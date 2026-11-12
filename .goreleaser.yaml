@@ -73,6 +73,15 @@ homebrew_casks:
     description: Turn any REST API into a curated, safe MCP server
     license: Apache-2.0
     skip_upload: auto # no upload for prereleases
+    # The binary isn't signed with an Apple Developer ID, so Gatekeeper
+    # would block its first run: drop the quarantine flag Homebrew's
+    # download sets. (Signing and notarizing would replace this.)
+    hooks:
+      post:
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/plugit"]
+          end
 
 scoops:
   - name: plugit
