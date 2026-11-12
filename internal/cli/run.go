@@ -218,6 +218,7 @@ func chooseBaseURL(flag string, servers []string, credentials bool) (*url.URL, e
 	if flag != "" {
 		return validateBaseURL(flag, "--base-url")
 	}
+	servers = collapseSchemeVariants(servers)
 	switch {
 	case len(servers) == 0:
 		return nil, errors.New("the spec declares no server; pass --base-url")
@@ -233,6 +234,31 @@ func chooseBaseURL(flag string, servers []string, credentials bool) (*url.URL, e
 		return nil, fmt.Errorf("credentials are configured, so pass --base-url explicitly: the spec's server (%s) is not trusted to receive them", listServers(servers))
 	}
 	return u, nil
+}
+
+// collapseSchemeVariants drops exact duplicates and, when the remaining
+// servers are the same host and path differing only in http vs https (a
+// Swagger 2.0 `schemes: [https, http]`), keeps just the https one. That
+// choice never sends anything to a new origin. Anything else is returned
+// unchanged, so run still never guesses between real alternatives.
+func collapseSchemeVariants(servers []string) []string {
+	uniq := slices.Compact(slices.Sorted(slices.Values(servers)))
+	if len(uniq) != 2 {
+		return uniq
+	}
+	a, errA := url.Parse(uniq[0])
+	b, errB := url.Parse(uniq[1])
+	if errA != nil || errB != nil || a.Host != b.Host || a.Path != b.Path ||
+		a.RawQuery != b.RawQuery || a.Fragment != b.Fragment || a.User.String() != b.User.String() {
+		return uniq
+	}
+	switch {
+	case a.Scheme == "http" && b.Scheme == "https":
+		return uniq[1:]
+	case a.Scheme == "https" && b.Scheme == "http":
+		return uniq[:1]
+	}
+	return uniq
 }
 
 func validateBaseURL(raw, what string) (*url.URL, error) {
