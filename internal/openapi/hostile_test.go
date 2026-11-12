@@ -80,6 +80,18 @@ var hostileCases = map[string]func(t *testing.T, data []byte){
 		if get := tool(t, m, "GET /notes"); !strings.HasPrefix(get.Description, "List notes.") {
 			t.Errorf("description = %q", get.Description)
 		}
+		// What cleaning removed is recorded, so lint (L007) can flag it.
+		for key, wheres := range map[string][]string{
+			"GET /notes":  {"summary", "description", `parameter "q" description`, "schema title", "schema description"},
+			"POST /notes": {"summary", "schema description"},
+		} {
+			tl := tool(t, m, model.OpKey(key))
+			for _, where := range wheres {
+				if !hasIssue(tl, model.IssueHiddenText, where) {
+					t.Errorf("%s: no hidden-text issue for %s: %+v", key, where, tl.Issues)
+				}
+			}
+		}
 	},
 	"evil-servers.yaml": func(t *testing.T, data []byte) {
 		m := mustParseQuickly(t, data)

@@ -35,6 +35,13 @@ func (c *converter) issue(kind model.IssueKind, format string, args ...any) {
 	}
 }
 
+// hidden records that cleaning removed hidden content from where (L007).
+func (c *converter) hidden(where, s string) {
+	if r := naming.Hidden(s); r != "" {
+		c.issue(model.IssueHiddenText, "%s contained %s (removed)", where, r)
+	}
+}
+
 // raw converts sp and encodes it. Encoding a map sorts keys, so output is
 // deterministic.
 func (c *converter) raw(sp *base.SchemaProxy) json.RawMessage {
@@ -100,6 +107,8 @@ func (c *converter) schema(s *base.Schema, depth int) map[string]any {
 		out["type"] = types
 	}
 
+	c.hidden("schema title", s.Title)
+	c.hidden("schema description", s.Description)
 	if t := naming.CleanText(s.Title, c.maxDesc); t != "" {
 		out["title"] = t
 	}

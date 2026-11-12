@@ -132,3 +132,18 @@ func TestApplyRejectsNameProblems(t *testing.T) {
 		})
 	}
 }
+
+// Select is Apply without the name check, so lint can report every clash
+// instead of stopping at the first.
+func TestSelectKeepsNameProblems(t *testing.T) {
+	ts := config.Toolset{Tools: map[string]config.ToolOverride{
+		"GET /pets": {Name: "getPet"}, "GET /pets/{id}": {}, "GET /store/inventory": {Name: strings.Repeat("a", 62)},
+	}}
+	res := Select(manifestTools, ts, "gh")
+	if got := names(res); !slices.Equal(got, []string{"gh_getPet", "gh_getPet", "gh_" + strings.Repeat("a", 62)}) {
+		t.Errorf("names = %v", got)
+	}
+	if err := CheckNames(res.Tools); !errors.Is(err, ErrNameConflict) {
+		t.Errorf("CheckNames = %v", err)
+	}
+}

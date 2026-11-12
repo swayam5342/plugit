@@ -43,10 +43,20 @@ type Result struct {
 // A name override gets the prefix too (§9 item 7). Override descriptions are
 // cleaned like spec text. Final names must be unique case-insensitively.
 func Apply(all []model.Tool, ts config.Toolset, prefix string) (Result, error) {
+	res := Select(all, ts, prefix)
+	if err := CheckNames(res.Tools); err != nil {
+		return Result{}, err
+	}
+	return res, nil
+}
+
+// Select is Apply without the final name check: clashing or overlong
+// names are returned as they are (lint reports them all).
+func Select(all []model.Tool, ts config.Toolset, prefix string) Result {
 	var res Result
 	listed := len(ts.Tools) > 0
 	if !listed && len(ts.IncludeTags) == 0 && len(ts.Methods) == 0 {
-		return res, nil
+		return res
 	}
 
 	present := make(map[model.OpKey]bool, len(all))
@@ -78,10 +88,7 @@ func Apply(all []model.Tool, ts config.Toolset, prefix string) (Result, error) {
 		}
 	}
 	slices.Sort(res.Missing)
-	if err := checkNames(res.Tools); err != nil {
-		return Result{}, err
-	}
-	return res, nil
+	return res
 }
 
 func matchesFilters(t model.Tool, ts config.Toolset) bool {
@@ -96,7 +103,9 @@ func matchesFilters(t model.Tool, ts config.Toolset) bool {
 	return true
 }
 
-func checkNames(tools []Selected) error {
+// CheckNames reports the first name that is too long with the prefix or
+// clashes with another (ignoring case).
+func CheckNames(tools []Selected) error {
 	seen := make(map[string]model.Tool, len(tools))
 	for _, s := range tools {
 		n := s.Tool.Name

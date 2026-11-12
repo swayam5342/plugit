@@ -151,6 +151,27 @@ func CleanText(s string, maxRunes int) string {
 	return capRunes(c, maxRunes)
 }
 
+// Hidden says what cleaning would silently remove from s that a reader
+// never sees but a model might act on: invisible or bidi format characters,
+// control characters (other than line breaks and tabs) or an HTML comment.
+// It returns "" when there is nothing of the sort.
+func Hidden(s string) string {
+	for _, r := range s {
+		if unicode.Is(unicode.Cf, r) {
+			return "invisible or bidi characters"
+		}
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) && r != '\n' && r != '\r' && r != '\t' {
+			return "control characters"
+		}
+	}
+	if htmlComment.MatchString(s) {
+		return "an HTML comment"
+	}
+	return ""
+}
+
 func cleanText(s string) string {
 	s = markdownLink.ReplaceAllString(s, "$1")
 	s = htmlComment.ReplaceAllString(s, "")

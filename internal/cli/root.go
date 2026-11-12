@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
 
@@ -28,6 +29,10 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, info BuildIn
 	root.SetErr(stderr)
 	if err := root.Execute(); err != nil {
 		_, _ = fmt.Fprintln(stderr, "plugit:", err)
+		var ec exitCodeError
+		if errors.As(err, &ec) {
+			return ec.code
+		}
 		return 1
 	}
 	return 0
@@ -67,7 +72,8 @@ func NewRootCmd(info BuildInfo) *cobra.Command {
 	root.PersistentFlags().StringVar(&g.configDir, "config-dir", "", "config root (default: the OS user config dir + /plugit)")
 	root.AddCommand(newVersionCmd(info), newRunCmd(info), newServeCmd(g, info), newAuthCmd(g), newTryCmd(g, info),
 		newInstallCmd(g), newUninstallCmd(g), newAddCmd(g, info), newEditCmd(g, info),
-		newListCmd(g), newRemoveCmd(g), newDoctorCmd(g, info))
+		newListCmd(g), newRemoveCmd(g), newDoctorCmd(g, info), newLintCmd(g, info))
+	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return usageError(err) })
 	return root
 }
 

@@ -196,6 +196,8 @@ func expandServer(s *v3.Server) string {
 func (b *builder) v3Op(method, path string, item *v3.PathItem, op *v3.Operation) {
 	t := b.newTool(method, path, op.Summary, op.Description, op.Tags, op.Deprecated != nil && *op.Deprecated)
 	c := newConverter(b.is30, b.opts.MaxDescription)
+	c.hidden("summary", op.Summary)
+	c.hidden("description", op.Description)
 
 	for _, p := range mergeParams(item.Parameters, op.Parameters, func(p *v3.Parameter) (string, string) { return p.In, p.Name }) {
 		var schema json.RawMessage
@@ -280,6 +282,8 @@ func v2Servers(doc *v2.Swagger) []string {
 func (b *builder) v2Op(method, path string, item *v2.PathItem, op *v2.Operation, globalConsumes []string) {
 	t := b.newTool(method, path, op.Summary, op.Description, op.Tags, op.Deprecated)
 	c := newConverter(false, b.opts.MaxDescription)
+	c.hidden("summary", op.Summary)
+	c.hidden("description", op.Description)
 	consumes := op.Consumes
 	if len(consumes) == 0 {
 		consumes = globalConsumes
@@ -418,6 +422,7 @@ func (b *builder) addParam(t *model.Tool, c *converter, name, in string, require
 		c.issue(model.IssueUnsupported, "parameter %q in %q not supported", name, in)
 		return
 	}
+	c.hidden(fmt.Sprintf("parameter %q description", name), desc)
 	t.Params = append(t.Params, model.Param{
 		Name:         name,
 		UpstreamName: name,

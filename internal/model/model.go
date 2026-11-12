@@ -173,6 +173,7 @@ const (
 	IssueSchemaDegraded IssueKind = "schema-degraded" // unsupported/too-deep schema became {} (L012)
 	IssueBodyNested     IssueKind = "body-nested"     // flattening collided; body nested under "body" (L012)
 	IssueUnsupported    IssueKind = "unsupported"     // cookie params, form or multipart bodies (L013)
+	IssueHiddenText     IssueKind = "hidden-text"     // cleaning removed invisible text from a description (L007)
 )
 
 // Issue is a problem found while ingesting one tool.
