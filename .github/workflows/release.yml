@@ -2,9 +2,7 @@ name: Release
 
 # Builds, signs and drafts a GitHub release for a v* tag (SPEC §8, T14).
 # The release is a draft: check the artifacts and signatures, then publish
-# it by hand. Needs repository secrets HOMEBREW_TAP_TOKEN and
-# SCOOP_BUCKET_TOKEN (fine-grained tokens with contents:write on
-# swayam5342/homebrew-tap and swayam5342/scoop-bucket only).
+# it by hand. Archives only for now: no Homebrew or Scoop publishing.
 
 on:
   push:
@@ -52,8 +50,6 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
