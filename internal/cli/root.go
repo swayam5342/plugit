@@ -65,7 +65,8 @@ func NewRootCmd(info BuildInfo) *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.PersistentFlags().StringVar(&g.configDir, "config-dir", "", "config root (default: the OS user config dir + /plugit)")
-	root.AddCommand(newVersionCmd(info), newRunCmd(info), newServeCmd(g, info), newAuthCmd(g), newTryCmd(g, info))
+	root.AddCommand(newVersionCmd(info), newRunCmd(info), newServeCmd(g, info), newAuthCmd(g), newTryCmd(g, info),
+		newInstallCmd(g), newUninstallCmd(g))
 	return root
 }
 

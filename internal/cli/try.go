@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -11,12 +10,10 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
-	"os"
 	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 
 	"github.com/swayam5342/plugit/internal/httpx"
 	"github.com/swayam5342/plugit/internal/isolate"
@@ -74,9 +71,7 @@ confirmation ask for it on the terminal (or pass --yes).`,
 				},
 				out: cmd.OutOrStdout(),
 			}
-			if in, ok := cmd.InOrStdin().(*os.File); ok && term.IsTerminal(int(in.Fd())) { // #nosec G115 -- a file descriptor fits in int
-				d.confirm = func(q string) (bool, error) { return askYesNo(in, cmd.ErrOrStderr(), q) }
-			}
+			d.confirm = terminalConfirm(cmd)
 			return tryTool(cmd.Context(), serveSettings{paths: p, name: args[0], toolset: toolset}, args[1], f, d)
 		},
 	}
@@ -84,18 +79,6 @@ confirmation ask for it on the terminal (or pass --yes).`,
 	cmd.Flags().BoolVar(&f.yes, "yes", false, "confirm the call if the tool's policy asks for confirmation (never overrides deny)")
 	cmd.Flags().StringVar(&toolset, "toolset", defaultToolset, "toolset the tool belongs to")
 	return cmd
-}
-
-func askYesNo(in io.Reader, out io.Writer, q string) (bool, error) {
-	if _, err := fmt.Fprintf(out, "%s [y/N] ", q); err != nil {
-		return false, err
-	}
-	line, err := bufio.NewReader(io.LimitReader(in, 64)).ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return false, err
-	}
-	a := strings.ToLower(strings.TrimSpace(line))
-	return a == "y" || a == "yes", nil
 }
 
 // tryTool makes one call. It returns an error when the call is refused,
