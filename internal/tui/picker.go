@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -152,13 +153,7 @@ func (p *Picker) buildGroups() {
 		}
 		byName[g] = append(byName[g], i)
 	}
-	names := slices.Sorted(func(yield func(string) bool) {
-		for n := range byName {
-			if !yield(n) {
-				return
-			}
-		}
-	})
+	names := slices.Sorted(maps.Keys(byName))
 	slices.SortStableFunc(names, func(a, b string) int {
 		// "(untagged)" goes last.
 		return cmp.Compare(boolInt(a == untagged), boolInt(b == untagged))

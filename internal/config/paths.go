@@ -6,6 +6,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -102,4 +103,26 @@ func (p Paths) apiFile(name, file string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, file), nil
+}
+
+// APINames lists the saved APIs: directories under apis/ with a valid name
+// and a plugit.yaml, sorted.
+func (p Paths) APINames() ([]string, error) {
+	entries, err := os.ReadDir(filepath.Join(p.root, "apis"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() || ValidateAPIName(e.Name()) != nil {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(p.root, "apis", e.Name(), "plugit.yaml")); err == nil {
+			names = append(names, e.Name())
+		}
+	}
+	return names, nil // ReadDir sorts by name
 }

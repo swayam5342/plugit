@@ -194,3 +194,32 @@ func isPlugitEntry(raw json.RawMessage, name string) bool {
 	}
 	return false
 }
+
+// PlugitEntry is a plugit serve entry found in a client config.
+type PlugitEntry struct {
+	Entry
+	API string // the API it serves
+}
+
+// PlugitEntries returns the plugit serve entries in a client config, by
+// server name.
+func PlugitEntries(data []byte) (map[string]PlugitEntry, error) {
+	_, srv, err := servers(data)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]PlugitEntry{}
+	for _, m := range srv {
+		var e Entry
+		if json.Unmarshal(m.Value, &e) != nil {
+			continue
+		}
+		for i := 0; i+1 < len(e.Args); i++ {
+			if e.Args[i] == "serve" && isPlugitEntry(m.Value, e.Args[i+1]) {
+				out[m.Key] = PlugitEntry{Entry: e, API: e.Args[i+1]}
+				break
+			}
+		}
+	}
+	return out, nil
+}
