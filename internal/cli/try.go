@@ -10,10 +10,12 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/swayam5342/plugit/internal/httpx"
 	"github.com/swayam5342/plugit/internal/isolate"
@@ -24,6 +26,7 @@ import (
 	"github.com/swayam5342/plugit/internal/redact"
 	"github.com/swayam5342/plugit/internal/schema"
 	"github.com/swayam5342/plugit/internal/secrets"
+	"github.com/swayam5342/plugit/internal/tui"
 )
 
 // maxShownBody caps how much of a request body try prints.
@@ -39,6 +42,9 @@ type tryDeps struct {
 	out io.Writer
 	// confirm asks the user a yes/no question. nil means no terminal.
 	confirm func(question string) (bool, error)
+	// form opens the Try it screen when no --arg is given; nil means no
+	// terminal (the call is made straight away).
+	form func(ctx context.Context, in tui.TryInput) error
 }
 
 func newTryCmd(g *globalFlags, info BuildInfo) *cobra.Command {
@@ -53,6 +59,9 @@ outgoing request and the tool result. Secrets are redacted.
 <tool> is a tool name or an operation key such as "GET /pets/{id}". Arguments
 are --arg name=value; values for non-string parameters are read as JSON
 (--arg limit=2, --arg tags='["a","b"]').
+
+On a terminal, leaving out --arg opens the Try it screen: a form with one
+field per parameter, which shows the request and response for each call.
 
 The API's policy applies: denied tools are refused, and tools that need
 confirmation ask for it on the terminal (or pass --yes).`,
@@ -72,6 +81,11 @@ confirmation ask for it on the terminal (or pass --yes).`,
 				out: cmd.OutOrStdout(),
 			}
 			d.confirm = terminalConfirm(cmd)
+			if len(f.args) == 0 && d.confirm != nil {
+				if out, ok := cmd.OutOrStdout().(*os.File); ok && term.IsTerminal(int(out.Fd())) { // #nosec G115 -- a file descriptor fits in int
+					d.form = func(ctx context.Context, in tui.TryInput) error { return tui.RunTryIt(ctx, in, cmd.InOrStdin(), out) }
+				}
+			}
 			return tryTool(cmd.Context(), serveSettings{paths: p, name: args[0], toolset: toolset}, args[1], f, d)
 		},
 	}
@@ -95,7 +109,23 @@ func tryTool(ctx context.Context, s serveSettings, toolName string, f tryFlags, 
 	}
 	t := st.Tool
 
-	switch dec := policy.Check(t.Safety, a.cfg.PolicyMode(), st.Override); dec.Decision {
+	dec := policy.Check(t.Safety, a.cfg.PolicyMode(), st.Override)
+	if dec.Decision == policy.Deny {
+		return fmt.Errorf("%s: denied by policy: %s (see policy.mode and the toolset's policy overrides in plugit.yaml)", t.Name, dec.Reason)
+	}
+	if d.form != nil && len(f.args) == 0 {
+		confirm := ""
+		if dec.Decision == policy.Confirm && !f.yes {
+			confirm = "This tool needs confirmation"
+			if r := dec.Reason; r != "" {
+				confirm = strings.ToUpper(r[:1]) + r[1:]
+			}
+		}
+		return d.form(ctx, tui.TryInput{API: a.cfg.Name, Tool: t, Mode: a.cfg.PolicyMode(), Confirm: confirm,
+			Send: func(ctx context.Context, values map[string]string) tui.TryResult { return formSend(ctx, a, t, values) }})
+	}
+
+	switch dec.Decision {
 	case policy.Allow:
 	case policy.Confirm:
 		ok := f.yes
@@ -110,32 +140,11 @@ func tryTool(ctx context.Context, s serveSettings, toolName string, f tryFlags, 
 		if !ok {
 			return fmt.Errorf("%s: not confirmed; no call made", t.Name)
 		}
-	default:
-		return fmt.Errorf("%s: denied by policy: %s (see policy.mode and the toolset's policy overrides in plugit.yaml)", t.Name, dec.Reason)
 	}
 
-	args, err := parseTryArgs(t, f.args)
+	r, err := callTool(ctx, a, t, f.args, d.out)
 	if err != nil {
-		return fmt.Errorf("%s: %w", t.Name, err)
-	}
-	raw, err := json.Marshal(args)
-	if err != nil {
-		return fmt.Errorf("%s: %w", t.Name, err)
-	}
-	if err := schema.NewValidator(t).Validate(raw); err != nil {
-		return errors.New(a.red.String(t.Name + ": " + err.Error()))
-	}
-	decoded, err := schema.DecodeArgs(raw)
-	if err != nil {
-		return fmt.Errorf("%s: %w", t.Name, err)
-	}
-
-	rec := &printingDoer{next: a.doer, out: d.out, red: a.red}
-	r := proxy.Call(ctx, rec, t, decoded, a.target, a.red)
-	if !rec.printed {
-		if _, err := fmt.Fprintln(d.out, "→ (no request sent)"); err != nil {
-			return err
-		}
+		return err
 	}
 	if _, err := fmt.Fprintf(d.out, "←\n%s\n", r.Text); err != nil {
 		return err
@@ -144,6 +153,49 @@ func tryTool(ctx context.Context, s serveSettings, toolName string, f tryFlags, 
 		return fmt.Errorf("%s returned an error result", t.Name)
 	}
 	return nil
+}
+
+// callTool validates name=value arguments and makes the call, writing the
+// redacted request to reqOut. Policy has already been checked.
+func callTool(ctx context.Context, a *active, t model.Tool, kv []string, reqOut io.Writer) (proxy.Result, error) {
+	args, err := parseTryArgs(t, kv)
+	if err != nil {
+		return proxy.Result{}, fmt.Errorf("%s: %w", t.Name, err)
+	}
+	raw, err := json.Marshal(args)
+	if err != nil {
+		return proxy.Result{}, fmt.Errorf("%s: %w", t.Name, err)
+	}
+	if err := schema.NewValidator(t).Validate(raw); err != nil {
+		return proxy.Result{}, errors.New(a.red.String(t.Name + ": " + err.Error()))
+	}
+	decoded, err := schema.DecodeArgs(raw)
+	if err != nil {
+		return proxy.Result{}, fmt.Errorf("%s: %w", t.Name, err)
+	}
+	rec := &printingDoer{next: a.doer, out: reqOut, red: a.red}
+	r := proxy.Call(ctx, rec, t, decoded, a.target, a.red)
+	if !rec.printed {
+		if _, err := fmt.Fprintln(reqOut, "→ (no request sent)"); err != nil {
+			return r, err
+		}
+	}
+	return r, nil
+}
+
+// formSend is the Try it screen's Send: field values as typed become
+// name=value arguments, exactly as with --arg.
+func formSend(ctx context.Context, a *active, t model.Tool, values map[string]string) tui.TryResult {
+	kv := make([]string, 0, len(values))
+	for _, k := range slices.Sorted(maps.Keys(values)) {
+		kv = append(kv, k+"="+values[k])
+	}
+	var req bytes.Buffer
+	r, err := callTool(ctx, a, t, kv, &req)
+	if err != nil {
+		return tui.TryResult{Request: a.red.String(req.String()), Err: a.red.String(err.Error())}
+	}
+	return tui.TryResult{Request: req.String(), Status: r.Status, Response: r.Text, IsError: r.IsError}
 }
 
 func findTool(tools []mcpserver.Tool, name, toolset string) (mcpserver.Tool, error) {

@@ -2,12 +2,14 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/isolate"
+	"github.com/swayam5342/plugit/internal/tui"
 )
 
 // setupTryAPI writes the pets config pointed at baseURL, with policy
@@ -163,5 +165,65 @@ func TestTryUpstreamError(t *testing.T) {
 	out, err := runTry(t, p, "", "pp_getPet", tryFlags{args: []string{"id=.."}}, nil)
 	if err == nil || !strings.Contains(out, "pp_getPet") {
 		t.Errorf("out = %q err = %v", out, err)
+	}
+}
+
+func runTryForm(t *testing.T, p config.Paths, toolset, tool string, f tryFlags, form func(context.Context, tui.TryInput) error) error {
+	t.Helper()
+	d := serveDeps(isolate.Parse)
+	d.stderr = &bytes.Buffer{}
+	return tryTool(t.Context(), serveSettings{paths: p, name: "pets", toolset: toolset}, tool, f, tryDeps{runDeps: d, out: &bytes.Buffer{}, form: form})
+}
+
+// On a terminal without --arg, try opens the Try it form; its Send makes
+// the same redacted call as the command line.
+func TestTryForm(t *testing.T) {
+	up := newUpstream(t)
+	p := setupTryAPI(t, up.URL, "")
+	opened := false
+	err := runTryForm(t, p, "", "pp_getPet", tryFlags{}, func(ctx context.Context, in tui.TryInput) error {
+		opened = true
+		if in.Tool.Name != "pp_getPet" || in.API != "pets" || in.Confirm != "" {
+			t.Errorf("input = %+v", in)
+		}
+		for _, prm := range in.Tool.Params {
+			if prm.Name == "X-Api-Key" && !prm.Hidden {
+				t.Error("the credential header is a visible field")
+			}
+		}
+		r := in.Send(ctx, map[string]string{"id": "7"})
+		all := r.Request + r.Response + r.Err
+		if r.Err != "" || r.Status != 200 || !strings.Contains(r.Request, "GET "+up.URL+"/pets/7") ||
+			!strings.Contains(r.Request, "X-Api-Key: ***") || !strings.Contains(r.Response, `"path": "/pets/7"`) || strings.Contains(all, runSecret) {
+			t.Errorf("result = %+v", r)
+		}
+		if r := in.Send(ctx, map[string]string{"nope": "x"}); r.Err == "" || !strings.Contains(r.Err, "nope") {
+			t.Errorf("unknown argument: %+v", r)
+		}
+		return nil
+	})
+	if err != nil || !opened {
+		t.Fatalf("err = %v, opened = %v", err, opened)
+	}
+}
+
+func TestTryFormPolicy(t *testing.T) {
+	up := newUpstream(t)
+	never := func(context.Context, tui.TryInput) error { t.Error("form opened for a refused tool"); return nil }
+	p := setupTryAPI(t, up.URL, "")
+	if err := runTryForm(t, p, "", "pp_createPet", tryFlags{}, never); err == nil || !strings.Contains(err.Error(), "read-only") {
+		t.Errorf("read-only: %v", err)
+	}
+	if err := runTryForm(t, p, "denied", "pp_listPets", tryFlags{}, never); err == nil || !strings.Contains(err.Error(), "denied") {
+		t.Errorf("deny: %v", err)
+	}
+
+	p = setupTryAPI(t, up.URL, "policy: {mode: confirm-writes}")
+	var confirm string
+	if err := runTryForm(t, p, "", "pp_createPet", tryFlags{}, func(_ context.Context, in tui.TryInput) error { confirm = in.Confirm; return nil }); err != nil || confirm == "" {
+		t.Errorf("confirm-writes: err=%v confirm=%q", err, confirm)
+	}
+	if err := runTryForm(t, p, "", "pp_createPet", tryFlags{yes: true}, func(_ context.Context, in tui.TryInput) error { confirm = in.Confirm; return nil }); err != nil || confirm != "" {
+		t.Errorf("--yes should pre-confirm: err=%v confirm=%q", err, confirm)
 	}
 }
