@@ -122,15 +122,12 @@ export default function Safety() {
   );
 
   return (
-    <section className="safety" id="safety" aria-labelledby="safety-title">
-      <div className="safety-out">
-        <div className="tui out" data-ui data-mode={mode} aria-live="polite" aria-label="What the model sees, updated by the controls">
-          {head}{hostWarn}{request}{header}{status}{body}{echo}{write}{lintLine}
-        </div>
-      </div>
-
-      <div className="safety-steps">
+    <section className="safety wrap" id="safety" aria-labelledby="safety-title">
+      <div className="safety-head">
         <h2 id="safety-title" className="head" data-reveal>Safe by default</h2>
+        <p data-reveal>Change any setting and the panel shows what the model would get.</p>
+      </div>
+      <div className="safety-steps">
         <div className="step" data-reveal>
           <h3 className="step-title">Read-only until you say so</h3>
           <p>GET, HEAD and OPTIONS are offered. Writes need confirm-writes or full, and confirm-writes asks you in the client before each call.</p>
@@ -167,12 +164,17 @@ export default function Safety() {
           </label>
           {mini(<>{hostWarn}{request}</>)}
         </div>
-        <div className="step" data-reveal>
+        <div className="step step-wide" data-reveal>
           <h3 className="step-title">Poisoned text gets caught</h3>
           <p>Lint reads every description the model would read and flags instructions aimed at it before you serve them. Edit this one.</p>
           <label className="control-label" htmlFor="desc">A tool description from a spec</label>
-          <textarea className="field" id="desc" rows={3} spellCheck={false} value={desc} onChange={(e) => setDesc(e.target.value)} />
+          <textarea className="field" id="desc" rows={2} spellCheck={false} value={desc} onChange={(e) => setDesc(e.target.value)} />
           {mini(lintLine)}
+        </div>
+      </div>
+      <div className="safety-out">
+        <div className="tui out" data-ui data-mode={mode} aria-live="polite" aria-label="What the model sees, updated by the controls">
+          {head}{hostWarn}{request}{header}{status}{body}{echo}{write}{lintLine}
         </div>
       </div>
     </section>

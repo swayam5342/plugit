@@ -63,7 +63,7 @@ export default function Install() {
         </h2>
         <div className="blank-row">
           <button className="button" type="submit">Write my commands</button>
-          <p className="blank-note">Nothing is sent anywhere: this only fills in the commands below.</p>
+          <p className="blank-note">Nothing is sent anywhere: this only fills in the commands.</p>
         </div>
       </form>
       <div className="commands">

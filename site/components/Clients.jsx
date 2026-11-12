@@ -34,29 +34,33 @@ const GROUPS = [
   },
 ];
 
+function Group({ g }) {
+  return (
+    <div>
+      <p className="group-word" data-reveal>{g.word}</p>
+      <ul className="rows">
+        {g.rows.map(([c, name, val]) => (
+          <li key={name}>
+            <span
+              className="dot"
+              style={c === 'ring' ? { '--c': 'var(--surface)', boxShadow: 'inset 0 0 0 2px #9aa39a' } : { '--c': c }}
+            />
+            <span>{name}</span>
+            <span className="val">{val}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// The heading, then two columns: the clients, and the specs and credentials.
 export default function Clients() {
   return (
     <section className="clients wrap" id="clients" aria-labelledby="clients-title">
-      <div className="clients-col">
-        <h2 id="clients-title" className="clients-title" data-reveal>Works where you work</h2>
-        {GROUPS.map((g) => (
-          <div key={g.word}>
-            <p className="group-word" data-reveal>{g.word}</p>
-            <ul className="rows">
-              {g.rows.map(([c, name, val]) => (
-                <li key={name}>
-                  <span
-                    className="dot"
-                    style={c === 'ring' ? { '--c': 'var(--surface)', boxShadow: 'inset 0 0 0 2px #9aa39a' } : { '--c': c }}
-                  />
-                  <span>{name}</span>
-                  <span className="val">{val}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
-      </div>
+      <h2 id="clients-title" className="clients-title" data-reveal>Works where you work</h2>
+      <div className="clients-colgroup"><Group g={GROUPS[0]} /></div>
+      <div className="clients-colgroup"><Group g={GROUPS[1]} /><Group g={GROUPS[2]} /></div>
     </section>
   );
 }
