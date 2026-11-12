@@ -20,6 +20,7 @@ func addSeeds(f *testing.F) {
 	f.Add([]byte(petstore30))
 	f.Add([]byte(swagger2))
 	f.Add([]byte(refChain(3)))
+	f.Add([]byte(petsCollection))
 	for _, dir := range []string{hostileDir, specsDir} {
 		entries, _ := os.ReadDir(dir)
 		for _, e := range entries {

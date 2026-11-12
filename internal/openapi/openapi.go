@@ -67,6 +67,9 @@ func Parse(data []byte, opts Options) (m *model.Manifest, err error) {
 	if opts.MaxDescription <= 0 {
 		opts.MaxDescription = naming.DefaultMaxDescription
 	}
+	if isPostman(data) {
+		return parsePostman(data, opts)
+	}
 	logger := opts.Logger
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)

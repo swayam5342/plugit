@@ -2,7 +2,7 @@
 
 > Turn any REST API into a curated, safe MCP server from your terminal.
 
-PlugIt reads an OpenAPI 3.0/3.1 or Swagger 2.0 spec and serves the operations you pick as
+PlugIt reads an OpenAPI 3.0/3.1 or Swagger 2.0 spec (or a Postman v2 collection) and serves the operations you pick as
 [MCP](https://modelcontextprotocol.io) tools over stdio, for Claude Desktop, Claude Code,
 OpenAI Codex, Cursor, VS Code (GitHub Copilot), Windsurf, Gemini CLI, LM Studio and any other
 stdio MCP client.
