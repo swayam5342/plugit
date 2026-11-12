@@ -107,6 +107,7 @@ plugit add pets https://petstore.swagger.io/v2/swagger.json --from-run --tags pe
 | `plugit lint <name>` | Quality and safety checks, including hidden instructions in descriptions (`--json`, exit 1 on errors) |
 | `plugit serve <name> [--toolset T]` | The MCP server (what clients run) |
 | `plugit install / uninstall <name> [--client C,…]` | Add to or remove from one or more MCP clients |
+| `plugit sync <name>` | Re-fetch the spec, review what changed, adopt it (overrides kept, base URL never changed) |
 | `plugit list`, `plugit remove <name>` | Manage saved APIs |
 | `plugit doctor` | Check configs, credentials and client installs, and flag relaxed security settings |
 
