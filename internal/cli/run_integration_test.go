@@ -118,11 +118,19 @@ func deps(transport mcp.Transport, stderr io.Writer, env map[string]string) runD
 // startRun serves in the background and returns a connected client.
 func startRun(t *testing.T, s runSettings, env map[string]string) (*mcp.ClientSession, *syncBuf) {
 	t.Helper()
+	return startServer(t, func(ctx context.Context, d runDeps) error { return runServe(ctx, s, d) }, deps(nil, nil, env))
+}
+
+// startServer runs serve in the background on an in-memory transport and
+// returns a connected client. d's transport and stderr are replaced.
+func startServer(t *testing.T, serve func(context.Context, runDeps) error, d runDeps) (*mcp.ClientSession, *syncBuf) {
+	t.Helper()
 	st, ct := mcp.NewInMemoryTransports()
 	stderr := &syncBuf{}
+	d.transport, d.stderr = st, stderr
 	ctx, cancel := context.WithCancel(t.Context())
 	errCh := make(chan error, 1)
-	go func() { errCh <- runServe(ctx, s, deps(st, stderr, env)) }()
+	go func() { errCh <- serve(ctx, d) }()
 	t.Cleanup(func() {
 		cancel()
 		select {

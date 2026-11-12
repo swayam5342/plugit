@@ -1,5 +1,6 @@
-// Package config owns PlugIt's on-disk layout: platform config paths, API
-// directory names and owner-only, atomic file writes.
+// Package config owns PlugIt's on-disk layout and files: platform config
+// paths, API directory names, owner-only atomic writes, plugit.yaml loading
+// and validation (SPEC §3.6), and the manifest.json parse cache.
 package config
 
 import (

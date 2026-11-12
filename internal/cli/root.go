@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/isolate"
 )
 
@@ -56,14 +57,29 @@ func (b BuildInfo) withDefaults() BuildInfo {
 // NewRootCmd builds the plugit command tree.
 func NewRootCmd(info BuildInfo) *cobra.Command {
 	info = info.withDefaults()
+	g := &globalFlags{}
 	root := &cobra.Command{
 		Use:           "plugit",
 		Short:         "Turn any REST API into a curated, safe MCP server",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	root.AddCommand(newVersionCmd(info), newRunCmd(info))
+	root.PersistentFlags().StringVar(&g.configDir, "config-dir", "", "config root (default: the OS user config dir + /plugit)")
+	root.AddCommand(newVersionCmd(info), newRunCmd(info), newServeCmd(g, info), newAuthCmd(g), newTryCmd(g, info))
 	return root
+}
+
+// globalFlags are the flags every command accepts.
+type globalFlags struct {
+	configDir string
+}
+
+func (g *globalFlags) paths() (config.Paths, error) {
+	root, err := config.RootDir(g.configDir)
+	if err != nil {
+		return config.Paths{}, err
+	}
+	return config.NewPaths(root), nil
 }
 
 func newVersionCmd(info BuildInfo) *cobra.Command {
