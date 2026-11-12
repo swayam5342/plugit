@@ -145,7 +145,7 @@ func (c *Chooser) View() tea.View {
 // or ErrCancelled.
 func RunChooser(ctx context.Context, title, subtitle string, choices []Choice, r io.Reader, w io.Writer) ([]int, error) {
 	c := NewChooser(title, subtitle, choices)
-	if _, err := tea.NewProgram(c, tea.WithContext(ctx), tea.WithInput(r), tea.WithOutput(w)).Run(); err != nil {
+	if _, err := tea.NewProgram(c, programOptions(ctx, r, w)...).Run(); err != nil {
 		return nil, err
 	}
 	idx, ok := c.Result()

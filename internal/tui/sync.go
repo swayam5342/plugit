@@ -204,7 +204,7 @@ func (s *SyncScreen) View() tea.View {
 // ErrCancelled.
 func RunSync(ctx context.Context, in SyncInput, r io.Reader, w io.Writer) ([]model.OpKey, error) {
 	s := NewSyncScreen(in)
-	if _, err := tea.NewProgram(s, tea.WithContext(ctx), tea.WithInput(r), tea.WithOutput(w)).Run(); err != nil {
+	if _, err := tea.NewProgram(s, programOptions(ctx, r, w)...).Run(); err != nil {
 		return nil, err
 	}
 	add, ok := s.Result()

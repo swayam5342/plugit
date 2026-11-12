@@ -252,6 +252,6 @@ func (s *Stats) View() tea.View {
 
 // RunStats shows the stats screen until the user quits.
 func RunStats(ctx context.Context, in StatsInput, r io.Reader, w io.Writer) error {
-	_, err := tea.NewProgram(NewStats(in), tea.WithContext(ctx), tea.WithInput(r), tea.WithOutput(w)).Run()
+	_, err := tea.NewProgram(NewStats(in), programOptions(ctx, r, w)...).Run()
 	return err
 }

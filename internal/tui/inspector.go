@@ -292,6 +292,6 @@ func (m *Inspector) View() tea.View {
 
 // RunInspector shows the inspector until the user quits.
 func RunInspector(ctx context.Context, in InspectorInput, r io.Reader, w io.Writer) error {
-	_, err := tea.NewProgram(NewInspector(in), tea.WithContext(ctx), tea.WithInput(r), tea.WithOutput(w)).Run()
+	_, err := tea.NewProgram(NewInspector(in), programOptions(ctx, r, w)...).Run()
 	return err
 }

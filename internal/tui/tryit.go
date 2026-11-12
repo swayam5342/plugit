@@ -308,6 +308,6 @@ func (m *TryIt) View() tea.View {
 
 // RunTryIt shows the Try it screen until the user quits.
 func RunTryIt(ctx context.Context, in TryInput, r io.Reader, w io.Writer) error {
-	_, err := tea.NewProgram(NewTryIt(in), tea.WithContext(ctx), tea.WithInput(r), tea.WithOutput(w)).Run()
+	_, err := tea.NewProgram(NewTryIt(in), programOptions(ctx, r, w)...).Run()
 	return err
 }

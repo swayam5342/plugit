@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"strings"
 	"testing"
+
+	"github.com/swayam5342/plugit/internal/tui"
 )
 
 func TestVersionCommand(t *testing.T) {
@@ -92,5 +94,16 @@ func TestUnknownCommandFails(t *testing.T) {
 	cmd.SetArgs([]string{"no-such-command"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected an error for an unknown command")
+	}
+}
+
+func TestNoColorFlag(t *testing.T) {
+	t.Cleanup(func() { tui.SetNoColor(false) })
+	var out, errOut bytes.Buffer
+	if code := Main([]string{"--no-color", "version"}, strings.NewReader(""), &out, &errOut, BuildInfo{}); code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut.String())
+	}
+	if !tui.NoColor() {
+		t.Error("--no-color not applied")
 	}
 }

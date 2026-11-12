@@ -12,6 +12,7 @@ import (
 
 	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/isolate"
+	"github.com/swayam5342/plugit/internal/tui"
 )
 
 // Main runs plugit with args (without the program name) and returns the
@@ -70,6 +71,8 @@ func NewRootCmd(info BuildInfo) *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.PersistentFlags().StringVar(&g.configDir, "config-dir", "", "config root (default: the OS user config dir + /plugit)")
+	root.PersistentFlags().BoolVar(&g.noColor, "no-color", false, "no colours in terminal screens (NO_COLOR works too)")
+	root.PersistentPreRun = func(*cobra.Command, []string) { tui.SetNoColor(g.noColor) }
 	root.AddCommand(newVersionCmd(info), newRunCmd(info), newServeCmd(g, info), newAuthCmd(g), newTryCmd(g, info),
 		newInstallCmd(g), newUninstallCmd(g), newAddCmd(g, info), newEditCmd(g, info),
 		newListCmd(g), newRemoveCmd(g), newDoctorCmd(g, info), newLintCmd(g, info), newLogsCmd(g), newStatsCmd(g, info), newSyncCmd(g, info))
@@ -80,6 +83,7 @@ func NewRootCmd(info BuildInfo) *cobra.Command {
 // globalFlags are the flags every command accepts.
 type globalFlags struct {
 	configDir string
+	noColor   bool
 }
 
 func (g *globalFlags) paths() (config.Paths, error) {
