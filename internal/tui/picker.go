@@ -18,6 +18,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/curate"
@@ -94,9 +95,10 @@ type Picker struct {
 	width     int
 	height    int
 
-	mode   mode
-	input  textinput.Model
-	status string
+	mode       mode
+	input      textinput.Model
+	inputLabel string
+	status     string
 
 	dirty bool
 	saved bool
@@ -109,6 +111,10 @@ type Picker struct {
 	budget     int
 	finalNames map[model.OpKey]string
 	toolTokens map[model.OpKey]int
+	nameWidth  int // column width for tool names
+
+	th       theme
+	showHelp bool
 }
 
 // NewPicker builds a picker.
@@ -121,6 +127,7 @@ func NewPicker(in PickerInput) *Picker {
 		missing:   map[string]config.ToolOverride{},
 		collapsed: map[int]bool{},
 		width:     100,
+		th:        newTheme(true),
 		height:    30,
 	}
 	present := map[model.OpKey]bool{}
@@ -230,10 +237,6 @@ func (p *Picker) rebuild() {
 	p.clampScroll()
 }
 
-func (p *Picker) listHeight() int {
-	return max(p.height-7, 3)
-}
-
 func (p *Picker) clampScroll() {
 	if p.cursor >= len(p.rows) {
 		p.cursor = max(len(p.rows)-1, 0)
@@ -271,6 +274,7 @@ func (p *Picker) recompute() {
 	if p.toolTokens == nil {
 		p.toolTokens = map[model.OpKey]int{}
 	}
+	defer p.measureNames()
 	res, err := curate.Apply(p.tools, p.toolset(), p.in.Prefix)
 	if err != nil {
 		p.conflict = err.Error()
@@ -290,6 +294,15 @@ func (p *Picker) recompute() {
 			p.budget += n
 		}
 	}
+}
+
+// measureNames sizes the name column to the longest name, up to a limit.
+func (p *Picker) measureNames() {
+	p.nameWidth = 0
+	for _, t := range p.tools {
+		p.nameWidth = max(p.nameWidth, ansi.StringWidth(safe(p.displayName(t))))
+	}
+	p.nameWidth = min(p.nameWidth, 40)
 }
 
 func (p *Picker) displayName(t model.Tool) string {
@@ -322,11 +335,15 @@ func (p *Picker) Result() (config.Toolset, bool) {
 }
 
 // Init implements tea.Model.
-func (p *Picker) Init() tea.Cmd { return nil }
+// It asks the terminal for its background colour to pick the palette.
+func (p *Picker) Init() tea.Cmd { return tea.RequestBackgroundColor }
 
 // Update implements tea.Model.
 func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.BackgroundColorMsg:
+		p.th = themeFor(msg)
+		return p, nil
 	case tea.WindowSizeMsg:
 		p.width, p.height = msg.Width, msg.Height
 		p.clampScroll()
@@ -430,12 +447,14 @@ func (p *Picker) updateList(msg tea.KeyPressMsg) tea.Cmd {
 		p.setOverride(k, o)
 	case "s", "ctrl+s":
 		return p.save()
+	case "?":
+		p.showHelp = !p.showHelp
 	case "q":
 		if !p.dirty {
 			return tea.Quit
 		}
 		p.mode = modeConfirmQuit
-		p.status = "Discard your changes? [y/N]"
+		p.status = ""
 	}
 	p.clampScroll()
 	return nil
@@ -497,7 +516,8 @@ func (p *Picker) setOverride(k model.OpKey, o config.ToolOverride) {
 func (p *Picker) startInput(m mode, prompt, value string) {
 	p.mode = m
 	p.input = textinput.New()
-	p.input.Prompt = prompt
+	p.inputLabel = prompt
+	p.input.Prompt = ""
 	p.input.CharLimit = naming.DefaultMaxDescription
 	p.input.SetValue(value)
 	p.input.CursorEnd()
@@ -565,15 +585,6 @@ func (p *Picker) commitInput() tea.Cmd {
 
 // ---- rendering ----
 
-var (
-	styleTitle  = lipgloss.NewStyle().Bold(true)
-	styleCursor = lipgloss.NewStyle().Reverse(true)
-	styleDim    = lipgloss.NewStyle().Faint(true)
-	styleWarn   = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-	styleErr    = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
-	styleRead   = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-)
-
 // safe strips control and format characters from untrusted text.
 func safe(s string) string {
 	return strings.Map(func(r rune) rune {
@@ -595,8 +606,55 @@ func truncate(s string, n int) string {
 	return string(r[:n-1]) + "…"
 }
 
-// rowText is a row as plain text.
-func (p *Picker) rowText(r row) string {
+// seg is a piece of a row: its text and how to draw it.
+type seg struct {
+	text  string
+	style lipgloss.Style
+}
+
+func plain(ss []seg) string {
+	var b strings.Builder
+	for _, s := range ss {
+		b.WriteString(s.text)
+	}
+	return b.String()
+}
+
+func styled(ss []seg) string {
+	var b strings.Builder
+	for _, s := range ss {
+		b.WriteString(s.style.Render(s.text))
+	}
+	return b.String()
+}
+
+const pathWidth = 34
+
+// Screen layout: everything except the list, in lines.
+const (
+	headerLines = 5 // box of two lines, then a blank line
+	footerLines = 6 // position, detail, input box (three), status bar
+)
+
+func (p *Picker) helpLines() []string {
+	if !p.showHelp {
+		return nil
+	}
+	return p.th.keyGrid(max(p.width, 20),
+		"↑↓ j k", "move", "space", "toggle tool or group", "enter", "fold group",
+		"a / n", "all / none shown", "/", "filter", "esc", "clear filter",
+		"r", "rename", "e", "edit description", "p", "cycle policy",
+		"s", "save", "q", "quit", "?", "hide shortcuts")
+}
+
+func (p *Picker) listHeight() int {
+	return max(p.height-headerLines-footerLines-len(p.helpLines()), 3)
+}
+
+// rowSegs is a row as styled pieces. Its plain text is what tests and the
+// filter see; the colours only add emphasis.
+func (p *Picker) rowSegs(r row, cursor bool) []seg {
+	th, none := p.th, lipgloss.NewStyle()
 	if r.kind == rowGroup {
 		g := p.groups[r.group]
 		sel := 0
@@ -605,30 +663,58 @@ func (p *Picker) rowText(r row) string {
 				sel++
 			}
 		}
-		arrow := "▾"
+		arrow := "▾ "
 		if p.collapsed[r.group] && p.filter == "" {
-			arrow = "▸"
+			arrow = "▸ "
 		}
-		return fmt.Sprintf("%s %s  (%d/%d)", arrow, safe(g.name), sel, len(g.tools))
+		count := th.Dim
+		if sel > 0 {
+			count = th.OK
+		}
+		return []seg{
+			{arrow, th.Dim},
+			{safe(g.name), th.Accent.Bold(true)},
+			{fmt.Sprintf("  %d/%d", sel, len(g.tools)), count},
+		}
 	}
+
 	t := p.tools[r.tool]
-	box := "[ ]"
-	if p.selected[t.Key] {
-		box = "[x]"
+	offered := policy.Lists(t.Safety, p.in.Mode)
+	on := p.selected[t.Key]
+	box := seg{"○ ", th.Dim}
+	if on {
+		box = seg{"● ", th.Accent}
 	}
-	badge := map[model.Safety]string{model.ReadOnly: "R", model.Write: "W", model.Destructive: "D"}[t.Safety]
-	s := fmt.Sprintf("  %s %s %-7s %-34s %s", box, badge, t.Method, truncate(safe(t.Path), 34), safe(p.displayName(t)))
-	if n, ok := p.toolTokens[t.Key]; ok && p.selected[t.Key] {
-		s += "  " + tokens.Format(n)
+	method, name := th.method(t.Method), none
+	if cursor {
+		name = th.Bold
+	}
+	if !offered {
+		method, name = th.Dim, th.Dim
+	}
+	ss := []seg{
+		box,
+		{fmt.Sprintf("%-7s ", t.Method), method},
+		{fmt.Sprintf("%-*s ", pathWidth, truncate(safe(t.Path), pathWidth)), th.Dim},
+		{fmt.Sprintf("%-*s", p.nameWidth, safe(p.displayName(t))), name},
+	}
+	if n, ok := p.toolTokens[t.Key]; ok && on {
+		ss = append(ss, seg{"  " + tokens.Format(n), th.Dim})
+	}
+	if o := p.over[t.Key]; o.Name != "" || o.Description != "" {
+		ss = append(ss, seg{"  ✎", th.Accent})
 	}
 	if o := p.over[t.Key]; o.Policy != "" {
-		s += "  [" + o.Policy + "]"
+		ss = append(ss, seg{"  " + o.Policy, th.policy(o.Policy)})
 	}
-	if !policy.Lists(t.Safety, p.in.Mode) {
-		s += "  (not offered in " + string(p.in.Mode) + ")"
+	if !offered {
+		ss = append(ss, seg{"  not offered in " + string(p.in.Mode), th.Warn})
 	}
-	return s
+	return ss
 }
+
+// rowText is a row as plain text.
+func (p *Picker) rowText(r row) string { return plain(p.rowSegs(r, false)) }
 
 func (p *Picker) currentRowText() string {
 	if r, ok := p.current(); ok {
@@ -642,7 +728,7 @@ func (p *Picker) footerText() string {
 	if p.count == 1 {
 		unit = "tool"
 	}
-	f := fmt.Sprintf("%d %s · %s tokens · %d write · mode %s", p.count, unit, tokens.Format(p.budget), p.writes, p.in.Mode)
+	f := fmt.Sprintf("%d %s · %s tokens · %d write", p.count, unit, tokens.Format(p.budget), p.writes)
 	if off := p.count - p.offered; off > 0 {
 		f += fmt.Sprintf(" · %d not offered", off)
 	}
@@ -651,65 +737,107 @@ func (p *Picker) footerText() string {
 
 // View implements tea.Model.
 func (p *Picker) View() tea.View {
+	th := p.th
 	w := max(p.width, 20)
-	var b strings.Builder
-	title := fmt.Sprintf("plugit · %s · pick tools", safe(p.in.API))
-	if p.filter != "" {
-		title += "  filter: " + safe(p.filter)
-	}
-	b.WriteString(styleTitle.Render(truncate(title, w)) + "\n")
+	var lines []string
 
+	// Header box: name, API, mode; then what's on offer.
+	title := th.Accent.Render("✦ ") + th.Title.Render("plugit") + th.Dim.Render(" · ") + th.Title.Render(safe(p.in.API))
+	if p.dirty {
+		title += th.Warn.Render("  ● unsaved")
+	}
+	sub := fmt.Sprintf("Pick the tools to expose · %d operations", len(p.tools))
+	if p.in.Prefix != "" {
+		sub += " · prefix " + safe(p.in.Prefix)
+	}
+	lines = append(lines, th.box(w, th.Border, spread(title, th.pill(p.in.Mode), w-4), th.Dim.Render(sub))...)
+	lines = append(lines, "")
+
+	// The list.
 	h := p.listHeight()
 	for i := p.offset; i < min(p.offset+h, len(p.rows)); i++ {
-		line := truncate(p.rowText(p.rows[i]), w)
-		switch {
-		case i == p.cursor:
-			line = styleCursor.Render(line)
-		case p.rows[i].kind == rowTool && !policy.Lists(p.tools[p.rows[i].tool].Safety, p.in.Mode):
-			line = styleDim.Render(line)
-		case p.rows[i].kind == rowTool && p.tools[p.rows[i].tool].Safety == model.ReadOnly:
-			line = styleRead.Render(line)
+		// Groups at the margin, tools indented under them; the cursor
+		// mark sits just before the row.
+		bar := "  "
+		if i == p.cursor {
+			bar = th.Accent.Render("› ")
 		}
-		b.WriteString(line + "\n")
+		if p.rows[i].kind == rowTool {
+			bar = "  " + bar
+		}
+		lines = append(lines, fit(bar+styled(p.rowSegs(p.rows[i], i == p.cursor)), w))
 	}
-	for i := len(p.rows) - p.offset; i < h; i++ {
-		b.WriteString("\n")
+	shown := max(min(len(p.rows)-p.offset, h), 0)
+	if len(p.rows) == 0 {
+		lines = append(lines, fit(th.Dim.Render("  No tools match “"+safe(p.filter)+"”. esc clears the filter."), w))
+		shown = 1
 	}
+	for range h - shown {
+		lines = append(lines, "")
+	}
+	pos := ""
+	if len(p.rows) > h {
+		pos = th.Dim.Render(fmt.Sprintf("%d-%d of %d ", p.offset+1, min(p.offset+h, len(p.rows)), len(p.rows)))
+	}
+	lines = append(lines, spread("", pos, w))
 
-	// Detail of the tool under the cursor.
+	// Detail: a message if there is one, else the row under the cursor.
+	elbow := th.Dim.Render("  ⎿  ")
 	detail := ""
-	if r, ok := p.current(); ok && r.kind == rowTool {
-		detail = safe(p.tools[r.tool].Description)
-		if o := p.over[p.tools[r.tool].Key]; o.Description != "" {
-			detail = safe(o.Description)
+	switch r, ok := p.current(); {
+	case p.status != "":
+		detail = th.Warn.Render(safe(p.status))
+	case p.conflict != "":
+		detail = th.Err.Render(safe(p.conflict))
+	case ok && r.kind == rowTool:
+		t := p.tools[r.tool]
+		d := t.Description
+		if o := p.over[t.Key]; o.Description != "" {
+			d = o.Description
+		}
+		detail = th.method(t.Method).Render(t.Method) + " " + safe(t.Path) + th.Dim.Render("  "+safe(d))
+	case ok:
+		detail = th.Dim.Render("space selects the whole group, enter folds it")
+	}
+	lines = append(lines, fit(elbow+detail, w))
+
+	// Input box, like a prompt: focused while typing.
+	var input string
+	border := th.Border
+	switch p.mode {
+	case modeFilter, modeRename, modeDescribe:
+		border = th.Focus
+		input = th.Accent.Render(p.inputLabel) + p.input.View()
+	case modeConfirmQuit:
+		border = th.Warn
+		input = th.Warn.Render("Discard your changes? ") + th.Dim.Render("y discards · any other key keeps editing")
+	default:
+		if p.filter != "" {
+			input = th.Accent.Render("/ ") + safe(p.filter) + th.Dim.Render("   esc clears")
+		} else {
+			input = th.Dim.Render("> press / to filter, space to toggle, s to save")
 		}
 	}
-	b.WriteString(styleDim.Render(truncate(detail, w)) + "\n")
+	lines = append(lines, th.box(w, border, input)...)
 
-	switch {
-	case p.mode == modeFilter || p.mode == modeRename || p.mode == modeDescribe:
-		b.WriteString(p.input.View() + "\n")
-	case p.status != "":
-		b.WriteString(styleWarn.Render(truncate(safe(p.status), w)) + "\n")
-	case p.conflict != "":
-		b.WriteString(styleErr.Render(truncate(safe(p.conflict), w)) + "\n")
-	default:
-		b.WriteString("\n")
+	// Status bar: totals and the token budget.
+	large := p.offered > warnTools || p.budget > warnTokens
+	stats := th.Dim
+	if large {
+		stats = th.Warn
 	}
-	if p.mode != modeList && p.status != "" {
-		b.WriteString(styleWarn.Render(truncate(safe(p.status), w)) + "\n")
-	} else {
-		b.WriteString("\n")
+	left := "  " + stats.Render(p.footerText()) + "  " + th.gauge(p.budget, warnTokens, 10)
+	if large {
+		left += th.Warn.Render("  large toolset: models pick tools less reliably")
 	}
+	right := th.Dim.Render("? for shortcuts")
+	if p.showHelp {
+		right = th.Dim.Render("? to hide")
+	}
+	lines = append(lines, spread(left, right, w))
+	lines = append(lines, p.helpLines()...)
 
-	footer := p.footerText()
-	if p.offered > warnTools || p.budget > warnTokens {
-		footer = styleWarn.Render(footer + " · large toolset")
-	}
-	b.WriteString(truncate(footer, w+20) + "\n")
-	b.WriteString(styleDim.Render(truncate("↑↓ move · space toggle · enter fold · / filter · a/n all/none · r rename · e describe · p policy · s save · q quit", w)))
-
-	v := tea.NewView(b.String())
+	v := tea.NewView(strings.Join(lines, "\n"))
 	v.AltScreen = true
 	return v
 }

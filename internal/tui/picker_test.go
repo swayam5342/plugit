@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/model"
@@ -79,7 +80,8 @@ func press(p *Picker, keys ...string) tea.Cmd {
 	return cmd
 }
 
-func view(p *Picker) string { return p.View().Content }
+// view is the screen as plain text.
+func view(p *Picker) string { return ansi.Strip(p.View().Content) }
 
 func isQuit(cmd tea.Cmd) bool {
 	if cmd == nil {
@@ -320,5 +322,35 @@ func TestPickerScrolls(t *testing.T) {
 	}
 	if !strings.Contains(v, p.currentRowText()) || footer(v) == "" {
 		t.Errorf("cursor row or footer missing:\n%s", v)
+	}
+}
+
+// No line may be wider than the window, at any width, or the terminal wraps
+// and the layout falls apart.
+func TestPickerFitsWidth(t *testing.T) {
+	for _, w := range []int{30, 60, 80, 120} {
+		p := newTest("GET /pets")
+		p.Update(tea.WindowSizeMsg{Width: w, Height: 20})
+		press(p, "/", "pe")
+		for _, l := range strings.Split(p.View().Content, "\n") {
+			if lw := ansi.StringWidth(l); lw > w {
+				t.Errorf("width %d: line is %d wide: %q", w, lw, ansi.Strip(l))
+			}
+		}
+	}
+}
+
+// The header names the API and the policy mode; tool rows show the method.
+func TestPickerHeader(t *testing.T) {
+	p := newTest("GET /pets")
+	header := strings.Join(strings.Split(view(p), "\n")[:4], "\n")
+	for _, want := range []string{"╭", "plugit", "pets", "read-only", "6 operations", "prefix pp", "╰"} {
+		if !strings.Contains(header, want) {
+			t.Errorf("header missing %q:\n%s", want, header)
+		}
+	}
+	moveTo(t, p, "pp_deletePet")
+	if !strings.Contains(p.currentRowText(), "DELETE") {
+		t.Errorf("row = %q", p.currentRowText())
 	}
 }
