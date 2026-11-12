@@ -41,7 +41,7 @@ func keysInOrder(t *testing.T, data []byte) []string {
 }
 
 func TestInstallPreservesEverythingElse(t *testing.T) {
-	out, err := InstallJSON([]byte(desktopConfig), "pets", entry)
+	out, err := InstallJSON([]byte(desktopConfig), MCPServers, "pets", entry)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,16 +84,16 @@ func TestInstallPreservesEverythingElse(t *testing.T) {
 }
 
 func TestInstallIsIdempotentAndReplacesOwnEntry(t *testing.T) {
-	once, err := InstallJSON([]byte(desktopConfig), "pets", entry)
+	once, err := InstallJSON([]byte(desktopConfig), MCPServers, "pets", entry)
 	if err != nil {
 		t.Fatal(err)
 	}
-	twice, err := InstallJSON(once, "pets", entry)
+	twice, err := InstallJSON(once, MCPServers, "pets", entry)
 	if err != nil || string(twice) != string(once) {
 		t.Errorf("second install changed the file (err=%v)", err)
 	}
 	moved := Entry{Command: `D:\new\plugit.exe`, Args: []string{"serve", "pets", "--toolset", "readonly"}}
-	out, err := InstallJSON(once, "pets", moved)
+	out, err := InstallJSON(once, MCPServers, "pets", moved)
 	if err != nil || !strings.Contains(string(out), `D:\\new\\plugit.exe`) || strings.Contains(string(out), `More`) {
 		t.Errorf("own entry not replaced (err=%v):\n%s", err, out)
 	}
@@ -102,7 +102,7 @@ func TestInstallIsIdempotentAndReplacesOwnEntry(t *testing.T) {
 func TestInstallCreatesConfig(t *testing.T) {
 	for name, in := range map[string]string{"missing file": "", "whitespace": " \n", "empty object": "{}", "no servers": `{"theme":"dark"}`} {
 		t.Run(name, func(t *testing.T) {
-			out, err := InstallJSON([]byte(in), "pets", entry)
+			out, err := InstallJSON([]byte(in), MCPServers, "pets", entry)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -132,7 +132,7 @@ func TestInstallRefuses(t *testing.T) {
 		"plugit for other API":  {otherAPI, ErrNotOurs},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := InstallJSON([]byte(tc.in), "pets", entry)
+			_, err := InstallJSON([]byte(tc.in), MCPServers, "pets", entry)
 			if !errors.Is(err, tc.want) {
 				t.Errorf("err = %v, want %v", err, tc.want)
 			}
@@ -141,22 +141,22 @@ func TestInstallRefuses(t *testing.T) {
 }
 
 func TestUninstall(t *testing.T) {
-	installed, err := InstallJSON([]byte(desktopConfig), "pets", entry)
+	installed, err := InstallJSON([]byte(desktopConfig), MCPServers, "pets", entry)
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, removed, err := UninstallJSON(installed, "pets")
+	out, removed, err := UninstallJSON(installed, MCPServers, "pets")
 	if err != nil || !removed {
 		t.Fatalf("removed=%v err=%v", removed, err)
 	}
 	if strings.Contains(string(out), `"pets"`) || !strings.Contains(string(out), `"other"`) || !strings.Contains(string(out), "1e400") {
 		t.Errorf("uninstall result:\n%s", out)
 	}
-	if _, removed, err := UninstallJSON(out, "pets"); err != nil || removed {
+	if _, removed, err := UninstallJSON(out, MCPServers, "pets"); err != nil || removed {
 		t.Errorf("second uninstall: removed=%v err=%v", removed, err)
 	}
 	// Someone else's entry of the same name is left alone.
-	if _, _, err := UninstallJSON([]byte(`{"mcpServers": {"pets": {"command": "npx"}}}`), "pets"); !errors.Is(err, ErrNotOurs) {
+	if _, _, err := UninstallJSON([]byte(`{"mcpServers": {"pets": {"command": "npx"}}}`), MCPServers, "pets"); !errors.Is(err, ErrNotOurs) {
 		t.Errorf("foreign uninstall: err = %v", err)
 	}
 }
@@ -189,5 +189,39 @@ func TestDiff(t *testing.T) {
 	}
 	if Diff([]byte("x\n"), []byte("x\n")) != "" {
 		t.Error("identical inputs produce a diff")
+	}
+}
+
+// VS Code keeps servers under "servers" and wants an explicit stdio type.
+func TestVSCodeFormat(t *testing.T) {
+	in := `{"servers": {"other": {"type": "http", "url": "https://x.example.test"}}, "inputs": []}`
+	out, err := InstallJSON([]byte(in), VSCodeServers, "pets", entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed struct {
+		Servers map[string]map[string]any `json:"servers"`
+		Inputs  []any                     `json:"inputs"`
+	}
+	if err := json.Unmarshal(out, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	pets := parsed.Servers["pets"]
+	if pets["type"] != "stdio" || pets["command"] != entry.Command || parsed.Servers["other"] == nil || parsed.Inputs == nil {
+		t.Errorf("unexpected result:\n%s", out)
+	}
+	if strings.Contains(string(out), "mcpServers") {
+		t.Errorf("wrote mcpServers into a VS Code config:\n%s", out)
+	}
+	if got, err := PlugitEntries(out, VSCodeServers); err != nil || got["pets"].API != "pets" {
+		t.Errorf("entries = %v, %v", got, err)
+	}
+	// The same file read as mcpServers has no plugit entries.
+	if got, _ := PlugitEntries(out, MCPServers); len(got) != 0 {
+		t.Errorf("found entries under the wrong key: %v", got)
+	}
+	back, removed, err := UninstallJSON(out, VSCodeServers, "pets")
+	if err != nil || !removed || strings.Contains(string(back), `"pets"`) || !strings.Contains(string(back), `"other"`) {
+		t.Errorf("uninstall = %v, %v:\n%s", removed, err, back)
 	}
 }

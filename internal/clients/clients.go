@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -29,18 +30,103 @@ type Client string
 const (
 	ClaudeDesktop Client = "claude-desktop"
 	ClaudeCode    Client = "claude-code"
+	Codex         Client = "codex"
 	Cursor        Client = "cursor"
+	VSCode        Client = "vscode"
+	Windsurf      Client = "windsurf"
+	Gemini        Client = "gemini"
+	LMStudio      Client = "lm-studio"
 )
 
-// ParseClient parses a --client value.
-func ParseClient(s string) (Client, error) {
-	switch c := Client(s); c {
-	case ClaudeDesktop, ClaudeCode, Cursor:
-		return c, nil
-	case "vscode":
-		return "", errors.New("--client vscode is not supported yet (planned for v0.3); use claude-desktop, claude-code or cursor")
+// Info describes how plugit installs into a client. A client is either
+// configured through its own CLI (CLI set) or through a JSON file plugit
+// edits in place (Format set).
+type Info struct {
+	ID     Client
+	Name   string // for people: "Claude Desktop"
+	CLI    string // executable that owns the client's config
+	Format Format // where servers live in the client's JSON file
+}
+
+var all = []Info{
+	{ID: ClaudeDesktop, Name: "Claude Desktop", Format: MCPServers},
+	{ID: ClaudeCode, Name: "Claude Code", CLI: "claude"},
+	{ID: Codex, Name: "OpenAI Codex", CLI: "codex"},
+	{ID: Cursor, Name: "Cursor", Format: MCPServers},
+	{ID: VSCode, Name: "VS Code (GitHub Copilot)", Format: VSCodeServers},
+	{ID: Windsurf, Name: "Windsurf", Format: MCPServers},
+	{ID: Gemini, Name: "Gemini CLI", Format: MCPServers},
+	{ID: LMStudio, Name: "LM Studio", Format: MCPServers},
+}
+
+var aliases = map[string]Client{
+	"copilot":      VSCode,
+	"vs-code":      VSCode,
+	"gemini-cli":   Gemini,
+	"openai-codex": Codex,
+	"codex-cli":    Codex,
+	"lmstudio":     LMStudio,
+}
+
+// All lists the supported clients in display order.
+func All() []Info { return slices.Clone(all) }
+
+// Lookup returns a client's details; c must come from ParseClient or All.
+func Lookup(c Client) Info {
+	for _, i := range all {
+		if i.ID == c {
+			return i
+		}
 	}
-	return "", fmt.Errorf("unknown --client %q: use claude-desktop, claude-code or cursor", s)
+	return Info{ID: c, Name: string(c)}
+}
+
+// IDs lists the client IDs, for help text.
+func IDs() string {
+	ids := make([]string, len(all))
+	for i, c := range all {
+		ids[i] = string(c.ID)
+	}
+	return strings.Join(ids, ", ")
+}
+
+// ParseClient parses a --client value. Case doesn't matter and a few
+// common names (copilot, gemini-cli, …) are accepted.
+func ParseClient(s string) (Client, error) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if c, ok := aliases[s]; ok {
+		return c, nil
+	}
+	for _, i := range all {
+		if string(i.ID) == s {
+			return i.ID, nil
+		}
+	}
+	switch s {
+	case "chatgpt", "openai":
+		return "", errors.New("ChatGPT connects only to remote MCP servers and plugit serves over stdio; use --client codex for OpenAI's Codex")
+	}
+	return "", fmt.Errorf("unknown --client %q: use one of %s", s, IDs())
+}
+
+// AddArgs is the argument list for a CLI client that registers e as name
+// at user scope. The entry goes after "--" as plain arguments, so no JSON
+// has to survive Windows command-line parsing.
+func (i Info) AddArgs(name string, e Entry) []string {
+	args := []string{"mcp", "add"}
+	if i.ID == ClaudeCode {
+		args = append(args, "--scope", "user")
+	}
+	return append(append(args, name, "--", e.Command), e.Args...)
+}
+
+// RemoveArgs is the argument list for a CLI client that removes name.
+func (i Info) RemoveArgs(name string) []string {
+	args := []string{"mcp", "remove"}
+	if i.ID == ClaudeCode {
+		args = append(args, "--scope", "user")
+	}
+	return append(args, name)
 }
 
 // Env holds the locations ConfigPath depends on.
@@ -65,24 +151,38 @@ func DefaultEnv() Env {
 func ConfigPath(c Client, env Env) (string, error) {
 	switch c {
 	case ClaudeDesktop:
-		switch env.GOOS {
-		case "windows":
-			if env.AppData == "" {
-				return "", errors.New("APPDATA is not set")
-			}
-			return filepath.Join(env.AppData, "Claude", "claude_desktop_config.json"), nil
-		case "darwin":
-			return homeJoin(env, "Library", "Application Support", "Claude", "claude_desktop_config.json")
-		default:
-			if env.ConfigHome == "" {
-				return "", errors.New("no config directory (set XDG_CONFIG_HOME or HOME)")
-			}
-			return filepath.Join(env.ConfigHome, "Claude", "claude_desktop_config.json"), nil
-		}
+		return appConfig(env, "Claude", "claude_desktop_config.json")
+	case VSCode:
+		return appConfig(env, "Code", "User", "mcp.json")
 	case Cursor:
 		return homeJoin(env, ".cursor", "mcp.json")
+	case Windsurf:
+		return homeJoin(env, ".codeium", "windsurf", "mcp_config.json")
+	case Gemini:
+		return homeJoin(env, ".gemini", "settings.json")
+	case LMStudio:
+		return homeJoin(env, ".lmstudio", "mcp.json")
 	}
-	return "", fmt.Errorf("%s is configured through its CLI, not a file", c)
+	return "", fmt.Errorf("%s is configured through its CLI, not a file", Lookup(c).Name)
+}
+
+// appConfig is a desktop app's file under the OS's per-user application
+// config directory.
+func appConfig(env Env, parts ...string) (string, error) {
+	switch env.GOOS {
+	case "windows":
+		if env.AppData == "" {
+			return "", errors.New("APPDATA is not set")
+		}
+		return filepath.Join(append([]string{env.AppData}, parts...)...), nil
+	case "darwin":
+		return homeJoin(env, append([]string{"Library", "Application Support"}, parts...)...)
+	default:
+		if env.ConfigHome == "" {
+			return "", errors.New("no config directory (set XDG_CONFIG_HOME or HOME)")
+		}
+		return filepath.Join(append([]string{env.ConfigHome}, parts...)...), nil
+	}
 }
 
 func homeJoin(env Env, parts ...string) (string, error) {
@@ -146,21 +246,8 @@ func fileExists(p string) bool {
 	return err == nil
 }
 
-// ClaudeCodeAdd is the `claude` argument list that registers e at user
-// scope. Claude Code owns ~/.claude.json and rewrites it while running, so
-// plugit never edits it (SPEC T13). The entry goes after "--" as plain
-// arguments, so no JSON has to survive Windows command-line parsing.
-func ClaudeCodeAdd(name string, e Entry) []string {
-	return append([]string{"mcp", "add", "--scope", "user", name, "--", e.Command}, e.Args...)
-}
-
-// ClaudeCodeRemove is the `claude` argument list that removes name.
-func ClaudeCodeRemove(name string) []string {
-	return []string{"mcp", "remove", "--scope", "user", name}
-}
-
-// CheckShimArgs refuses arguments a Windows batch shim (claude.cmd, as npm
-// installs it) would re-interpret: cmd.exe parses its command line again,
+// CheckShimArgs refuses arguments a Windows batch shim (claude.cmd or codex.cmd,
+// as npm installs them) would re-interpret: cmd.exe parses its command line again,
 // so quotes and metacharacters could change what runs.
 func CheckShimArgs(exe string, args []string) error {
 	ext := strings.ToLower(filepath.Ext(exe))

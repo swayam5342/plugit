@@ -137,11 +137,12 @@ func TestDoctor(t *testing.T) {
 	for _, want := range []string{
 		"v0.1.0",
 		"pets",
-		"allow_private",       // relaxed default
-		"PETS_KEY is not set", // unresolvable credential
-		"manifest",            // cache not built yet (no serve has run)
-		"claude-desktop",      // installed client found
-		"claude CLI",          // not on PATH
+		"allow_private",                        // relaxed default
+		"PETS_KEY is not set",                  // unresolvable credential
+		"manifest",                             // cache not built yet (no serve has run)
+		"Claude Desktop: \"pets\" serves pets", // installed client found
+		"claude CLI not on PATH",
+		"codex CLI not on PATH",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("doctor should mention %q:\n%s", want, s)
@@ -188,7 +189,7 @@ func TestDoctor(t *testing.T) {
 
 func TestPlugitEntries(t *testing.T) {
 	data := []byte(`{"mcpServers": {"a": {"command": "C:\\x\\plugit.exe", "args": ["serve", "pets"]}, "b": {"command": "npx"}, "c": {"command": "/bin/plugit", "args": ["run", "x"]}}}`)
-	got, err := clients.PlugitEntries(data)
+	got, err := clients.PlugitEntries(data, clients.MCPServers)
 	if err != nil || len(got) != 1 || got["a"].API != "pets" {
 		t.Errorf("entries = %+v, %v", got, err)
 	}

@@ -3,8 +3,9 @@
 > Turn any REST API into a curated, safe MCP server from your terminal.
 
 PlugIt reads an OpenAPI 3.0/3.1 or Swagger 2.0 spec and serves the operations you pick as
-[MCP](https://modelcontextprotocol.io) tools over stdio, for clients such as Claude Desktop,
-Claude Code and Cursor.
+[MCP](https://modelcontextprotocol.io) tools over stdio, for Claude Desktop, Claude Code,
+OpenAI Codex, Cursor, VS Code (GitHub Copilot), Windsurf, Gemini CLI, LM Studio and any other
+stdio MCP client.
 
 - **Local only.** One binary. No accounts, no hosted backend, no LLM calls, no telemetry.
 - **Safe by default.** Read-only mode, private-network blocking, credentials bound to the
@@ -66,12 +67,25 @@ plugit add github --prefix gh https://raw.githubusercontent.com/github/rest-api-
 #   space toggle · / filter · r rename · e describe · p policy · s save
 plugit auth github                          # store the token in the OS keyring (hidden input)
 plugit try github "GET /repos/{owner}/{repo}/issues" --arg owner=me --arg repo=x   # one test call, secrets redacted
-plugit install github --client claude-desktop                  # or cursor, claude-code
+plugit install github                       # pick clients from a list (detected ones are marked)
+plugit install github --client codex,vscode # or name them
 ```
 
-`install` shows a diff of the client config, backs it up and asks before writing. Only
-plugit's own entry changes, and it never contains a secret. For Claude Code it runs
-`claude mcp add --scope user …` (or prints the command if the `claude` CLI isn't on PATH).
+| `--client` | Where the entry goes |
+|---|---|
+| `claude-desktop` | `claude_desktop_config.json` |
+| `claude-code` | runs `claude mcp add --scope user …` |
+| `codex` | runs `codex mcp add …` (OpenAI Codex CLI, IDE extension and app share it) |
+| `cursor` | `~/.cursor/mcp.json` |
+| `vscode` (or `copilot`) | VS Code's user `mcp.json` |
+| `windsurf` | `~/.codeium/windsurf/mcp_config.json` |
+| `gemini` | `~/.gemini/settings.json` |
+| `lm-studio` | `~/.lmstudio/mcp.json` |
+
+For JSON configs, `install` shows a diff, backs the file up and asks before writing. Only
+plugit's own entry changes, and it never contains a secret. Claude Code and Codex own their
+configs, so plugit runs their CLI instead, or prints the command if the CLI isn't on PATH.
+Any other stdio MCP client works too: point it at `plugit serve <name>`.
 
 Already have a working `plugit run` command line? Turn it into a saved config:
 
@@ -89,7 +103,7 @@ plugit add pets https://petstore.swagger.io/v2/swagger.json --from-run --tags pe
 | `plugit auth <name>` | Store or rotate the credential in the OS keyring |
 | `plugit try <name> <tool> [--arg k=v]` | One call, printing the redacted request and the result |
 | `plugit serve <name> [--toolset T]` | The MCP server (what clients run) |
-| `plugit install / uninstall <name> --client C` | Add to or remove from Claude Desktop, Cursor or Claude Code |
+| `plugit install / uninstall <name> [--client C,…]` | Add to or remove from one or more MCP clients |
 | `plugit list`, `plugit remove <name>` | Manage saved APIs |
 | `plugit doctor` | Check configs, credentials and client installs, and flag relaxed security settings |
 

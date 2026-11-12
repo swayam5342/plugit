@@ -131,10 +131,10 @@ func removeAPI(p config.Paths, name string, yesFlag bool, confirm func(string) (
 	if _, err := fmt.Fprintf(w, "Removed %s. Keyring items it used are left in place.\n", name); err != nil {
 		return err
 	}
-	for _, c := range []clients.Client{clients.ClaudeDesktop, clients.Cursor} {
-		for key, e := range clientEntries(c, env) {
+	for _, info := range clients.All() {
+		for key, e := range clientEntries(info, env) {
 			if e.API == name {
-				if _, err := fmt.Fprintf(w, "%s still has an entry %q for it: run `plugit uninstall %s --client %s", c, key, name, c); err != nil {
+				if _, err := fmt.Fprintf(w, "%s still has an entry %q for it: run `plugit uninstall %s --client %s", info.Name, key, name, info.ID); err != nil {
 					return err
 				}
 				if key != name {
@@ -147,8 +147,13 @@ func removeAPI(p config.Paths, name string, yesFlag bool, confirm func(string) (
 	return nil
 }
 
-func clientEntries(c clients.Client, env clients.Env) map[string]clients.PlugitEntry {
-	path, err := clients.ConfigPath(c, env)
+// clientEntries returns the plugit entries in a file client's config; CLI
+// clients and unreadable configs have none.
+func clientEntries(info clients.Info, env clients.Env) map[string]clients.PlugitEntry {
+	if info.CLI != "" {
+		return nil
+	}
+	path, err := clients.ConfigPath(info.ID, env)
 	if err != nil {
 		return nil
 	}
@@ -156,7 +161,7 @@ func clientEntries(c clients.Client, env clients.Env) map[string]clients.PlugitE
 	if err != nil || !existed {
 		return nil
 	}
-	entries, _ := clients.PlugitEntries(data)
+	entries, _ := clients.PlugitEntries(data, info.Format)
 	return entries
 }
 
@@ -238,8 +243,17 @@ func runDoctor(d doctorDeps) int {
 	}
 
 	_, _ = fmt.Fprintln(d.out, "clients")
-	for _, c := range []clients.Client{clients.ClaudeDesktop, clients.Cursor} {
-		entries := clientEntries(c, d.env)
+	for _, info := range clients.All() {
+		if info.CLI != "" {
+			if _, err := d.lookPath(info.CLI); err != nil {
+				r.info("%s: %s CLI not on PATH (install prints the command instead)", info.Name, info.CLI)
+			} else {
+				r.ok("%s: %s CLI found (check with `%s mcp list`)", info.Name, info.CLI, info.CLI)
+			}
+			continue
+		}
+		c := info.Name
+		entries := clientEntries(info, d.env)
 		if len(entries) == 0 {
 			r.info("%s: no plugit entries", c)
 			continue
@@ -248,7 +262,7 @@ func runDoctor(d doctorDeps) int {
 			e := entries[key]
 			switch {
 			case d.stat(e.Command) != nil:
-				r.fail("%s: %q runs %s, which is missing; reinstall with `plugit install %s --client %s`", c, key, e.Command, e.API, c)
+				r.fail("%s: %q runs %s, which is missing; reinstall with `plugit install %s --client %s`", c, key, e.Command, e.API, info.ID)
 			case !slices.Contains(names, e.API):
 				r.fail("%s: %q serves %s, which isn't saved", c, key, e.API)
 			case e.Command != exe:
@@ -257,11 +271,6 @@ func runDoctor(d doctorDeps) int {
 				r.ok("%s: %q serves %s", c, key, e.API)
 			}
 		}
-	}
-	if _, err := d.lookPath("claude"); err != nil {
-		r.info("claude CLI not on PATH (install --client claude-code prints the command instead)")
-	} else {
-		r.ok("claude CLI found (claude-code installs run `claude mcp add`)")
 	}
 	return r.problems
 }

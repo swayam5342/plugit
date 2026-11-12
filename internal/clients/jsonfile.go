@@ -1,6 +1,7 @@
-// Package clients installs PlugIt into MCP client configs (SPEC T13): Claude
-// Desktop and Cursor (JSON files, edited in place) and Claude Code (through
-// its own CLI). Only PlugIt's own entry ever changes; every other key and
+// Package clients installs PlugIt into MCP client configs (SPEC T13): JSON
+// files edited in place (Claude Desktop, Cursor, VS Code, Windsurf, Gemini
+// CLI, LM Studio) and clients that own their config and are driven through
+// their CLI (Claude Code, Codex). Only PlugIt's own entry ever changes; every other key and
 // its order are kept. Entries carry a command and arguments only, never
 // secrets.
 package clients
@@ -23,6 +24,25 @@ var (
 
 // Entry is the MCP server entry plugit writes.
 type Entry struct {
+	Command string   `json:"command"`
+	Args    []string `json:"args"`
+}
+
+// Format says where a client's JSON config keeps its servers.
+type Format struct {
+	ServersKey string // top-level object holding the servers
+	Type       string // value of each entry's "type" field; "" for none
+}
+
+// Known formats.
+var (
+	MCPServers    = Format{ServersKey: "mcpServers"}
+	VSCodeServers = Format{ServersKey: "servers", Type: "stdio"}
+)
+
+// wire is an entry as written to a file.
+type wire struct {
+	Type    string   `json:"type,omitempty"`
 	Command string   `json:"command"`
 	Args    []string `json:"args"`
 }
@@ -93,8 +113,8 @@ func marshalNoEscape(v any) []byte {
 	return bytes.TrimRight(b.Bytes(), "\n")
 }
 
-// render indents a document with two spaces (as Claude Desktop and Cursor
-// write theirs). json.Indent only changes whitespace: numbers and string
+// render indents a document with two spaces (as the clients write
+// theirs). json.Indent only changes whitespace: numbers and string
 // escapes keep their original text.
 func render(doc json.RawMessage) ([]byte, error) {
 	var b bytes.Buffer
@@ -114,33 +134,32 @@ func find(ms []member, key string) int {
 	return -1
 }
 
-// servers returns the top-level members and the mcpServers members (nil if
-// there's no mcpServers key yet).
-func servers(data []byte) (top, srv []member, err error) {
+// servers returns the top-level members and the servers members (nil if
+// there's no servers key yet).
+func servers(data []byte, f Format) (top, srv []member, err error) {
 	if len(bytes.TrimSpace(data)) == 0 {
 		return nil, nil, nil
 	}
 	if top, err = parseObject(data); err != nil {
 		return nil, nil, err
 	}
-	if i := find(top, "mcpServers"); i >= 0 {
+	if i := find(top, f.ServersKey); i >= 0 {
 		if srv, err = parseObject(top[i].Value); err != nil {
-			return nil, nil, fmt.Errorf("mcpServers: %w", err)
+			return nil, nil, fmt.Errorf("%s: %w", f.ServersKey, err)
 		}
 	}
 	return top, srv, nil
 }
 
-// InstallJSON adds or replaces the named server entry in a client config
-// with an mcpServers object (Claude Desktop, Cursor). Empty input starts a
-// new config. A same-named entry that isn't plugit's own for this API is
-// ErrNotOurs.
-func InstallJSON(data []byte, name string, e Entry) ([]byte, error) {
-	top, srv, err := servers(data)
+// InstallJSON adds or replaces the named server entry in a client config.
+// Empty input starts a new config. A same-named entry that isn't plugit's
+// own for this API is ErrNotOurs.
+func InstallJSON(data []byte, f Format, name string, e Entry) ([]byte, error) {
+	top, srv, err := servers(data, f)
 	if err != nil {
 		return nil, err
 	}
-	val := marshalNoEscape(e)
+	val := marshalNoEscape(wire{Type: f.Type, Command: e.Command, Args: e.Args})
 	if i := find(srv, name); i >= 0 {
 		if !isPlugitEntry(srv[i].Value, name) {
 			return nil, fmt.Errorf("%w: %q", ErrNotOurs, name)
@@ -149,18 +168,18 @@ func InstallJSON(data []byte, name string, e Entry) ([]byte, error) {
 	} else {
 		srv = append(srv, member{name, val})
 	}
-	if i := find(top, "mcpServers"); i >= 0 {
+	if i := find(top, f.ServersKey); i >= 0 {
 		top[i].Value = encodeObject(srv)
 	} else {
-		top = append(top, member{"mcpServers", encodeObject(srv)})
+		top = append(top, member{f.ServersKey, encodeObject(srv)})
 	}
 	return render(encodeObject(top))
 }
 
 // UninstallJSON removes plugit's entry for name. removed is false when there
 // was none. Someone else's entry of that name is ErrNotOurs.
-func UninstallJSON(data []byte, name string) (out []byte, removed bool, err error) {
-	top, srv, err := servers(data)
+func UninstallJSON(data []byte, f Format, name string) (out []byte, removed bool, err error) {
+	top, srv, err := servers(data, f)
 	if err != nil {
 		return nil, false, err
 	}
@@ -172,7 +191,7 @@ func UninstallJSON(data []byte, name string) (out []byte, removed bool, err erro
 		return nil, false, fmt.Errorf("%w: %q", ErrNotOurs, name)
 	}
 	srv = append(srv[:i], srv[i+1:]...)
-	top[find(top, "mcpServers")].Value = encodeObject(srv)
+	top[find(top, f.ServersKey)].Value = encodeObject(srv)
 	out, err = render(encodeObject(top))
 	return out, err == nil, err
 }
@@ -203,8 +222,8 @@ type PlugitEntry struct {
 
 // PlugitEntries returns the plugit serve entries in a client config, by
 // server name.
-func PlugitEntries(data []byte) (map[string]PlugitEntry, error) {
-	_, srv, err := servers(data)
+func PlugitEntries(data []byte, f Format) (map[string]PlugitEntry, error) {
+	_, srv, err := servers(data, f)
 	if err != nil {
 		return nil, err
 	}

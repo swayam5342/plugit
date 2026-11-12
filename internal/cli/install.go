@@ -41,6 +41,16 @@ type installDeps struct {
 	lookPath func(string) (string, error)
 	run      func(ctx context.Context, name string, args ...string) ([]byte, error)
 	now      func() time.Time
+	// choose lets the user pick clients when --client is omitted; nil
+	// means no terminal.
+	choose func([]clientOption) ([]clients.Client, error)
+}
+
+// clientOption is a client offered by the chooser.
+type clientOption struct {
+	Info     clients.Info
+	Detected bool   // looks installed on this machine
+	Where    string // its config file, or the CLI that owns its config
 }
 
 func newInstallCmd(g *globalFlags) *cobra.Command {
@@ -58,10 +68,13 @@ func installCommand(g *globalFlags, use, short string, fn func(context.Context, 
 		Short: short,
 		Long: short + `.
 
-Clients: claude-desktop, cursor (their JSON config is edited in place; only
-plugit's own entry changes, after a timestamped backup) and claude-code
-(through the claude CLI, which owns its config). Entries contain the plugit
-command only: credentials stay in the keyring or environment.`,
+Clients: ` + clients.IDs() + `.
+Without --client you pick from a list (detected clients are marked); pass
+several as a comma-separated list. JSON configs are edited in place: only
+plugit's own entry changes, after a timestamped backup. Claude Code and
+Codex own their configs, so plugit runs their CLI (claude mcp add, codex mcp
+add) instead. Entries contain the plugit command only: credentials stay in
+the keyring or environment.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p, err := g.paths()
@@ -80,16 +93,16 @@ command only: credentials stay in the keyring or environment.`,
 				run: func(ctx context.Context, name string, args ...string) ([]byte, error) {
 					return exec.CommandContext(ctx, name, args...).CombinedOutput() // #nosec G204 -- the claude CLI with arguments checked by CheckShimArgs
 				},
-				now: time.Now,
+				now:    time.Now,
+				choose: chooseClients(cmd),
 			})
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&s.client, "client", "", "claude-desktop, claude-code or cursor")
+	f.StringVar(&s.client, "client", "", "client(s), comma-separated: "+clients.IDs()+" (default: choose)")
 	f.StringVar(&s.toolset, "toolset", "", "toolset to serve (default: default)")
 	f.StringVar(&s.as, "as", "", "server name in the client config (default: the API name)")
 	f.BoolVar(&s.yes, "yes", false, "don't ask for confirmation")
-	_ = cmd.MarkFlagRequired("client")
 	return cmd
 }
 
@@ -144,32 +157,81 @@ func entryFor(s installSettings, d installDeps) (key string, e clients.Entry, er
 	return key, e, nil
 }
 
-func installAPI(ctx context.Context, s installSettings, d installDeps) error {
-	c, err := clients.ParseClient(s.client)
-	if err != nil {
-		return err
+// resolveClients parses --client, or asks when it's empty.
+func resolveClients(s installSettings, d installDeps) ([]clients.Info, error) {
+	var ids []clients.Client
+	if strings.TrimSpace(s.client) == "" {
+		if d.choose == nil {
+			return nil, fmt.Errorf("not a terminal: pass --client (%s)", clients.IDs())
+		}
+		chosen, err := d.choose(clientOptions(d))
+		if err != nil {
+			return nil, err
+		}
+		if len(chosen) == 0 {
+			return nil, errors.New("no client chosen; nothing changed")
+		}
+		ids = chosen
+	} else {
+		for part := range strings.SplitSeq(s.client, ",") {
+			c, err := clients.ParseClient(part)
+			if err != nil {
+				return nil, err
+			}
+			if !slices.Contains(ids, c) {
+				ids = append(ids, c)
+			}
+		}
 	}
+	out := make([]clients.Info, len(ids))
+	for i, c := range ids {
+		out[i] = clients.Lookup(c)
+	}
+	return out, nil
+}
+
+// clientOptions lists every client and whether it looks installed: its
+// CLI is on PATH, or its config directory exists.
+func clientOptions(d installDeps) []clientOption {
+	var out []clientOption
+	for _, info := range clients.All() {
+		o := clientOption{Info: info}
+		if info.CLI != "" {
+			_, err := d.lookPath(info.CLI)
+			o.Detected, o.Where = err == nil, info.CLI+" mcp add"
+		} else if path, err := clients.ConfigPath(info.ID, d.env); err == nil {
+			fi, err := os.Stat(filepath.Dir(path))
+			o.Detected, o.Where = err == nil && fi.IsDir(), path
+		}
+		out = append(out, o)
+	}
+	return out
+}
+
+func installAPI(ctx context.Context, s installSettings, d installDeps) error {
 	key, e, err := entryFor(s, d)
 	if err != nil {
 		return err
 	}
-	if c == clients.ClaudeCode {
-		return runClaudeCode(ctx, s, d, clients.ClaudeCodeAdd(key, e), "add "+key)
-	}
-	return editClientFile(c, s, d, func(data []byte) ([]byte, bool, error) {
-		out, err := clients.InstallJSON(data, key, e)
-		if errors.Is(err, clients.ErrNotOurs) {
-			return nil, false, fmt.Errorf("%w; pick another name with --as", err)
-		}
-		return out, err == nil, err
-	}, fmt.Sprintf("%s is already installed in %s as %q.", s.name, c, key))
-}
-
-func uninstallAPI(ctx context.Context, s installSettings, d installDeps) error {
-	c, err := clients.ParseClient(s.client)
+	infos, err := resolveClients(s, d)
 	if err != nil {
 		return err
 	}
+	return eachClient(d, infos, func(info clients.Info) error {
+		if info.CLI != "" {
+			return runClientCLI(ctx, info, s, d, info.AddArgs(key, e), "add "+key)
+		}
+		return editClientFile(info, s, d, func(data []byte) ([]byte, bool, error) {
+			out, err := clients.InstallJSON(data, info.Format, key, e)
+			if errors.Is(err, clients.ErrNotOurs) {
+				return nil, false, fmt.Errorf("%w; pick another name with --as", err)
+			}
+			return out, err == nil, err
+		}, fmt.Sprintf("%s is already installed in %s as %q.", s.name, info.Name, key))
+	})
+}
+
+func uninstallAPI(ctx context.Context, s installSettings, d installDeps) error {
 	key := s.as
 	if key == "" {
 		key = s.name
@@ -177,18 +239,47 @@ func uninstallAPI(ctx context.Context, s installSettings, d installDeps) error {
 	if !serverKeyRe.MatchString(key) {
 		return fmt.Errorf("--as %q: use 1-64 letters, digits, '-' or '_'", safeName(key))
 	}
-	if c == clients.ClaudeCode {
-		return runClaudeCode(ctx, s, d, clients.ClaudeCodeRemove(key), "remove "+key)
+	infos, err := resolveClients(s, d)
+	if err != nil {
+		return err
 	}
-	return editClientFile(c, s, d, func(data []byte) ([]byte, bool, error) {
-		return clients.UninstallJSON(data, key)
-	}, fmt.Sprintf("%s has no plugit entry named %q.", c, key))
+	return eachClient(d, infos, func(info clients.Info) error {
+		if info.CLI != "" {
+			return runClientCLI(ctx, info, s, d, info.RemoveArgs(key), "remove "+key)
+		}
+		return editClientFile(info, s, d, func(data []byte) ([]byte, bool, error) {
+			return clients.UninstallJSON(data, info.Format, key)
+		}, fmt.Sprintf("%s has no plugit entry named %q.", info.Name, key))
+	})
+}
+
+// eachClient runs fn per client, with a heading when there are several.
+// It stops at the first failure.
+func eachClient(d installDeps, infos []clients.Info, fn func(clients.Info) error) error {
+	for i, info := range infos {
+		if len(infos) > 1 {
+			sep := ""
+			if i > 0 {
+				sep = "\n"
+			}
+			if _, err := fmt.Fprintf(d.out, "%s== %s ==\n", sep, info.Name); err != nil {
+				return err
+			}
+		}
+		if err := fn(info); err != nil {
+			if len(infos) > 1 {
+				return fmt.Errorf("%s: %w", info.Name, err)
+			}
+			return err
+		}
+	}
+	return nil
 }
 
 // editClientFile reads a client config, applies edit, shows the diff, asks,
 // then backs up and writes.
-func editClientFile(c clients.Client, s installSettings, d installDeps, edit func([]byte) ([]byte, bool, error), unchanged string) error {
-	path, err := clients.ConfigPath(c, d.env)
+func editClientFile(info clients.Info, s installSettings, d installDeps, edit func([]byte) ([]byte, bool, error), unchanged string) error {
+	path, err := clients.ConfigPath(info.ID, d.env)
 	if err != nil {
 		return err
 	}
@@ -211,6 +302,9 @@ func editClientFile(c clients.Client, s installSettings, d installDeps, edit fun
 		return err
 	}
 	backup, err := clients.WriteWithBackup(path, after, d.now())
+	if errors.Is(err, clients.ErrClientNotFound) {
+		return fmt.Errorf("%w: is %s installed?", err, info.Name)
+	}
 	if err != nil {
 		return err
 	}
@@ -219,15 +313,17 @@ func editClientFile(c clients.Client, s installSettings, d installDeps, edit fun
 			return err
 		}
 	}
-	_, err = fmt.Fprintf(d.out, "Updated %s. Restart %s to pick up the change.\n", path, c)
+	_, err = fmt.Fprintf(d.out, "Updated %s. Restart %s to pick up the change.\n", path, info.Name)
 	return err
 }
 
-func runClaudeCode(ctx context.Context, s installSettings, d installDeps, args []string, what string) error {
-	shown := "claude " + shellJoin(args)
-	exe, err := d.lookPath("claude")
+// runClientCLI runs a client's own CLI (claude, codex) to change its
+// config, or prints the command when the CLI isn't on PATH.
+func runClientCLI(ctx context.Context, info clients.Info, s installSettings, d installDeps, args []string, what string) error {
+	shown := info.CLI + " " + shellJoin(args)
+	exe, err := d.lookPath(info.CLI)
 	if err != nil {
-		_, err := fmt.Fprintf(d.out, "The claude CLI isn't on PATH. Run this to %s in Claude Code:\n\n  %s\n", what, shown)
+		_, err := fmt.Fprintf(d.out, "The %s CLI isn't on PATH. Run this to %s in %s:\n\n  %s\n", info.CLI, what, info.Name, shown)
 		return err
 	}
 	if err := clients.CheckShimArgs(exe, args); err != nil {
@@ -242,7 +338,7 @@ func runClaudeCode(ctx context.Context, s installSettings, d installDeps, args [
 	}
 	out, err := d.run(ctx, exe, args...)
 	if err != nil {
-		return fmt.Errorf("claude %s failed: %w: %s", args[1], err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("%s %s failed: %w: %s", info.CLI, args[1], err, strings.TrimSpace(string(out)))
 	}
 	_, err = fmt.Fprintf(d.out, "%s\n", strings.TrimSpace(string(out)))
 	return err

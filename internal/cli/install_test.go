@@ -206,3 +206,105 @@ func TestInstallClaudeCode(t *testing.T) {
 		}
 	})
 }
+
+func TestInstallCodex(t *testing.T) {
+	p := setupAPI(t, "https://pets.example.test")
+	d, _, out, fr := installEnv(t, p, "")
+	d.confirm = yes
+	d.lookPath = func(name string) (string, error) {
+		if name == "codex" {
+			return `C:\bin\codex.exe`, nil
+		}
+		return "", errors.New("not found")
+	}
+	if err := installAPI(t.Context(), installSettings{name: "pets", client: "codex"}, d); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{`C:\bin\codex.exe`, "mcp", "add", "pets", "--", fakeExe, "serve", "pets"}
+	if len(fr.calls) != 1 || !slices.Equal(fr.calls[0], want) {
+		t.Errorf("calls = %q", fr.calls)
+	}
+	if !strings.Contains(out.String(), "codex mcp add pets") {
+		t.Errorf("command not shown: %s", out)
+	}
+	if err := uninstallAPI(t.Context(), installSettings{name: "pets", client: "codex"}, d); err != nil {
+		t.Fatal(err)
+	}
+	if len(fr.calls) != 2 || !slices.Equal(fr.calls[1][1:], []string{"mcp", "remove", "pets"}) {
+		t.Errorf("calls = %q", fr.calls)
+	}
+}
+
+func TestInstallVSCode(t *testing.T) {
+	p := setupAPI(t, "https://pets.example.test")
+	d, _, out, _ := installEnv(t, p, "")
+	d.confirm = yes
+	dir := filepath.Join(d.env.AppData, "Code", "User")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := installAPI(t.Context(), installSettings{name: "pets", client: "copilot"}, d); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "mcp.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"servers"`, `"type": "stdio"`, `"serve"`} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("missing %s:\n%s", want, data)
+		}
+	}
+	if !strings.Contains(out.String(), "Restart VS Code") {
+		t.Errorf("restart hint should name the client: %s", out)
+	}
+}
+
+func TestInstallSeveralClients(t *testing.T) {
+	p := setupAPI(t, "https://pets.example.test")
+	d, desktop, _, _ := installEnv(t, p, "")
+	d.confirm = yes
+	if err := os.MkdirAll(filepath.Join(d.env.Home, ".cursor"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := installAPI(t.Context(), installSettings{name: "pets", client: "claude-desktop, cursor"}, d); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{desktop, filepath.Join(d.env.Home, ".cursor", "mcp.json")} {
+		if data, err := os.ReadFile(f); err != nil || !strings.Contains(string(data), `"pets"`) {
+			t.Errorf("%s: %v\n%s", f, err, data)
+		}
+	}
+}
+
+// Without --client, a terminal gets a chooser of the clients; detected
+// ones are marked.
+func TestInstallChooser(t *testing.T) {
+	p := setupAPI(t, "https://pets.example.test")
+	d, desktop, _, _ := installEnv(t, p, "")
+	d.confirm = yes
+	var offered []clientOption
+	d.choose = func(opts []clientOption) ([]clients.Client, error) {
+		offered = opts
+		return []clients.Client{clients.ClaudeDesktop}, nil
+	}
+	if err := installAPI(t.Context(), installSettings{name: "pets"}, d); err != nil {
+		t.Fatal(err)
+	}
+	if len(offered) != len(clients.All()) {
+		t.Fatalf("offered %d clients", len(offered))
+	}
+	for _, o := range offered {
+		if want := o.Info.ID == clients.ClaudeDesktop; o.Detected != want {
+			t.Errorf("%s detected = %v", o.Info.ID, o.Detected)
+		}
+	}
+	if data, _ := os.ReadFile(desktop); !strings.Contains(string(data), `"pets"`) {
+		t.Errorf("not installed:\n%s", data)
+	}
+
+	d.choose = nil
+	if err := installAPI(t.Context(), installSettings{name: "pets"}, d); err == nil || !strings.Contains(err.Error(), "--client") {
+		t.Errorf("no terminal and no --client: %v", err)
+	}
+}
