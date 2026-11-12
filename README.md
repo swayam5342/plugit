@@ -20,16 +20,12 @@ stdio MCP client.
 ## Install
 
 ```sh
-# macOS (Homebrew)
-brew install --cask swayam5342/tap/plugit
-
-# Windows (Scoop)
-scoop bucket add plugit https://github.com/swayam5342/scoop-bucket
-scoop install plugit
-
-# Anywhere else, from source (Go 1.26.7+), or download an archive from the GitHub releases
 go install github.com/swayam5342/plugit/cmd/plugit@latest
 ```
+
+This needs Go (any recent version fetches the 1.26.7 toolchain plugit asks for) and puts
+`plugit` in `~/go/bin` (`%USERPROFILE%\go\bin` on Windows), which should be on your `PATH`.
+Without Go, download the archive for your platform from the GitHub releases.
 
 Release archives on GitHub come with SHA-256 checksums, a cosign signature, SBOMs and
 build provenance. See [Verifying a release](#verifying-a-release).
