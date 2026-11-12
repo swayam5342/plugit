@@ -30,12 +30,14 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: site/package-lock.json
-      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - id: pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - run: npm ci --no-audit --no-fund
       - run: npm run build
         env:
-          # Project pages live under /<repo>; a custom domain would use "".
-          NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
+          # Where Pages serves the site (a custom domain included), from the Pages settings.
+          NEXT_PUBLIC_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          NEXT_PUBLIC_SITE_URL: ${{ steps.pages.outputs.origin }}
           NEXT_TELEMETRY_DISABLED: "1"
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
