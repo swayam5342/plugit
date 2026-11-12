@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"regexp"
 	"slices"
 	"strings"
 	"unicode"
@@ -530,6 +531,9 @@ func mergeParams[P any](pathLevel, opLevel []*P, id func(*P) (string, string)) [
 	return out
 }
 
+// cookieNameRe is an RFC 6265 cookie-name (an RFC 7230 token).
+var cookieNameRe = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$")
+
 func (b *builder) addParam(t *model.Tool, c *converter, name, in string, required bool, desc string, schema json.RawMessage) {
 	if name == "" {
 		c.issue(model.IssueSchemaDegraded, "parameter without a name (or an unresolvable parameter $ref) ignored")
@@ -544,8 +548,13 @@ func (b *builder) addParam(t *model.Tool, c *converter, name, in string, require
 	case "header":
 		loc = model.InHeader
 	case "cookie":
-		c.issue(model.IssueUnsupported, "cookie parameter %q not supported yet", name)
-		return
+		// The name goes into the Cookie header plugit builds: it must be
+		// an RFC 6265 token (SPEC M6 design note: cookie parameters).
+		if !cookieNameRe.MatchString(name) {
+			c.issue(model.IssueUnsupported, "%q isn't a valid cookie name; parameter dropped", name)
+			return
+		}
+		loc = model.InCookie
 	default:
 		c.issue(model.IssueUnsupported, "parameter %q in %q not supported", name, in)
 		return

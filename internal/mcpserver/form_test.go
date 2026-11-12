@@ -65,3 +65,34 @@ func TestResponseFields(t *testing.T) {
 		t.Errorf("text = %s", text(res))
 	}
 }
+
+// Cookie parameters reach the API as cookies; the model never sees or sets
+// the Cookie header itself.
+func TestCookieParamsEndToEnd(t *testing.T) {
+	me := schema.Prepare(model.Tool{Key: "GET /me", Name: "getMe", Method: "GET", Path: "/me", Description: "Who am I.", Safety: model.ReadOnly,
+		Params: []model.Param{
+			{Name: "theme", UpstreamName: "theme", In: model.InCookie, Schema: []byte(`{"type":"string"}`)},
+			{Name: "Cookie", UpstreamName: "Cookie", In: model.InHeader, Schema: []byte(`{"type":"string"}`)},
+		}}, schema.Options{})
+	if strings.Contains(string(schema.InputSchema(me)), `"Cookie"`) {
+		t.Fatalf("the Cookie header is a tool parameter: %s", schema.InputSchema(me))
+	}
+	var got atomic.Value
+	upstream := func(w http.ResponseWriter, r *http.Request) {
+		if c, err := r.Cookie("theme"); err == nil {
+			got.Store(c.Value)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}
+	r := setup(t, Config{Tools: served(me), Mode: policy.ReadOnly}, upstream)
+	if res, err := r.call(t, "getMe", map[string]any{"theme": "dark"}); err != nil || res.IsError {
+		t.Fatalf("err=%v text=%s", err, text(res))
+	}
+	if got.Load() != "dark" {
+		t.Errorf("upstream cookie = %v", got.Load())
+	}
+	if res, _ := r.call(t, "getMe", map[string]any{"theme": "dark; admin=1"}); !res.IsError {
+		t.Error("a cookie injection was sent")
+	}
+}

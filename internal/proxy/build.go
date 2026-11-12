@@ -27,6 +27,7 @@ import (
 
 	"github.com/swayam5342/plugit/internal/httpx"
 	"github.com/swayam5342/plugit/internal/model"
+	"github.com/swayam5342/plugit/internal/schema"
 )
 
 // Sentinel errors callers can match with errors.Is.
@@ -139,6 +140,7 @@ func Build(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*
 	query := url.Values{}
 	header := http.Header{}
 	bodyFields := map[string]any{}
+	cookies := map[string]string{}
 	var bodyRoot any
 	hasBodyRoot := false
 
@@ -163,11 +165,22 @@ func Build(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*
 				return nil, fmt.Errorf("%w: %q: %w", ErrBadArgument, name, err)
 			}
 		case model.InHeader:
+			// Auth and hop-by-hop headers are never tool parameters (schema
+			// drops them; refuse here too, in case a tool wasn't prepared).
+			if schema.IsForbiddenHeader(p.UpstreamName) {
+				return nil, fmt.Errorf("%w: %q: the %s header can't be set by a tool", ErrBadArgument, name, p.UpstreamName)
+			}
 			s, err := headerValue(v)
 			if err != nil {
 				return nil, fmt.Errorf("%w: %q: %w", ErrBadArgument, name, err)
 			}
 			header.Set(p.UpstreamName, s)
+		case model.InCookie:
+			s, err := cookieValue(p.UpstreamName, v)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %q: %w", ErrBadArgument, name, err)
+			}
+			cookies[p.UpstreamName] = s
 		case model.InBody:
 			bodyFields[p.UpstreamName] = v
 		case model.InBodyRoot:
@@ -196,6 +209,12 @@ func Build(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*
 				return nil, fmt.Errorf("%w: fixed header %q has an invalid value", ErrBuild, upstream)
 			}
 			header.Set(upstream, s)
+		case model.InCookie:
+			s, err := cookieValue(upstream, f.Value)
+			if err != nil {
+				return nil, fmt.Errorf("%w: fixed cookie %q has an invalid value", ErrBuild, upstream)
+			}
+			cookies[upstream] = s
 		case model.InBody:
 			bodyFields[upstream] = f.Value
 		case model.InPath:
@@ -229,6 +248,15 @@ func Build(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*
 		return nil, fmt.Errorf("%w: %w", ErrBuild, err)
 	}
 	maps.Copy(req.Header, header)
+	if len(cookies) > 0 {
+		// One header, built by plugit from named values (SPEC M6 design
+		// note: cookie parameters).
+		parts := make([]string, 0, len(cookies))
+		for _, k := range slices.Sorted(maps.Keys(cookies)) {
+			parts = append(parts, k+"="+cookies[k])
+		}
+		req.Header.Set("Cookie", strings.Join(parts, "; "))
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", contentType)
 	}
@@ -427,6 +455,27 @@ func attachAuth(req *http.Request, tg Target) error {
 		return fmt.Errorf("%w: unknown auth type %q", ErrBuild, a.Type)
 	}
 	return nil
+}
+
+// cookieNameRe is an RFC 6265 cookie-name (an RFC 7230 token).
+var cookieNameRe = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$")
+
+// cookieValue formats a scalar as a cookie value and refuses anything that
+// could end the value or start another cookie (RFC 6265 cookie-octets).
+func cookieValue(name string, v any) (string, error) {
+	if !cookieNameRe.MatchString(name) {
+		return "", fmt.Errorf("%q isn't a valid cookie name", name)
+	}
+	s, ok := formScalar(v)
+	if !ok {
+		return "", errors.New("a cookie value must be a string, number or boolean")
+	}
+	for _, r := range s {
+		if r <= ' ' || r >= 0x7f || r == '"' || r == ',' || r == ';' || r == '\\' {
+			return "", errors.New("cookie values can't contain spaces, quotes, commas, semicolons, backslashes, control or non-ASCII characters")
+		}
+	}
+	return s, nil
 }
 
 // bytesReader returns a nil io.Reader (not a typed-nil *bytes.Reader, which

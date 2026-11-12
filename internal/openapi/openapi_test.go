@@ -315,11 +315,12 @@ paths:
 	if !hasIssue(up, model.IssueUnsupported, "file") {
 		t.Errorf("missing file-field issue: %+v", up.Issues)
 	}
-	if !hasIssue(up, model.IssueUnsupported, "cookie") {
-		t.Errorf("missing cookie issue: %+v", up.Issues)
+	// Cookie parameters are supported (SPEC M6 design note).
+	if hasIssue(up, model.IssueUnsupported, "cookie") {
+		t.Errorf("cookie still flagged unsupported: %+v", up.Issues)
 	}
-	if len(up.Params) != 1 || up.Params[0].UpstreamName != "q" {
-		t.Errorf("params = %+v, want only q", up.Params)
+	if p := param(t, up, "session"); p.In != model.InCookie {
+		t.Errorf("session = %+v", p)
 	}
 
 	for _, tl := range m.Tools {
@@ -936,5 +937,37 @@ func TestParseRejectsScalarV2PathItemValues(t *testing.T) {
 	ok := "swagger: '2.0'\ninfo: {title: t, version: '1'}\npaths:\n  /x:\n    get:\n      description: uses $ref internally\n      responses: {'200': {description: ok}}\n"
 	if m := parse(t, ok, Options{}); len(m.Tools) != 1 {
 		t.Errorf("valid spec rejected: %v", m.Warnings)
+	}
+}
+
+// Cookie names must be RFC 6265 tokens: anything else could break the
+// Cookie header, so it's dropped with an issue.
+func TestParseCookieParams(t *testing.T) {
+	src := `
+openapi: 3.0.3
+info: {title: T, version: '1'}
+paths:
+  /me:
+    get:
+      parameters:
+        - {name: session_id, in: cookie, required: true, schema: {type: string}, description: The session}
+        - {name: theme, in: cookie, schema: {type: string, enum: [light, dark]}}
+        - {name: "bad;name", in: cookie, schema: {type: string}}
+        - {name: "two words", in: cookie, schema: {type: string}}
+      responses: {'200': {description: ok}}
+`
+	m := parse(t, src, Options{})
+	me := tool(t, m, "GET /me")
+	if p := param(t, me, "session_id"); p.In != model.InCookie || !p.Required || p.Desc != "The session" {
+		t.Errorf("session_id = %+v", p)
+	}
+	param(t, me, "theme")
+	for _, p := range me.Params {
+		if strings.ContainsAny(p.UpstreamName, "; ") {
+			t.Errorf("invalid cookie name kept: %q", p.UpstreamName)
+		}
+	}
+	if !hasIssue(me, model.IssueUnsupported, "cookie name") {
+		t.Errorf("invalid names not reported: %+v", me.Issues)
 	}
 }
