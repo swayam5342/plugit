@@ -270,3 +270,48 @@ var tokenPatterns = []tokenPattern{
 	{regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`), Mask},
 	{regexp.MustCompile(`(?i)\b(bearer)\s+[A-Za-z0-9._~+/=-]{8,}`), "${1} " + Mask},
 }
+
+// Args returns a copy of call arguments for the call log: values under
+// secret-looking names (at any depth) become Mask, and every string has
+// secrets and known token formats masked. args is not changed.
+func (r *Redactor) Args(args map[string]any) map[string]any {
+	if args == nil {
+		return nil
+	}
+	out, _ := r.walk(args, true).(map[string]any)
+	return out
+}
+
+// Values is Args without masking by name (log.args: full). Resolved
+// secrets and token formats are still masked.
+func (r *Redactor) Values(args map[string]any) map[string]any {
+	if args == nil {
+		return nil
+	}
+	out, _ := r.walk(args, false).(map[string]any)
+	return out
+}
+
+func (r *Redactor) walk(v any, byName bool) any {
+	switch v := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for k, x := range v {
+			if byName && r.isSecretParam(k) {
+				out[k] = Mask
+				continue
+			}
+			out[k] = r.walk(x, byName)
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, x := range v {
+			out[i] = r.walk(x, byName)
+		}
+		return out
+	case string:
+		return r.String(v)
+	}
+	return v
+}

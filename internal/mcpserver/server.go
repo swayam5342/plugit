@@ -19,12 +19,14 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/httpx"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/policy"
 	"github.com/swayam5342/plugit/internal/proxy"
 	"github.com/swayam5342/plugit/internal/redact"
 	"github.com/swayam5342/plugit/internal/schema"
+	"github.com/swayam5342/plugit/internal/store"
 )
 
 // Tool is one tool to serve: a prepared model.Tool (see schema.Prepare) and
@@ -44,6 +46,17 @@ type Config struct {
 	Doer     httpx.Doer
 	Redactor *redact.Redactor
 	Logger   *slog.Logger // must not write to stdout
+	Log      *CallLog     // nil: calls aren't recorded
+}
+
+// CallLog sends one redacted record per call to the call log (SPEC §3.7
+// step 9).
+type CallLog struct {
+	Record  func(store.Call) // must not block (see store.Recorder)
+	API     string
+	Toolset string
+	Args    config.LogArgs // none, redacted or full (secrets are masked either way)
+	Preview bool           // keep a redacted response preview
 }
 
 // New builds the MCP server. Tools the mode can never run, and tools set to
@@ -107,12 +120,20 @@ type handler struct {
 func (h *handler) handle(ctx context.Context, req *mcp.CallToolRequest) (res *mcp.CallToolResult, _ error) {
 	name := h.tool.Tool.Name
 	start := time.Now()
+	var raw json.RawMessage
+	if req != nil && req.Params != nil {
+		raw = req.Params.Arguments
+	}
+	// Recorded last, after the panic recovery below has set res.
+	rec := store.Call{Outcome: store.OK}
+	defer func() { h.record(start, raw, &rec, res) }()
 	defer func() {
 		if r := recover(); r != nil {
 			h.cfg.Logger.Error("tool handler panicked",
 				"tool", name, "panic", h.cfg.Redactor.String(fmt.Sprint(r)),
 				"stack", h.cfg.Redactor.String(string(debug.Stack())))
 			res = errorResult(name + ": internal error (see the plugit log)")
+			rec.Outcome = store.Failed
 		}
 	}()
 
@@ -120,11 +141,13 @@ func (h *handler) handle(ctx context.Context, req *mcp.CallToolRequest) (res *mc
 	switch decision.Decision {
 	case policy.Deny:
 		h.log(name, start, 0, true, "denied")
+		rec.Outcome = store.Denied
 		return errorResult(name + ": denied by policy: " + decision.Reason), nil
 	case policy.Confirm:
 		// Elicitation-based confirmation arrives in M5 (SPEC §7); until then,
 		// deny and say how to proceed.
 		h.log(name, start, 0, true, "needs confirmation")
+		rec.Outcome = store.Denied
 		return errorResult(name + ": " + decision.Reason + ", which requires user confirmation; " +
 			"this server can't ask for it yet, so the call was not made. Use `plugit edit` to allow this tool or change policy.mode"), nil
 	}
@@ -135,27 +158,75 @@ func (h *handler) handle(ctx context.Context, req *mcp.CallToolRequest) (res *mc
 			h.cfg.Logger.Warn("input schema could not be compiled; validating argument names and required arguments only", "tool", name)
 		}
 	})
-	var raw json.RawMessage
-	if req != nil && req.Params != nil {
-		raw = req.Params.Arguments
-	}
 	if err := h.validator.Validate(raw); err != nil {
 		h.log(name, start, 0, true, "invalid arguments")
+		rec.Outcome = store.Invalid
 		return errorResult(h.cfg.Redactor.String(name + ": " + err.Error())), nil
 	}
 	args, err := schema.DecodeArgs(raw)
 	if err != nil {
 		h.log(name, start, 0, true, "invalid arguments")
+		rec.Outcome = store.Invalid
 		return errorResult(name + ": " + err.Error()), nil
 	}
 
 	r := proxy.Call(ctx, h.cfg.Doer, h.tool.Tool, args, h.cfg.Target, h.cfg.Redactor)
 	h.log(name, start, r.Status, r.IsError, "", "bytes", r.Bytes, "truncated", r.Truncated)
+	rec.Status, rec.Bytes = r.Status, r.Bytes
+	switch {
+	case r.Status >= 400:
+		rec.Outcome = store.HTTPError
+	case r.IsError:
+		rec.Outcome = store.Failed
+	}
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: r.Text}}, IsError: r.IsError}, nil
 }
 
-// log writes one line per call. Arguments and bodies are never logged here
-// (SPEC §5.4: log.args defaults to redacted; the call log is M4).
+// record sends one call to the call log, if there is one. Arguments follow
+// log.args; the error and preview come from the result text, which is
+// already redacted, and are redacted again to be sure.
+func (h *handler) record(start time.Time, raw json.RawMessage, c *store.Call, res *mcp.CallToolResult) {
+	l := h.cfg.Log
+	if l == nil || l.Record == nil {
+		return
+	}
+	c.Time, c.Duration = start.UTC(), time.Since(start)
+	c.API, c.Toolset, c.Tool, c.Op = l.API, l.Toolset, h.tool.Tool.Name, string(h.tool.Tool.Key)
+	red := h.cfg.Redactor
+	if l.Args != config.LogArgsNone {
+		var args map[string]any
+		if json.Unmarshal(raw, &args) == nil && args != nil {
+			if l.Args == config.LogArgsFull {
+				args = red.Values(args)
+			} else {
+				args = red.Args(args)
+			}
+			if b, err := json.Marshal(args); err == nil {
+				c.Args = b
+			}
+		}
+	}
+	text := ""
+	if res != nil {
+		for _, ct := range res.Content {
+			if tc, ok := ct.(*mcp.TextContent); ok {
+				text += tc.Text
+			}
+		}
+	}
+	text = red.String(text)
+	if c.Outcome != store.OK {
+		first, _, _ := strings.Cut(text, "\n")
+		c.Error = first
+	}
+	if l.Preview {
+		c.Preview = text
+	}
+	l.Record(*c)
+}
+
+// log writes one line per call to the process log. Arguments and bodies
+// never go here; the call log (record) has them, redacted.
 func (h *handler) log(name string, start time.Time, status int, isError bool, outcome string, extra ...any) {
 	attrs := append([]any{"tool", name, "status", status, "is_error", isError, "ms", time.Since(start).Milliseconds()}, extra...)
 	if outcome != "" {

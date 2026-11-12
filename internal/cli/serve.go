@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
@@ -28,6 +29,7 @@ import (
 	"github.com/swayam5342/plugit/internal/redact"
 	"github.com/swayam5342/plugit/internal/schema"
 	"github.com/swayam5342/plugit/internal/secrets"
+	"github.com/swayam5342/plugit/internal/store"
 )
 
 const defaultToolset = "default"
@@ -85,7 +87,10 @@ func serveAPI(ctx context.Context, s serveSettings, d runDeps) error {
 	logger.Info("plugit serve serving",
 		"api", a.cfg.Name, "toolset", a.toolset, "selected", len(a.tools), "listed", listed, "mode", a.cfg.Policy.Mode,
 		"base_url", a.target.BaseURL.String()) // validated: no userinfo or query
+	callLog, closeLog := openCallLog(ctx, s.paths, a, logger)
+	defer closeLog()
 	return mcpserver.Serve(ctx, mcpserver.Config{
+		Log:      callLog,
 		Name:     "plugit-" + a.cfg.Name,
 		Version:  d.info.withDefaults().Version,
 		Tools:    a.tools,
@@ -95,6 +100,33 @@ func serveAPI(ctx context.Context, s serveSettings, d runDeps) error {
 		Redactor: a.red,
 		Logger:   logger,
 	}, d.transport)
+}
+
+// openCallLog opens the call log, prunes the API's calls older than
+// log.retention and starts a background recorder. The log is best effort:
+// if it can't be opened, serve still runs and says so on stderr.
+func openCallLog(ctx context.Context, p config.Paths, a *active, logger *slog.Logger) (*mcpserver.CallLog, func()) {
+	db, err := store.Open(ctx, p.DB())
+	if err != nil {
+		logger.Warn("call log unavailable; calls won't be recorded", "err", err)
+		return nil, func() {}
+	}
+	if n, err := db.Prune(ctx, a.cfg.Name, time.Now().Add(-a.cfg.RetentionPeriod())); err != nil {
+		logger.Warn("pruning the call log failed", "err", err)
+	} else if n > 0 {
+		logger.Info("pruned old calls from the call log", "removed", n, "retention", a.cfg.RetentionPeriod().String())
+	}
+	rec := store.NewRecorder(db, 256, func(err error) { logger.Warn("recording a call failed", "err", err) })
+	return &mcpserver.CallLog{
+		Record: rec.Record, API: a.cfg.Name, Toolset: a.toolset,
+		Args: a.cfg.Log.Args, Preview: a.cfg.Log.ResponsePreview,
+	}, func() {
+		rec.Close()
+		if n := rec.Dropped(); n > 0 {
+			logger.Warn("calls not recorded because the call log fell behind", "dropped", n)
+		}
+		_ = db.Close()
+	}
 }
 
 // active is a loaded API, ready to call: its active toolset with resolved

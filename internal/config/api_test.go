@@ -335,3 +335,20 @@ func TestMarshalAPIRoundTrip(t *testing.T) {
 		t.Errorf("invalid config marshalled: %v", err)
 	}
 }
+
+func TestRetentionPeriod(t *testing.T) {
+	for in, want := range map[string]time.Duration{
+		"":    DefaultRetention,
+		"7d":  7 * 24 * time.Hour,
+		"72h": 72 * time.Hour,
+		"90m": 90 * time.Minute,
+	} {
+		c := API{Log: Log{Retention: in}}
+		if got := c.RetentionPeriod(); got != want {
+			t.Errorf("RetentionPeriod(%q) = %v, want %v", in, got, want)
+		}
+	}
+	if DefaultRetention != 30*24*time.Hour {
+		t.Errorf("DefaultRetention = %v (SPEC §3.6: 30d)", DefaultRetention)
+	}
+}

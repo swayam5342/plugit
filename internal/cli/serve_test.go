@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/openapi"
 	"github.com/swayam5342/plugit/internal/secrets"
+	"github.com/swayam5342/plugit/internal/store"
 )
 
 const petsYAML = `version: 1
@@ -249,5 +251,41 @@ func TestServeSetupFailures(t *testing.T) {
 				t.Errorf("error leaks the secret: %v", err)
 			}
 		})
+	}
+}
+
+// serve records each call (redacted) in the call log and prunes calls past
+// log.retention when it starts.
+func TestServeRecordsCalls(t *testing.T) {
+	up := newUpstream(t)
+	p := setupAPI(t, up.URL)
+	db, err := store.Open(t.Context(), p.DB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := store.Call{Time: time.Now().Add(-60 * 24 * time.Hour), API: "pets", Toolset: "default", Tool: "old", Op: "GET /old", Outcome: store.OK}
+	if _, err := db.Insert(t.Context(), old); err != nil {
+		t.Fatal(err)
+	}
+
+	cs, _ := startServe(t, serveSettings{paths: p, name: "pets"}, serveDeps(isolate.Parse))
+	if r, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "pp_list_pets", Arguments: map[string]any{"limit": 2}}); err != nil || r.IsError {
+		t.Fatalf("call: %v %s", err, resultText(r))
+	}
+
+	var got []store.Call
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		got, err = db.List(t.Context(), store.Filter{API: "pets"})
+		if err == nil && len(got) == 1 && got[0].Tool == "pp_list_pets" {
+			break
+		}
+	}
+	if len(got) != 1 || got[0].Tool != "pp_list_pets" || got[0].Outcome != store.OK || string(got[0].Args) != `{"limit":2}` {
+		t.Fatalf("call log = %+v", got)
+	}
+	_ = db.Close()
+	data, _ := os.ReadFile(p.DB())
+	if strings.Contains(string(data), runSecret) {
+		t.Error("call log file contains the secret")
 	}
 }

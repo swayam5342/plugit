@@ -510,3 +510,23 @@ func SaveAPI(p Paths, c *API) error {
 	}
 	return WriteFileAtomic(path, data)
 }
+
+// DefaultRetention is how long the call log keeps an API's calls when
+// log.retention is unset (SPEC §3.6).
+const DefaultRetention = 30 * 24 * time.Hour
+
+// RetentionPeriod is log.retention as a duration ("30d" or a Go duration).
+// Validate has checked the syntax; anything unparsable falls back to the
+// default.
+func (c *API) RetentionPeriod() time.Duration {
+	s := c.Log.Retention
+	if m := retentionRe.FindStringSubmatch(s); m != nil {
+		if n, err := strconv.Atoi(m[1]); err == nil && n > 0 {
+			return time.Duration(n) * 24 * time.Hour
+		}
+	}
+	if d, err := time.ParseDuration(s); err == nil && d > 0 {
+		return d
+	}
+	return DefaultRetention
+}

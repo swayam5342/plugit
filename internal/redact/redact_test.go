@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -269,4 +270,42 @@ func FuzzStringNeverLeaksSecret(f *testing.F) {
 			}
 		}
 	})
+}
+
+// Call arguments are stored in the call log (SPEC §3.7 step 9): secret-
+// looking names are masked, and resolved secrets are masked anywhere.
+func TestArgs(t *testing.T) {
+	r := New(Options{Secrets: []string{"s3cr3t-value"}})
+	in := map[string]any{
+		"q":       "cats",
+		"limit":   float64(5),
+		"api_key": "abc",
+		"nested":  map[string]any{"password": "p", "name": "rex"},
+		"list":    []any{map[string]any{"token": "t"}, "see s3cr3t-value here"},
+		"note":    "contains s3cr3t-value",
+	}
+	got := r.Args(in)
+	want := map[string]any{
+		"q":       "cats",
+		"limit":   float64(5),
+		"api_key": Mask,
+		"nested":  map[string]any{"password": Mask, "name": "rex"},
+		"list":    []any{map[string]any{"token": Mask}, "see *** here"},
+		"note":    "contains ***",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Args = %#v\nwant %#v", got, want)
+	}
+	if in["api_key"] != "abc" || in["nested"].(map[string]any)["password"] != "p" {
+		t.Error("Args changed its input")
+	}
+
+	// Values only masks resolved secrets and token formats (log.args: full).
+	full := r.Values(in)
+	if full["api_key"] != "abc" || full["note"] != "contains ***" {
+		t.Errorf("Values = %#v", full)
+	}
+	if r.Args(nil) != nil {
+		t.Error("Args(nil) should be nil")
+	}
 }
