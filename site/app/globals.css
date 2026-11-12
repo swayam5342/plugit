@@ -107,7 +107,7 @@ textarea.field { resize: vertical; line-height: 1.45; }
   grid-column: 5 / 13; grid-row: 1; align-self: start;
   margin-top: max(42svh, 22.5rem);
   background: var(--accent);
-  padding: 3.5rem 0 0 3.5rem;
+  padding: 3.5rem 0 3.5rem 3.5rem;
   min-height: calc(58svh + 6rem);
   overflow: clip;
   clip-path: polygon(0 3rem, 7rem 3rem, 7rem 0, 100% 0, 100% 100%, 0 100%);
@@ -135,7 +135,7 @@ textarea.field { resize: vertical; line-height: 1.45; }
 .m.put, .m.patch { color: var(--t-warn); }
 .m.delete { color: var(--t-err); }
 
-.picker { width: 620px; max-width: none; white-space: normal; }
+.picker { width: 680px; max-width: none; white-space: normal; }
 .picker button.pill { cursor: pointer; transition: transform var(--t-press) var(--ease-out); }
 .picker button.pill:active { transform: scale(0.94); }
 .picker[data-mode="confirm-writes"] .pill { background: var(--t-warn); }
@@ -144,8 +144,9 @@ textarea.field { resize: vertical; line-height: 1.45; }
 .t-row.is-cursor { background: var(--t-hover); }
 .tui-list { display: flex; flex-direction: column; padding: 2px 0 6px; }
 .g-row { text-align: left; padding: 3px 4px; margin-top: 4px; border-radius: 3px; font: inherit; }
-.t-row { display: grid; grid-template-columns: 18px 58px 196px 150px 1fr; align-items: baseline; text-align: left; padding: 1px 4px 1px 18px; border-radius: 3px; font: inherit; white-space: nowrap; }
+.t-row { display: grid; grid-template-columns: 18px 58px 196px 212px 1fr; align-items: baseline; text-align: left; padding: 1px 4px 1px 18px; border-radius: 3px; font: inherit; white-space: nowrap; }
 .t-row .p { color: var(--t-dim); overflow: hidden; text-overflow: ellipsis; padding-right: 8px; }
+.t-row .n { overflow: hidden; text-overflow: ellipsis; padding-right: 8px; }
 .t-row .x { color: var(--t-dim); }
 .t-row[aria-checked="true"] .dot { color: var(--t-accent); }
 .t-row[aria-checked="true"] .n { color: #fff; font-weight: 600; }
@@ -219,7 +220,7 @@ textarea.field { resize: vertical; line-height: 1.45; }
 .chips button { background: var(--surface); }
 .control-label { display: block; margin: 0.9rem 0 0.4rem; font-size: var(--step-small); color: var(--muted); }
 .switch { display: flex; align-items: center; gap: 0.8rem; margin-top: 0.9rem; min-height: 2.75rem; cursor: pointer; }
-.switch input { appearance: none; width: 3.25rem; height: 1.75rem; background: var(--surface-2); position: relative; margin: 0; cursor: pointer; transition: background-color var(--t-hover); }
+.switch input { flex: none; appearance: none; width: 3.25rem; height: 1.75rem; background: var(--surface-2); position: relative; margin: 0; cursor: pointer; transition: background-color var(--t-hover); }
 .switch input::after { content: ""; position: absolute; top: 4px; left: 4px; width: 1.25rem; height: calc(1.75rem - 8px); background: var(--muted); transition: transform 240ms var(--ease-out), background-color var(--t-hover); }
 .switch input:checked { background: var(--accent); }
 .switch input:checked::after { transform: translateX(1.5rem); background: var(--accent-ink); }
@@ -330,7 +331,7 @@ textarea.field { resize: vertical; line-height: 1.45; }
 /* ---------- tokens: the read tools against the writes ---------- */
 .tokens { background: var(--field-1); margin-top: var(--section); padding-block: clamp(3rem, 5vw, 4.5rem); }
 .tokens-inner { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: var(--gutter); align-items: start; }
-.tokens-copy { grid-column: 1 / 6; position: sticky; top: 2rem; }
+.tokens-copy { grid-column: 1 / 6; }
 .tokens-title { display: flex; flex-direction: column; gap: 0.6rem; }
 .tokens-title .figure { font-size: var(--step-display); font-variant-numeric: tabular-nums; }
 .tokens-title .claim { font-size: var(--step-title); letter-spacing: -0.02em; font-weight: 500; line-height: 1.1; }
@@ -395,7 +396,7 @@ textarea.field { resize: vertical; line-height: 1.45; }
 .step-wide { grid-column: 1 / -1; }
 .step-title { font-size: var(--step-lead); letter-spacing: -0.01em; line-height: 1.2; font-weight: 600; }
 .step p { margin-top: 0.4rem; font-size: 1rem; color: var(--muted); }
-.safety-out { grid-column: 7 / 13; position: sticky; top: 1.5rem; }
+.safety-out { grid-column: 7 / 13; }
 .out { width: 100%; font-size: 12.5px; overflow-wrap: anywhere; }
 .out .tui-pre { max-height: 16em; }
 .step-out { display: none; }

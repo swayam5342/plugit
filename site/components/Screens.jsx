@@ -145,14 +145,32 @@ const PANELS = [
   },
 ];
 
+const AUTOPLAY_MS = 4000;
+const IDLE_AFTER_TOUCH_MS = 8000;
+
 export default function Screens() {
   const row = useRef(null);
   const [lit, setLit] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const litRef = useRef(0);
+  const hold = useRef({ hover: false, focus: false, touchedAt: 0 });
+
+  // Scroll the row itself (never the page) so panel i sits in the middle.
+  const show = (i) => {
+    const el = row.current;
+    const child = el?.children[i];
+    if (!child) return;
+    const er = el.getBoundingClientRect();
+    const cr = child.getBoundingClientRect();
+    el.scrollTo({ left: el.scrollLeft + (cr.left - er.left) - (el.clientWidth - cr.width) / 2, behavior: 'smooth' });
+  };
+  const go = (step) => show((litRef.current + step + PANELS.length) % PANELS.length);
+  const touched = () => { hold.current.touchedAt = Date.now(); };
 
   // The lit panel is the one nearest the row's centre.
   useEffect(() => {
     const el = row.current;
-    if (!el) return;
+    if (!el) return undefined;
     let frame = 0;
     const update = () => {
       cancelAnimationFrame(frame);
@@ -165,6 +183,7 @@ export default function Screens() {
           const d = Math.abs(r.left + r.width / 2 - mid);
           if (d < bestDist) { bestDist = d; best = i; }
         });
+        litRef.current = best;
         setLit(best);
       });
     };
@@ -174,9 +193,13 @@ export default function Screens() {
 
     // Drag to scroll with a mouse (touch scrolls natively).
     let down = false, startX = 0, startLeft = 0;
-    const onDown = (e) => { if (e.pointerType !== 'mouse') return; down = true; startX = e.clientX; startLeft = el.scrollLeft; el.style.scrollSnapType = 'none'; };
+    const onDown = (e) => {
+      touched();
+      if (e.pointerType !== 'mouse') return;
+      down = true; startX = e.clientX; startLeft = el.scrollLeft; el.style.scrollSnapType = 'none';
+    };
     const onMove = (e) => { if (down) el.scrollLeft = startLeft - (e.clientX - startX); };
-    const onUp = () => { if (!down) return; down = false; el.style.scrollSnapType = ''; };
+    const onUp = () => { if (!down) return; down = false; el.style.scrollSnapType = ''; touched(); };
     el.addEventListener('pointerdown', onDown);
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
@@ -189,11 +212,26 @@ export default function Screens() {
     };
   }, []);
 
-  const go = (step) => {
+  // Slide on its own while in view, unless the visitor prefers less motion,
+  // is pointing at it, has focus in it, or touched it in the last few seconds.
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined;
+    setPlaying(true);
+    return undefined;
+  }, []);
+  useEffect(() => {
+    if (!playing) return undefined;
     const el = row.current;
-    const next = Math.max(0, Math.min(PANELS.length - 1, lit + step));
-    el.children[next]?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
-  };
+    let inView = false;
+    const io = new IntersectionObserver(([e]) => { inView = e.isIntersecting; }, { threshold: 0.5 });
+    io.observe(el);
+    const id = setInterval(() => {
+      const h = hold.current;
+      if (!inView || document.hidden || h.hover || h.focus || Date.now() - h.touchedAt < IDLE_AFTER_TOUCH_MS) return;
+      go(1);
+    }, AUTOPLAY_MS);
+    return () => { clearInterval(id); io.disconnect(); };
+  }, [playing]);
 
   return (
     <section className="screens" id="screens" aria-labelledby="screens-title">
@@ -202,23 +240,32 @@ export default function Screens() {
       </div>
       <div className="screens-body">
         <div className="screens-row" ref={row} tabIndex={0} aria-label="PlugIt screens, scroll sideways"
-          onKeyDown={(e) => { if (e.key === 'ArrowRight') { e.preventDefault(); go(1); } if (e.key === 'ArrowLeft') { e.preventDefault(); go(-1); } }}>
+          onPointerEnter={(e) => { if (e.pointerType === 'mouse') hold.current.hover = true; }}
+          onPointerLeave={() => { hold.current.hover = false; }}
+          onFocus={() => { hold.current.focus = true; }}
+          onBlur={() => { hold.current.focus = false; }}
+          onKeyDown={(e) => { if (e.key === 'ArrowRight') { e.preventDefault(); touched(); go(1); } if (e.key === 'ArrowLeft') { e.preventDefault(); touched(); go(-1); } }}>
           {PANELS.map((p, i) => (
             <article key={p.name} className={`panel${i === lit ? ' is-lit' : ''}`} aria-label={p.name}>
               <div className="tui" data-ui>{p.body}</div>
             </article>
           ))}
         </div>
-        <div className="screens-caption" aria-live="polite">
+        <div className="screens-caption" aria-live={playing ? 'off' : 'polite'}>
           <h3 className="screens-name">{PANELS[lit].name}</h3>
           <p>{PANELS[lit].text}</p>
-          <p className="screens-hint small">Screen {lit + 1} of {PANELS.length}. Drag the row, or use the arrows.</p>
+          <p className="screens-hint small">Screen {lit + 1} of {PANELS.length}. {playing ? 'It moves on by itself; drag or use the arrows to take over.' : 'Drag the row, or use the arrows.'}</p>
           <div className="screens-arrows">
-            <button className="arrow" type="button" onClick={() => go(-1)} aria-label="Previous screen" disabled={lit === 0}>
+            <button className="arrow" type="button" onClick={() => { touched(); go(-1); }} aria-label="Previous screen">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
             </button>
-            <button className="arrow" type="button" onClick={() => go(1)} aria-label="Next screen" disabled={lit === PANELS.length - 1}>
+            <button className="arrow" type="button" onClick={() => { touched(); go(1); }} aria-label="Next screen">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" /></svg>
+            </button>
+            <button className="arrow" type="button" onClick={() => setPlaying((v) => !v)} aria-label={playing ? 'Pause the slides' : 'Play the slides'}>
+              {playing
+                ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5v14M15 5v14" /></svg>
+                : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5l11 7-11 7z" /></svg>}
             </button>
           </div>
         </div>
