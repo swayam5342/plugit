@@ -2,6 +2,13 @@
 
 > Turn any REST API into a curated, safe MCP server from your terminal.
 
+[![CI](https://github.com/swayam5342/plugit/actions/workflows/ci.yml/badge.svg)](https://github.com/swayam5342/plugit/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/swayam5342/plugit)](https://github.com/swayam5342/plugit/releases/latest)
+[![Go Reference](https://pkg.go.dev/badge/github.com/swayam5342/plugit.svg)](https://pkg.go.dev/github.com/swayam5342/plugit)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+
+**Website and live demo:** [swayam5342.github.io/plugit](https://swayam5342.github.io/plugit/)
+
 ![PlugIt: add an API, pick and inspect tools, lint, try a call, install into Claude Desktop](demo/demo.gif)
 
 PlugIt reads an OpenAPI 3.0/3.1 or Swagger 2.0 spec (or a Postman v2 collection) and serves the operations you pick as
@@ -13,9 +20,13 @@ stdio MCP client.
 - **Safe by default.** Read-only mode, private-network blocking, credentials bound to the
   base URL you pin, secrets only from the OS keyring or env vars, and redaction everywhere.
 - **Curated.** Pick, rename and describe tools in a terminal UI with a live token budget, so
-  a 1,000-operation API doesn't flood the model's context.
+  a 1,000-operation API doesn't flood the model's context. Keep only the response fields
+  you need, and lint every description for instructions hidden in a spec.
+- **Observable.** A live call inspector, per-tool stats and a one-shot `try` command, all
+  with secrets masked.
 
-> **Status:** pre-release (v0.1.0 in progress). Expect rough edges and config changes.
+> **Status:** v0.1.0, the first release. The CLI and the `plugit.yaml` format may still change
+> before 1.0; config changes come with a version bump and an automatic migration.
 
 ## Install
 
@@ -25,7 +36,9 @@ go install github.com/swayam5342/plugit/cmd/plugit@latest
 
 This needs Go (any recent version fetches the 1.26.7 toolchain plugit asks for) and puts
 `plugit` in `~/go/bin` (`%USERPROFILE%\go\bin` on Windows), which should be on your `PATH`.
-Without Go, download the archive for your platform from the GitHub releases.
+Without Go, download the archive for your platform from the
+[latest release](https://github.com/swayam5342/plugit/releases/latest) and put `plugit` on
+your `PATH`. Builds exist for Windows, macOS and Linux on amd64 and arm64.
 
 Release archives on GitHub come with SHA-256 checksums, a cosign signature, SBOMs and
 build provenance. See [Verifying a release](#verifying-a-release).
@@ -84,6 +97,19 @@ For JSON configs, `install` shows a diff, backs the file up and asks before writ
 plugit's own entry changes, and it never contains a secret. Claude Code and Codex own their
 configs, so plugit runs their CLI instead, or prints the command if the CLI isn't on PATH.
 Any other stdio MCP client works too: point it at `plugit serve <name>`.
+
+### Policy modes
+
+| `policy.mode` | Read tools (GET, HEAD, OPTIONS) | Write tools (POST, PUT, PATCH, DELETE) |
+|---|---|---|
+| `read-only` (default) | offered | not offered; the model never sees them |
+| `confirm-writes` | offered | offered; the client asks you before each call (refused if it can't ask) |
+| `full` | offered | offered and run without asking |
+
+Switch with `m` in the picker (`plugit add`, or `plugit edit <name>` later). Moving to `full`
+takes a second press. Then reconnect your client (in Claude Code, `/mcp`); no reinstall is
+needed, because the client's entry is just `plugit serve <name>`. Per tool, `p` adds
+`confirm` or `deny` on top, which can only make a tool stricter.
 
 Already have a working `plugit run` command line? Turn it into a saved config:
 
