@@ -203,20 +203,9 @@ func Build(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*
 		return nil, fmt.Errorf("%w: path parameter %s has no value", ErrBuild, ph)
 	}
 
-	var body []byte
-	switch {
-	case hasBodyRoot:
-		b, err := json.Marshal(bodyRoot)
-		if err != nil {
-			return nil, fmt.Errorf("%w: encoding body: %w", ErrBadArgument, err)
-		}
-		body = b
-	case len(bodyFields) > 0:
-		b, err := json.Marshal(bodyFields)
-		if err != nil {
-			return nil, fmt.Errorf("%w: encoding body: %w", ErrBadArgument, err)
-		}
-		body = b
+	body, contentType, err := encodeBody(t.Body, bodyFields, bodyRoot, hasBodyRoot)
+	if err != nil {
+		return nil, err
 	}
 
 	u := joinURL(tg.BaseURL, path)
@@ -231,7 +220,7 @@ func Build(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*
 	}
 	maps.Copy(req.Header, header)
 	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", contentType)
 	}
 	req.Header.Set("Accept", "application/json, */*;q=0.8")
 	if tg.UserAgent != "" {

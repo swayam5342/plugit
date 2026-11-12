@@ -160,9 +160,18 @@ type Param struct {
 
 // Body is a tool's request body.
 type Body struct {
-	ContentType string          `json:"contentType"`
-	Schema      json.RawMessage `json:"schema"`
-	Required    bool            `json:"required,omitempty"`
+	ContentType string              `json:"contentType"` // application/json, application/x-www-form-urlencoded or multipart/form-data
+	Schema      json.RawMessage     `json:"schema"`
+	Required    bool                `json:"required,omitempty"`
+	Encoding    map[string]Encoding `json:"encoding,omitempty"` // form fields with an explicit OpenAPI encoding
+}
+
+// Encoding is how one form field is serialized (an OpenAPI encoding
+// object, with explode resolved). Fields without one use style form,
+// explode true.
+type Encoding struct {
+	Style   string `json:"style,omitempty"` // "form" or "deepObject"
+	Explode bool   `json:"explode"`
 }
 
 // IssueKind classifies an ingest problem. Lint rules map these to findings.

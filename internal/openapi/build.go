@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"unicode"
@@ -213,17 +214,32 @@ func (b *builder) v3Op(method, path string, item *v3.PathItem, op *v3.Operation)
 	}
 
 	if rb := op.RequestBody; rb != nil && rb.Content != nil && rb.Content.Len() > 0 {
+		// JSON first, then a URL-encoded form, then multipart (SPEC M6
+		// design note: form and multipart bodies).
 		var all []string
-		found := false
+		var jsonMT, formMT, multiMT *v3.MediaType
 		for pair := rb.Content.First(); pair != nil; pair = pair.Next() {
 			ct := normalizeMediaType(pair.Key())
 			all = append(all, ct)
-			if !found && isJSON(ct) && pair.Value() != nil {
-				found = true
-				t.Body = &model.Body{ContentType: "application/json", Schema: c.raw(pair.Value().Schema), Required: rb.Required != nil && *rb.Required}
+			switch mt := pair.Value(); {
+			case mt == nil:
+			case isJSON(ct) && jsonMT == nil:
+				jsonMT = mt
+			case ct == ctForm && formMT == nil:
+				formMT = mt
+			case ct == ctMultipart && multiMT == nil:
+				multiMT = mt
 			}
 		}
-		if !found {
+		required := rb.Required != nil && *rb.Required
+		switch {
+		case jsonMT != nil:
+			t.Body = &model.Body{ContentType: "application/json", Schema: c.raw(jsonMT.Schema), Required: required}
+		case formMT != nil:
+			t.Body = formBody(c, ctForm, c.raw(formMT.Schema), v3Encodings(formMT), required)
+		case multiMT != nil:
+			t.Body = formBody(c, ctMultipart, c.raw(multiMT.Schema), v3Encodings(multiMT), required)
+		default:
 			c.issue(model.IssueUnsupported, "request body content type(s) not supported yet: %s", strings.Join(all, ", "))
 		}
 	}
@@ -289,6 +305,9 @@ func (b *builder) v2Op(method, path string, item *v2.PathItem, op *v2.Operation,
 		consumes = globalConsumes
 	}
 
+	form := map[string]any{}
+	var formRequired []any
+	formAnyRequired := false
 	for _, p := range mergeParams(item.Parameters, op.Parameters, func(p *v2.Parameter) (string, string) { return p.In, p.Name }) {
 		switch strings.ToLower(p.In) {
 		case "body":
@@ -299,17 +318,126 @@ func (b *builder) v2Op(method, path string, item *v2.PathItem, op *v2.Operation,
 			}
 			t.Body = &model.Body{ContentType: ct, Schema: c.raw(p.Schema), Required: p.Required != nil && *p.Required}
 		case "formdata":
-			c.issue(model.IssueUnsupported, "formData parameter %q not supported yet", p.Name)
+			prop := v2ParamSchema(c, p)
+			if d := naming.CleanText(p.Description, b.opts.MaxDescription); d != "" {
+				prop["description"] = d
+			}
+			form[p.Name] = prop
+			if p.Required != nil && *p.Required {
+				formRequired = append(formRequired, p.Name)
+				formAnyRequired = true
+			}
 		default:
 			b.addParam(t, c, p.Name, p.In, p.Required != nil && *p.Required, p.Description, mustJSON(v2ParamSchema(c, p)))
 		}
+	}
+	if len(form) > 0 && t.Body == nil {
+		ct := ctForm
+		if slices.ContainsFunc(consumes, func(x string) bool { return normalizeMediaType(x) == ctMultipart }) &&
+			!slices.ContainsFunc(consumes, func(x string) bool { return normalizeMediaType(x) == ctForm }) {
+			ct = ctMultipart
+		}
+		obj := map[string]any{"type": "object", "properties": form}
+		if len(formRequired) > 0 {
+			obj["required"] = formRequired
+		}
+		// Swagger 2.0 formData arrays default to collectionFormat csv; multi
+		// (repeated keys) is the OpenAPI 3 form default plugit sends.
+		t.Body = formBody(c, ct, mustJSON(obj), nil, formAnyRequired)
 	}
 	t.Issues = c.issues
 	b.addOp(t, op.OperationId)
 }
 
+// Form content types.
+const (
+	ctForm      = "application/x-www-form-urlencoded"
+	ctMultipart = "multipart/form-data"
+)
+
+// formBody models a form or multipart body. Its schema must be an object
+// (its fields become parameters like a JSON body's). File fields are
+// dropped with an issue, since their content can't come from a model; if
+// one is required, the body isn't modelled at all.
+func formBody(c *converter, ct string, raw json.RawMessage, enc map[string]model.Encoding, required bool) *model.Body {
+	var schema map[string]any
+	if json.Unmarshal(raw, &schema) != nil || (schema["type"] != nil && schema["type"] != "object") {
+		c.issue(model.IssueUnsupported, "%s body schema is not an object, so it can't be sent as fields", ct)
+		return nil
+	}
+	props, _ := schema["properties"].(map[string]any)
+	req, _ := schema["required"].([]any)
+	for _, name := range slices.Sorted(maps.Keys(props)) {
+		if !isFileField(props[name]) {
+			continue
+		}
+		delete(props, name)
+		if slices.Contains(req, any(name)) {
+			c.issue(model.IssueUnsupported, "%s body needs the file field %q, which plugit can't send (file content can't come from a model)", ct, name)
+			return nil
+		}
+		c.issue(model.IssueUnsupported, "file field %q left out of the %s body (file content can't come from a model)", name, ct)
+	}
+	if len(props) == 0 {
+		// No declared fields: nothing a model could fill in (Stripe puts an
+		// empty form body on its GET and DELETE operations).
+		return nil
+	}
+	for k := range enc {
+		if _, ok := props[k]; !ok {
+			delete(enc, k)
+		}
+	}
+	if len(enc) == 0 {
+		enc = nil
+	}
+	return &model.Body{ContentType: ct, Schema: mustJSON(schema), Required: required, Encoding: enc}
+}
+
+// isFileField reports a schema whose value is file content.
+func isFileField(v any) bool {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return false
+	}
+	if m["type"] == "file" || m["format"] == "binary" {
+		return true
+	}
+	_, media := m["contentMediaType"]
+	_, encoding := m["contentEncoding"]
+	return media || encoding
+}
+
+// v3Encodings reads a media type's per-field encoding, resolving explode:
+// it defaults to true for style form and false otherwise (OpenAPI 3).
+func v3Encodings(mt *v3.MediaType) map[string]model.Encoding {
+	if mt.Encoding == nil || mt.Encoding.Len() == 0 {
+		return nil
+	}
+	out := map[string]model.Encoding{}
+	for pair := mt.Encoding.First(); pair != nil; pair = pair.Next() {
+		e := pair.Value()
+		if e == nil {
+			continue
+		}
+		style := e.Style
+		if style == "" {
+			style = "form"
+		}
+		if style != "form" && style != "deepObject" {
+			continue // spaceDelimited and friends: send with the default
+		}
+		explode := style == "form"
+		if e.Explode != nil {
+			explode = *e.Explode
+		}
+		out[pair.Key()] = model.Encoding{Style: style, Explode: explode}
+	}
+	return out
+}
+
 func v2ParamSchema(c *converter, p *v2.Parameter) map[string]any {
-	if p.Type == "file" {
+	if p.Type == "file" && !strings.EqualFold(p.In, "formData") {
 		c.issue(model.IssueUnsupported, "file parameter %q not supported yet", p.Name)
 	}
 	out := map[string]any{}

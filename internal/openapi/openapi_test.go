@@ -295,7 +295,11 @@ paths:
       requestBody:
         content:
           multipart/form-data:
-            schema: {type: object}
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: {type: string, format: binary}
       responses: {'200': {description: ok}}
   /echo:
     trace:
@@ -306,10 +310,10 @@ paths:
 	m := parse(t, src, Options{})
 	up := tool(t, m, "POST /upload")
 	if up.Body != nil {
-		t.Error("multipart body should not be modelled")
+		t.Error("a body whose required field is a file should not be modelled")
 	}
-	if !hasIssue(up, model.IssueUnsupported, "multipart/form-data") {
-		t.Errorf("missing multipart issue: %+v", up.Issues)
+	if !hasIssue(up, model.IssueUnsupported, "file") {
+		t.Errorf("missing file-field issue: %+v", up.Issues)
 	}
 	if !hasIssue(up, model.IssueUnsupported, "cookie") {
 		t.Errorf("missing cookie issue: %+v", up.Issues)
@@ -731,8 +735,8 @@ func TestParseSwagger2(t *testing.T) {
 	}
 
 	av := tool(t, m, "POST /avatar")
-	if !hasIssue(av, model.IssueUnsupported, "formData") {
-		t.Errorf("missing formData issue: %+v", av.Issues)
+	if !hasIssue(av, model.IssueUnsupported, "file") || av.Body != nil {
+		t.Errorf("file-only formData: body %+v, issues %+v", av.Body, av.Issues)
 	}
 }
 
@@ -771,5 +775,143 @@ func TestParseWritesNothingToStdout(t *testing.T) {
 	out, _ := io.ReadAll(r)
 	if len(out) != 0 {
 		t.Errorf("Parse wrote to stdout: %q", out)
+	}
+}
+
+// Form and multipart bodies (SPEC M6 design note): JSON is preferred, the
+// encoding of each field is kept, binary fields are dropped with an issue.
+func TestParseFormBodies(t *testing.T) {
+	src := `
+openapi: 3.0.3
+info: {title: T, version: '1'}
+paths:
+  /customers:
+    post:
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: {type: string}
+                metadata: {type: object, additionalProperties: {type: string}}
+                tags: {type: array, items: {type: string}}
+            encoding:
+              metadata: {style: deepObject, explode: true}
+              tags: {style: form, explode: false}
+      responses: {'200': {description: ok}}
+  /notes:
+    post:
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                title: {type: string}
+                attachment: {type: string, format: binary}
+      responses: {'200': {description: ok}}
+  /both:
+    post:
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema: {type: object, properties: {a: {type: string}}}
+          application/json:
+            schema: {type: object, properties: {a: {type: string}}}
+      responses: {'200': {description: ok}}
+  /empty:
+    get:
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema: {type: object, properties: {}, additionalProperties: false}
+      responses: {'200': {description: ok}}
+  /scalar:
+    post:
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema: {type: string}
+      responses: {'200': {description: ok}}
+`
+	m := parse(t, src, Options{})
+	c := tool(t, m, "POST /customers")
+	if c.Body == nil || c.Body.ContentType != "application/x-www-form-urlencoded" || !c.Body.Required {
+		t.Fatalf("form body = %+v", c.Body)
+	}
+	want := map[string]model.Encoding{"metadata": {Style: "deepObject", Explode: true}, "tags": {Style: "form", Explode: false}}
+	if !reflect.DeepEqual(c.Body.Encoding, want) {
+		t.Errorf("encoding = %+v", c.Body.Encoding)
+	}
+	if hasIssue(c, model.IssueUnsupported, "") {
+		t.Errorf("form body flagged unsupported: %+v", c.Issues)
+	}
+
+	n := tool(t, m, "POST /notes")
+	if n.Body == nil || n.Body.ContentType != "multipart/form-data" {
+		t.Fatalf("multipart body = %+v", n.Body)
+	}
+	if strings.Contains(string(n.Body.Schema), "attachment") || !strings.Contains(string(n.Body.Schema), "title") {
+		t.Errorf("binary field kept: %s", n.Body.Schema)
+	}
+	if !hasIssue(n, model.IssueUnsupported, "attachment") {
+		t.Errorf("dropped field not reported: %+v", n.Issues)
+	}
+
+	if b := tool(t, m, "POST /both"); b.Body == nil || b.Body.ContentType != "application/json" {
+		t.Errorf("JSON should win: %+v", b.Body)
+	}
+	// Stripe declares an empty form body on GET and DELETE: nothing to send,
+	// so no body and no "body" parameter.
+	if e := tool(t, m, "GET /empty"); e.Body != nil || len(e.Issues) != 0 {
+		t.Errorf("empty form body: %+v, %+v", e.Body, e.Issues)
+	}
+	if sc := tool(t, m, "POST /scalar"); sc.Body != nil || !hasIssue(sc, model.IssueUnsupported, "object") {
+		t.Errorf("non-object form body: %+v, %+v", sc.Body, sc.Issues)
+	}
+}
+
+func TestParseSwagger2FormData(t *testing.T) {
+	src := `
+swagger: '2.0'
+info: {title: T, version: '1'}
+host: api.example.test
+paths:
+  /pets/{id}:
+    post:
+      consumes: [application/x-www-form-urlencoded]
+      parameters:
+        - {name: id, in: path, required: true, type: integer}
+        - {name: name, in: formData, required: true, type: string, description: New name}
+        - {name: status, in: formData, type: string, enum: [available, sold]}
+        - {name: tags, in: formData, type: array, items: {type: string}, collectionFormat: multi}
+      responses: {'200': {description: ok}}
+  /pets/{id}/photo:
+    post:
+      consumes: [multipart/form-data]
+      parameters:
+        - {name: id, in: path, required: true, type: integer}
+        - {name: caption, in: formData, type: string}
+        - {name: file, in: formData, type: file}
+      responses: {'200': {description: ok}}
+`
+	m := parse(t, src, Options{})
+	up := tool(t, m, "POST /pets/{id}")
+	if up.Body == nil || up.Body.ContentType != "application/x-www-form-urlencoded" || !up.Body.Required {
+		t.Fatalf("body = %+v", up.Body)
+	}
+	assertJSON(t, "form schema", up.Body.Schema, `{"type":"object","required":["name"],"properties":{"name":{"type":"string","description":"New name"},"status":{"type":"string","enum":["available","sold"]},"tags":{"type":"array","items":{"type":"string"}}}}`)
+	if len(up.Params) != 1 || up.Params[0].Name != "id" {
+		t.Errorf("params = %+v", up.Params)
+	}
+	ph := tool(t, m, "POST /pets/{id}/photo")
+	if ph.Body == nil || ph.Body.ContentType != "multipart/form-data" || strings.Contains(string(ph.Body.Schema), `"file"`) {
+		t.Errorf("multipart body = %+v", ph.Body)
+	}
+	if !hasIssue(ph, model.IssueUnsupported, "file") {
+		t.Errorf("file field not reported: %+v", ph.Issues)
 	}
 }
