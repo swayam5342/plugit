@@ -3,12 +3,15 @@ package cli
 import (
 	"cmp"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -36,13 +39,17 @@ import (
 const defaultToolset = "default"
 
 type serveSettings struct {
-	paths   config.Paths
-	name    string
-	toolset string // "" means default
+	paths    config.Paths
+	name     string
+	toolset  string       // "" means default
+	http     string       // listen address for the HTTP transport; "" serves stdio
+	newToken bool         // with http: replace the stored token
+	ready    func(string) // with http: called with the endpoint URL once listening
 }
 
 func newServeCmd(g *globalFlags, info BuildInfo) *cobra.Command {
-	var toolset string
+	var toolset, httpAddr string
+	var newToken bool
 	cmd := &cobra.Command{
 		Use:   "serve <name>",
 		Short: "Serve a saved API as MCP tools on stdio (run by the MCP client)",
@@ -50,14 +57,20 @@ func newServeCmd(g *globalFlags, info BuildInfo) *cobra.Command {
 
 MCP clients run this command; stdout carries JSON-RPC and logs go to stderr.
 Credentials come from the keyring or environment variables named in
-plugit.yaml, never from the client config.`,
+plugit.yaml, never from the client config.
+
+--http ADDR serves Streamable HTTP instead, on loopback only (":8931" is
+127.0.0.1:8931), at http://ADDR/mcp. Every request needs the header
+"Authorization: Bearer <token>"; the token is generated once and kept in an
+owner-only file (its path is printed, the token never is); --new-token
+replaces it. Browser requests from non-loopback origins are refused.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p, err := g.paths()
 			if err != nil {
 				return err
 			}
-			return serveAPI(cmd.Context(), serveSettings{paths: p, name: args[0], toolset: toolset}, runDeps{
+			return serveAPI(cmd.Context(), serveSettings{paths: p, name: args[0], toolset: toolset, http: httpAddr, newToken: newToken}, runDeps{
 				transport: &mcp.StdioTransport{},
 				stderr:    cmd.ErrOrStderr(),
 				resolver:  secrets.NewResolver(),
@@ -67,12 +80,19 @@ plugit.yaml, never from the client config.`,
 		},
 	}
 	cmd.Flags().StringVar(&toolset, "toolset", defaultToolset, "toolset to serve")
+	cmd.Flags().StringVar(&httpAddr, "http", "", "serve Streamable HTTP on this loopback address (e.g. :8931) instead of stdio")
+	cmd.Flags().BoolVar(&newToken, "new-token", false, "with --http, replace the stored token")
 	return cmd
 }
 
 // serveAPI loads a saved API and serves it. It returns before serving on any
 // setup error. Nothing here writes to stdout: it carries JSON-RPC.
 func serveAPI(ctx context.Context, s serveSettings, d runDeps) error {
+	if s.http != "" {
+		if _, err := mcpserver.ListenAddr(s.http); err != nil {
+			return err // before anything is loaded or opened
+		}
+	}
 	logger := slog.New(slog.NewTextHandler(d.stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	a, err := loadActive(ctx, s, d, logger)
 	if err != nil {
@@ -96,7 +116,7 @@ func serveAPI(ctx context.Context, s serveSettings, d runDeps) error {
 	}
 	callLog, closeLog := openCallLog(ctx, s.paths, a, logger)
 	defer closeLog()
-	return mcpserver.Serve(ctx, mcpserver.Config{
+	cfg := mcpserver.Config{
 		Log:      callLog,
 		Limit:    apiLimit,
 		Name:     "plugit-" + a.cfg.Name,
@@ -107,7 +127,55 @@ func serveAPI(ctx context.Context, s serveSettings, d runDeps) error {
 		Doer:     a.doer,
 		Redactor: a.red,
 		Logger:   logger,
-	}, d.transport)
+	}
+	if s.http == "" {
+		return mcpserver.Serve(ctx, cfg, d.transport)
+	}
+	addr, err := mcpserver.ListenAddr(s.http)
+	if err != nil {
+		return err
+	}
+	token, tokenPath, err := httpToken(s.paths, a.cfg.Name, s.newToken)
+	if err != nil {
+		return err
+	}
+	return mcpserver.ServeHTTP(ctx, cfg, addr, token, func(endpoint string) {
+		// The token itself is never logged: only where to find it.
+		logger.Info("plugit serve listening (Streamable HTTP)", "url", endpoint, "token_file", tokenPath,
+			"header", "Authorization: Bearer <contents of token_file>")
+		if s.ready != nil {
+			s.ready(endpoint)
+		}
+	})
+}
+
+// httpToken returns the API's HTTP transport token, creating it (32
+// random bytes, base64url) on first use or with rotate. The file is
+// owner-only and written atomically.
+func httpToken(p config.Paths, name string, rotate bool) (token, path string, err error) {
+	path, err = p.HTTPToken(name)
+	if err != nil {
+		return "", "", err
+	}
+	if !rotate {
+		if b, err := os.ReadFile(path); err == nil { // #nosec G304 -- plugit's own token file
+			if t := strings.TrimSpace(string(b)); len(t) >= 32 && len(t) <= 256 {
+				return t, path, nil
+			}
+		}
+	}
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", "", err
+	}
+	token = base64.RawURLEncoding.EncodeToString(raw)
+	if err := config.EnsureDir(filepath.Dir(path)); err != nil {
+		return "", "", err
+	}
+	if err := config.WriteFileAtomic(path, []byte(token+"\n")); err != nil {
+		return "", "", err
+	}
+	return token, path, nil
 }
 
 // openCallLog opens the call log, prunes the API's calls older than

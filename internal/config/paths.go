@@ -79,6 +79,14 @@ func (p Paths) GlobalConfig() string { return filepath.Join(p.root, "config.yaml
 // DB is the path of the sqlite call log.
 func (p Paths) DB() string { return filepath.Join(p.root, "data", "plugit.db") }
 
+// HTTPToken is the file holding an API's HTTP transport token.
+func (p Paths) HTTPToken(name string) (string, error) {
+	if err := ValidateAPIName(name); err != nil {
+		return "", err
+	}
+	return filepath.Join(p.root, "data", "http", name+".token"), nil
+}
+
 // APIDir is the directory holding one API's config and spec snapshot.
 func (p Paths) APIDir(name string) (string, error) {
 	if err := ValidateAPIName(name); err != nil {

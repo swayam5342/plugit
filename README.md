@@ -93,6 +93,20 @@ Already have a working `plugit run` command line? Turn it into a saved config:
 plugit add pets https://petstore.swagger.io/v2/swagger.json --from-run --tags pet --base-url https://petstore.swagger.io/v2
 ```
 
+### Over HTTP instead of stdio
+
+For clients that connect to a URL, serve on loopback:
+
+```sh
+plugit serve github --http :8931
+#   listening on http://127.0.0.1:8931/mcp; the token is in the file it names
+claude mcp add --transport http github http://127.0.0.1:8931/mcp \
+  --header "Authorization: Bearer $(cat <token file>)"
+```
+
+Only loopback addresses are accepted, every request needs the token, and browser requests
+from other origins are refused. `--new-token` replaces the token.
+
 ## Commands
 
 | Command | What it does |
