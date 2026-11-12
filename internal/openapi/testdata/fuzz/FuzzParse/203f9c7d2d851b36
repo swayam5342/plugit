@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("openapi: 3.0\no: e\n#\npaths:\n e:\n  t:\n      requestBody:\n       content:\n        a: {$ref: '/comprnents/schemas/Tree'}\n      responses: {'200': {description: ok}}\ncomponents:\n  schemas:\n    Tree:\n      type: object\n      properties:\n        children: {type: array, items: {$ref: '#/components/sc99hemas/Tree'}}\n        other: {$ref: '#/components/schemas/Forest'}\n    Forest:")

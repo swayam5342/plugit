@@ -1,0 +1,404 @@
+openapi: 3.0.3
+info: {title: hostile, version: '1'}
+# 100 operations whose names all slugify to get_item. Names must stay unique and valid.
+paths:
+  /item/v00:
+    get:
+      operationId: 'get item!'
+      responses: {'200': {description: ok}}
+  /item/v01:
+    get:
+      operationId: 'get item!!'
+      responses: {'200': {description: ok}}
+  /item/v02:
+    get:
+      operationId: 'get item!!!'
+      responses: {'200': {description: ok}}
+  /item/v03:
+    get:
+      operationId: 'get item!!!!'
+      responses: {'200': {description: ok}}
+  /item/v04:
+    get:
+      operationId: 'get item!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v05:
+    get:
+      operationId: 'get item!!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v06:
+    get:
+      operationId: 'get item!!!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v07:
+    get:
+      operationId: 'get item!'
+      responses: {'200': {description: ok}}
+  /item/v08:
+    get:
+      operationId: 'get item!!'
+      responses: {'200': {description: ok}}
+  /item/v09:
+    get:
+      operationId: 'get item!!!'
+      responses: {'200': {description: ok}}
+  /item/v10:
+    get:
+      operationId: 'get item!!!!'
+      responses: {'200': {description: ok}}
+  /item/v11:
+    get:
+      operationId: 'get item!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v12:
+    get:
+      operationId: 'get item!!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v13:
+    get:
+      operationId: 'get item!!!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v14:
+    get:
+      operationId: 'get item!'
+      responses: {'200': {description: ok}}
+  /item/v15:
+    get:
+      operationId: 'get item!!'
+      responses: {'200': {description: ok}}
+  /item/v16:
+    get:
+      operationId: 'get item!!!'
+      responses: {'200': {description: ok}}
+  /item/v17:
+    get:
+      operationId: 'get item!!!!'
+      responses: {'200': {description: ok}}
+  /item/v18:
+    get:
+      operationId: 'get item!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v19:
+    get:
+      operationId: 'get item!!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v20:
+    get:
+      operationId: 'get item!!!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v21:
+    get:
+      operationId: 'get item!'
+      responses: {'200': {description: ok}}
+  /item/v22:
+    get:
+      operationId: 'get item!!'
+      responses: {'200': {description: ok}}
+  /item/v23:
+    get:
+      operationId: 'get item!!!'
+      responses: {'200': {description: ok}}
+  /item/v24:
+    get:
+      operationId: 'get item!!!!'
+      responses: {'200': {description: ok}}
+  /item/v25:
+    get:
+      operationId: 'get item!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v26:
+    get:
+      operationId: 'get item!!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v27:
+    get:
+      operationId: 'get item!!!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v28:
+    get:
+      operationId: 'get item!'
+      responses: {'200': {description: ok}}
+  /item/v29:
+    get:
+      operationId: 'get item!!'
+      responses: {'200': {description: ok}}
+  /item/v30:
+    get:
+      operationId: 'get item!!!'
+      responses: {'200': {description: ok}}
+  /item/v31:
+    get:
+      operationId: 'get item!!!!'
+      responses: {'200': {description: ok}}
+  /item/v32:
+    get:
+      operationId: 'get item!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v33:
+    get:
+      operationId: 'get item!!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v34:
+    get:
+      operationId: 'get item!!!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v35:
+    get:
+      operationId: 'get item!'
+      responses: {'200': {description: ok}}
+  /item/v36:
+    get:
+      operationId: 'get item!!'
+      responses: {'200': {description: ok}}
+  /item/v37:
+    get:
+      operationId: 'get item!!!'
+      responses: {'200': {description: ok}}
+  /item/v38:
+    get:
+      operationId: 'get item!!!!'
+      responses: {'200': {description: ok}}
+  /item/v39:
+    get:
+      operationId: 'get item!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v40:
+    get:
+      operationId: 'get item!!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v41:
+    get:
+      operationId: 'get item!!!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v42:
+    get:
+      operationId: 'get item!'
+      responses: {'200': {description: ok}}
+  /item/v43:
+    get:
+      operationId: 'get item!!'
+      responses: {'200': {description: ok}}
+  /item/v44:
+    get:
+      operationId: 'get item!!!'
+      responses: {'200': {description: ok}}
+  /item/v45:
+    get:
+      operationId: 'get item!!!!'
+      responses: {'200': {description: ok}}
+  /item/v46:
+    get:
+      operationId: 'get item!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v47:
+    get:
+      operationId: 'get item!!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v48:
+    get:
+      operationId: 'get item!!!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v49:
+    get:
+      operationId: 'get item!'
+      responses: {'200': {description: ok}}
+  /item/v50:
+    get:
+      operationId: 'get item!!'
+      responses: {'200': {description: ok}}
+  /item/v51:
+    get:
+      operationId: 'get item!!!'
+      responses: {'200': {description: ok}}
+  /item/v52:
+    get:
+      operationId: 'get item!!!!'
+      responses: {'200': {description: ok}}
+  /item/v53:
+    get:
+      operationId: 'get item!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v54:
+    get:
+      operationId: 'get item!!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v55:
+    get:
+      operationId: 'get item!!!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v56:
+    get:
+      operationId: 'get item!'
+      responses: {'200': {description: ok}}
+  /item/v57:
+    get:
+      operationId: 'get item!!'
+      responses: {'200': {description: ok}}
+  /item/v58:
+    get:
+      operationId: 'get item!!!'
+      responses: {'200': {description: ok}}
+  /item/v59:
+    get:
+      operationId: 'get item!!!!'
+      responses: {'200': {description: ok}}
+  /item/v60:
+    get:
+      operationId: 'get item!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v61:
+    get:
+      operationId: 'get item!!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v62:
+    get:
+      operationId: 'get item!!!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v63:
+    get:
+      operationId: 'get item!'
+      responses: {'200': {description: ok}}
+  /item/v64:
+    get:
+      operationId: 'get item!!'
+      responses: {'200': {description: ok}}
+  /item/v65:
+    get:
+      operationId: 'get item!!!'
+      responses: {'200': {description: ok}}
+  /item/v66:
+    get:
+      operationId: 'get item!!!!'
+      responses: {'200': {description: ok}}
+  /item/v67:
+    get:
+      operationId: 'get item!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v68:
+    get:
+      operationId: 'get item!!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v69:
+    get:
+      operationId: 'get item!!!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v70:
+    get:
+      operationId: 'get item!'
+      responses: {'200': {description: ok}}
+  /item/v71:
+    get:
+      operationId: 'get item!!'
+      responses: {'200': {description: ok}}
+  /item/v72:
+    get:
+      operationId: 'get item!!!'
+      responses: {'200': {description: ok}}
+  /item/v73:
+    get:
+      operationId: 'get item!!!!'
+      responses: {'200': {description: ok}}
+  /item/v74:
+    get:
+      operationId: 'get item!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v75:
+    get:
+      operationId: 'get item!!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v76:
+    get:
+      operationId: 'get item!!!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v77:
+    get:
+      operationId: 'get item!'
+      responses: {'200': {description: ok}}
+  /item/v78:
+    get:
+      operationId: 'get item!!'
+      responses: {'200': {description: ok}}
+  /item/v79:
+    get:
+      operationId: 'get item!!!'
+      responses: {'200': {description: ok}}
+  /item/v80:
+    get:
+      operationId: 'get item!!!!'
+      responses: {'200': {description: ok}}
+  /item/v81:
+    get:
+      operationId: 'get item!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v82:
+    get:
+      operationId: 'get item!!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v83:
+    get:
+      operationId: 'get item!!!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v84:
+    get:
+      operationId: 'get item!'
+      responses: {'200': {description: ok}}
+  /item/v85:
+    get:
+      operationId: 'get item!!'
+      responses: {'200': {description: ok}}
+  /item/v86:
+    get:
+      operationId: 'get item!!!'
+      responses: {'200': {description: ok}}
+  /item/v87:
+    get:
+      operationId: 'get item!!!!'
+      responses: {'200': {description: ok}}
+  /item/v88:
+    get:
+      operationId: 'get item!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v89:
+    get:
+      operationId: 'get item!!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v90:
+    get:
+      operationId: 'get item!!!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v91:
+    get:
+      operationId: 'get item!'
+      responses: {'200': {description: ok}}
+  /item/v92:
+    get:
+      operationId: 'get item!!'
+      responses: {'200': {description: ok}}
+  /item/v93:
+    get:
+      operationId: 'get item!!!'
+      responses: {'200': {description: ok}}
+  /item/v94:
+    get:
+      operationId: 'get item!!!!'
+      responses: {'200': {description: ok}}
+  /item/v95:
+    get:
+      operationId: 'get item!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v96:
+    get:
+      operationId: 'get item!!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v97:
+    get:
+      operationId: 'get item!!!!!!!'
+      responses: {'200': {description: ok}}
+  /item/v98:
+    get:
+      operationId: 'get item!'
+      responses: {'200': {description: ok}}
+  /item/v99:
+    get:
+      operationId: 'get item!!'
+      responses: {'200': {description: ok}}

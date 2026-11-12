@@ -1,0 +1,11 @@
+openapi: 3.0.3
+info: {title: hostile, version: '1'}
+# T6: used by the proxy tests (M2). A path param that will receive "..", "%2e%2e" and "a/b",
+# and a header param that will receive CR/LF.
+paths:
+  /files/{name}:
+    get:
+      parameters:
+        - {name: name, in: path, required: true, schema: {type: string}}
+        - {name: X-Note, in: header, schema: {type: string}}
+      responses: {'200': {description: ok}}

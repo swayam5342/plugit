@@ -5,9 +5,32 @@ package cli
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/spf13/cobra"
+
+	"github.com/swayam5342/plugit/internal/isolate"
 )
+
+// Main runs plugit with args (without the program name) and returns the
+// process exit code. The hidden isolate.ChildArg first argument turns the
+// process into a spec-parse child (see package isolate); it is not a cobra
+// command, so it never appears in help.
+func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, info BuildInfo) int {
+	if len(args) > 0 && args[0] == isolate.ChildArg {
+		return isolate.ChildMain(stdin, stdout)
+	}
+	root := NewRootCmd(info)
+	root.SetArgs(args)
+	root.SetIn(stdin)
+	root.SetOut(stdout)
+	root.SetErr(stderr)
+	if err := root.Execute(); err != nil {
+		_, _ = fmt.Fprintln(stderr, "plugit:", err)
+		return 1
+	}
+	return 0
+}
 
 // BuildInfo describes the running binary. Values are injected at build time
 // with -ldflags; empty fields fall back to development defaults.

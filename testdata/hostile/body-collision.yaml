@@ -1,0 +1,32 @@
+openapi: 3.0.3
+info: {title: hostile, version: '1'}
+# Body fields that clash with path/query params, including a body_<name> double collision.
+paths:
+  /things/{id}:
+    put:
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+        - {name: name, in: query, schema: {type: string}}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id: {type: integer}
+                name: {type: string}
+                other: {type: string}
+      responses: {'200': {description: ok}}
+  /double/{id}:
+    put:
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id: {type: integer}
+                body_id: {type: integer}
+      responses: {'200': {description: ok}}

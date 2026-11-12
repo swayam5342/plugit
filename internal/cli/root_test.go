@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/base64"
 	"strings"
 	"testing"
 )
@@ -50,6 +51,36 @@ func TestRootHelpListsVersion(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "version") {
 		t.Errorf("help output does not list the version command:\n%s", out.String())
+	}
+}
+
+func TestMainDispatchesParseChild(t *testing.T) {
+	spec := "openapi: 3.0.3\ninfo: {title: T, version: '1'}\npaths:\n  /x:\n    get:\n      operationId: getX\n      responses: {'200': {description: ok}}\n"
+	req := `{"spec":"` + base64.StdEncoding.EncodeToString([]byte(spec)) + `"}`
+	var out, errb bytes.Buffer
+	code := Main([]string{"__parse"}, strings.NewReader(req), &out, &errb, BuildInfo{})
+	if code != 0 {
+		t.Fatalf("exit code %d, stderr %q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), `"name":"getX"`) {
+		t.Errorf("stdout = %q, want a manifest with getX", out.String())
+	}
+}
+
+func TestMainExitCodes(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := Main([]string{"version"}, strings.NewReader(""), &out, &errb, BuildInfo{Version: "v9"}); code != 0 || !strings.Contains(out.String(), "v9") {
+		t.Errorf("version: code=%d out=%q", code, out.String())
+	}
+	out.Reset()
+	if code := Main([]string{"no-such-command"}, strings.NewReader(""), &out, &errb, BuildInfo{}); code != 1 {
+		t.Errorf("unknown command exit code = %d, want 1", code)
+	}
+	if !strings.HasPrefix(errb.String(), "plugit: ") {
+		t.Errorf("stderr = %q, want a plugit: error line", errb.String())
+	}
+	if out.Len() != 0 {
+		t.Errorf("errors must not go to stdout, got %q", out.String())
 	}
 }
 

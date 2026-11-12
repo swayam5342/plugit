@@ -1,0 +1,12 @@
+openapi: 3.0.3
+info: {title: hostile, version: '1'}
+# T1: file $refs aimed at local secrets. Must never be read.
+paths:
+  /x:
+    get:
+      parameters:
+        - {name: a, in: query, schema: {$ref: 'file:///etc/passwd'}}
+        - {name: b, in: query, schema: {$ref: '..\..\Windows\win.ini'}}
+        - {name: c, in: query, schema: {$ref: '../../../../etc/shadow#/x'}}
+        - {name: d, in: query, schema: {$ref: 'C:/Windows/System32/drivers/etc/hosts'}}
+      responses: {'200': {description: ok}}

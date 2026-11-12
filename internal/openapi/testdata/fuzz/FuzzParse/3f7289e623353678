@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("swagger: \"2.0\"\npaths:\n  /\x7f:\n    put:")

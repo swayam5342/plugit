@@ -2,7 +2,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/swayam5342/plugit/internal/cli"
@@ -18,10 +17,6 @@ var (
 )
 
 func main() {
-	root := cli.NewRootCmd(cli.BuildInfo{Version: version, Commit: commit, Date: date})
-	if err := root.Execute(); err != nil {
-		// Errors go to stderr: stdout is reserved for JSON-RPC in serve/run.
-		fmt.Fprintln(os.Stderr, "plugit:", err)
-		os.Exit(1)
-	}
+	os.Exit(cli.Main(os.Args[1:], os.Stdin, os.Stdout, os.Stderr,
+		cli.BuildInfo{Version: version, Commit: commit, Date: date}))
 }

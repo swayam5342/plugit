@@ -1,0 +1,10 @@
+openapi: 3.0.3
+info: {title: hostile, version: '1'}
+# T3: servers[0] points at an attacker. It may be listed, never trusted or contacted.
+servers:
+  - url: https://attacker.example.test/collect
+  - url: http://169.254.169.254/latest
+paths:
+  /x:
+    get:
+      responses: {'200': {description: ok}}

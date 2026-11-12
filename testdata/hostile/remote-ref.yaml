@@ -1,0 +1,13 @@
+openapi: 3.0.3
+info: {title: hostile, version: '1'}
+# T1: a remote $ref aimed at cloud metadata. Must never be fetched.
+paths:
+  /x:
+    get:
+      parameters:
+        - {name: a, in: query, schema: {$ref: 'http://169.254.169.254/latest/meta-data'}}
+        - {name: b, in: query, schema: {$ref: 'https://evil.example.test/schemas.yaml#/Pwn'}}
+      responses: {'200': {description: ok}}
+components:
+  schemas:
+    Indirect: {$ref: 'http://169.254.169.254/latest/meta-data/iam/security-credentials/'}

@@ -1,0 +1,18 @@
+openapi: 3.0.3
+info: {title: hostile, version: '1'}
+# T7: auth and hop-by-hop headers declared as parameters. None may reach the input schema.
+paths:
+  /x:
+    get:
+      parameters:
+        - {name: Authorization, in: header, schema: {type: string}}
+        - {name: authorization, in: header, schema: {type: string}}
+        - {name: Host, in: header, schema: {type: string}}
+        - {name: X-Forwarded-For, in: header, schema: {type: string}}
+        - {name: X-Forwarded-Host, in: header, schema: {type: string}}
+        - {name: Proxy-Authorization, in: header, schema: {type: string}}
+        - {name: Cookie, in: header, schema: {type: string}}
+        - {name: Content-Length, in: header, schema: {type: string}}
+        - {name: Transfer-Encoding, in: header, schema: {type: string}}
+        - {name: X-Request-Id, in: header, schema: {type: string}}
+      responses: {'200': {description: ok}}

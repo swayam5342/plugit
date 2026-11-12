@@ -60,6 +60,8 @@ jobs:
       matrix:
         target:
           - { pkg: ./internal/redact, fn: FuzzStringNeverLeaksSecret }
+          - { pkg: ./internal/openapi, fn: FuzzParse }
+          - { pkg: ./internal/openapi, fn: FuzzRefCheck }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -68,7 +70,8 @@ jobs:
         with:
           go-version: stable
       - name: fuzz ${{ matrix.target.fn }} (short)
-        run: go test ${{ matrix.target.pkg }} -run '^$' -fuzz '^${{ matrix.target.fn }}$' -fuzztime 30s
+        # A short minimize time keeps the run fuzzing instead of shrinking inputs.
+        run: go test ${{ matrix.target.pkg }} -run '^$' -fuzz '^${{ matrix.target.fn }}$' -fuzztime 30s -fuzzminimizetime 5s
 
   vulncheck:
     runs-on: ubuntu-latest

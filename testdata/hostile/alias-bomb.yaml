@@ -1,0 +1,18 @@
+openapi: 3.0.3
+info: {title: hostile, version: '1'}
+# T2: "billion laughs". 9^9 expansions if aliases were followed naively.
+x-a: &a ["lol","lol","lol","lol","lol","lol","lol","lol","lol"]
+x-b: &b [*a,*a,*a,*a,*a,*a,*a,*a,*a]
+x-c: &c [*b,*b,*b,*b,*b,*b,*b,*b,*b]
+x-d: &d [*c,*c,*c,*c,*c,*c,*c,*c,*c]
+x-e: &e [*d,*d,*d,*d,*d,*d,*d,*d,*d]
+x-f: &f [*e,*e,*e,*e,*e,*e,*e,*e,*e]
+x-g: &g [*f,*f,*f,*f,*f,*f,*f,*f,*f]
+x-h: &h [*g,*g,*g,*g,*g,*g,*g,*g,*g]
+x-i: &i [*h,*h,*h,*h,*h,*h,*h,*h,*h]
+paths:
+  /x:
+    get:
+      parameters:
+        - {name: a, in: query, schema: {type: string, enum: *i}}
+      responses: {'200': {description: ok}}
