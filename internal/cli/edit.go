@@ -68,7 +68,7 @@ func editAPI(ctx context.Context, p config.Paths, name, toolset string, d addDep
 	if current.Tools == nil {
 		current.Tools = map[string]config.ToolOverride{}
 	}
-	ts, err := d.pick(ctx, pickInput{api: name, tools: tools, prefix: cfg.Prefix, mode: cfg.PolicyMode(), selected: current,
+	res, err := d.pick(ctx, pickInput{api: name, tools: tools, prefix: cfg.Prefix, mode: cfg.PolicyMode(), selected: current,
 		lint: pickerLint(*cfg, tsName, m.Tools)})
 	if errors.Is(err, tui.ErrCancelled) {
 		_, err := fmt.Fprintln(d.out, "Cancelled; nothing saved.")
@@ -76,6 +76,12 @@ func editAPI(ctx context.Context, p config.Paths, name, toolset string, d addDep
 	}
 	if err != nil {
 		return err
+	}
+	ts := res.toolset
+	modeNote := ""
+	if res.mode != "" && res.mode != cfg.PolicyMode() {
+		cfg.Policy.Mode = string(res.mode)
+		modeNote = ", policy mode " + string(res.mode)
 	}
 	active, err := curate.Apply(tools, ts, cfg.Prefix)
 	if err != nil {
@@ -89,8 +95,8 @@ func editAPI(ctx context.Context, p config.Paths, name, toolset string, d addDep
 	for _, st := range active.Tools {
 		sel = append(sel, st.Tool)
 	}
-	_, err = fmt.Fprintf(d.out, "Saved toolset %s of %s: %d tools, %s tokens. Restart your MCP client to pick up the change.\n",
-		tsName, name, len(sel), tokens.Format(tokens.Total(sel)))
+	_, err = fmt.Fprintf(d.out, "Saved toolset %s of %s: %d tools, %s tokens%s. Restart your MCP client to pick up the change.\n",
+		tsName, name, len(sel), tokens.Format(tokens.Total(sel)), modeNote)
 	return err
 }
 

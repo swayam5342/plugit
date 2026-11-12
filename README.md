@@ -62,7 +62,7 @@ Restart the client, and ask Claude to "find available pets using petstore".
 ```sh
 plugit add github --prefix gh https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.json
 #   confirm the base URL to pin, then pick tools in the terminal UI:
-#   space toggle · / filter · r rename · e describe · p policy · s save
+#   space toggle · / filter · r rename · e describe · p tool policy · m API mode · s save
 plugit auth github                          # store the token in the OS keyring (hidden input)
 plugit try github "GET /repos/{owner}/{repo}/issues" --arg owner=me --arg repo=x   # one test call, secrets redacted
 plugit install github                       # pick clients from a list (detected ones are marked)
@@ -152,7 +152,9 @@ hand-editable `apis/<name>/plugit.yaml`; unknown keys and literal secrets are re
 PlugIt treats the spec, the model's tool arguments and the API's responses as untrusted.
 
 - **Read-only by default.** Write tools need `policy.mode: confirm-writes` or `full`; per-tool
-  `confirm` and `deny` can only tighten that.
+  `confirm` and `deny` can only tighten that. Change the mode with `m` in `plugit add` or
+  `plugit edit <name>` (switching to `full` asks you to press `m` twice), then reconnect your
+  client; no reinstall is needed.
 - **The host never comes from the model or the spec.** You pin `base_url`; credentials are
   attached only to requests for exactly that origin; redirects stay on it.
 - **SSRF guard.** The resolved IP is checked at connect time: loopback and private ranges

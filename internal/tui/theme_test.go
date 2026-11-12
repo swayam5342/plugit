@@ -13,19 +13,19 @@ import (
 func TestPickerShortcuts(t *testing.T) {
 	p := newTest("GET /pets")
 	p.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
-	if strings.Contains(view(p), "cycle policy") {
+	if strings.Contains(view(p), "tool policy") {
 		t.Fatal("shortcuts shown before ?")
 	}
 	press(p, "?")
 	v := view(p)
-	if !strings.Contains(v, "cycle policy") || !strings.Contains(v, "? to hide") {
+	if !strings.Contains(v, "tool policy") || !strings.Contains(v, "? to hide") {
 		t.Errorf("shortcuts missing:\n%s", v)
 	}
 	if lines := strings.Count(v, "\n") + 1; lines > 24 {
 		t.Errorf("view has %d lines for a 24-line window", lines)
 	}
 	press(p, "?")
-	if strings.Contains(view(p), "cycle policy") {
+	if strings.Contains(view(p), "tool policy") {
 		t.Error("? didn't hide the shortcuts")
 	}
 }

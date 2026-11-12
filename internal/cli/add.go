@@ -43,6 +43,13 @@ type addSettings struct {
 	yes                  bool // accept the spec's server as the base URL
 }
 
+// pickResult is what the picker hands back: the toolset, and the API's
+// policy mode as set there with m (empty keeps the mode it started with).
+type pickResult struct {
+	toolset config.Toolset
+	mode    policy.Mode
+}
+
 // pickInput is what the picker works on.
 type pickInput struct {
 	api      string
@@ -60,7 +67,7 @@ type addDeps struct {
 	confirm func(string) (bool, error) // nil: no terminal
 	parse   func(context.Context, []byte, openapi.Options) (*model.Manifest, error)
 	// pick runs the interactive picker; nil means there's no terminal.
-	pick func(context.Context, pickInput) (config.Toolset, error)
+	pick func(context.Context, pickInput) (pickResult, error)
 	info BuildInfo
 }
 
@@ -158,6 +165,7 @@ func addAPI(ctx context.Context, s addSettings, d addDeps) error {
 	prepared := prepareAll(m.Tools, hiddenParams(auth, fixed))
 
 	var ts config.Toolset
+	mode := s.mode
 	if s.fromRun {
 		sel := selectTools(prepared, s.mode, s.tags, s.methods, s.paths)
 		if err := checkToolCount(sel, s.maxTools); err != nil {
@@ -169,7 +177,7 @@ func addAPI(ctx context.Context, s addSettings, d addDeps) error {
 		}
 	} else {
 		draft := config.API{Name: s.name, BaseURL: baseURL, Prefix: s.prefix, Auth: auth, Fixed: fixed, Policy: config.Policy{Mode: string(s.mode)}}
-		ts, err = d.pick(ctx, pickInput{api: s.name, tools: prepared, prefix: s.prefix, mode: s.mode, selected: initialSelection(prepared, s.mode),
+		res, err := d.pick(ctx, pickInput{api: s.name, tools: prepared, prefix: s.prefix, mode: s.mode, selected: initialSelection(prepared, s.mode),
 			lint: pickerLint(draft, defaultToolset, m.Tools)})
 		if errors.Is(err, tui.ErrCancelled) {
 			_, err := fmt.Fprintln(d.out, "Cancelled; nothing saved.")
@@ -177,6 +185,10 @@ func addAPI(ctx context.Context, s addSettings, d addDeps) error {
 		}
 		if err != nil {
 			return err
+		}
+		ts = res.toolset
+		if res.mode != "" {
+			mode = res.mode
 		}
 	}
 
@@ -197,7 +209,7 @@ func addAPI(ctx context.Context, s addSettings, d addDeps) error {
 		Fixed:    fixed,
 		Network:  config.Network{AllowPrivate: s.allowPrivate, Timeout: s.timeout},
 		Auth:     auth,
-		Policy:   config.Policy{Mode: string(s.mode)},
+		Policy:   config.Policy{Mode: string(mode)},
 		Toolsets: map[string]config.Toolset{defaultToolset: ts},
 	}
 	if cfg.Network.Timeout == 0 {

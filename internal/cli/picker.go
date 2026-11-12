@@ -8,14 +8,13 @@ import (
 	"golang.org/x/term"
 
 	"github.com/swayam5342/plugit/internal/clients"
-	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/tui"
 )
 
 // runPicker runs the terminal picker (SPEC §2.3). The picker draws on
 // stdout: add and edit are interactive commands, never MCP servers.
-func runPicker(ctx context.Context, in pickInput) (config.Toolset, error) {
-	return tui.RunPicker(ctx, tui.PickerInput{
+func runPicker(ctx context.Context, in pickInput) (pickResult, error) {
+	ts, mode, err := tui.RunPicker(ctx, tui.PickerInput{
 		API:      in.api,
 		Tools:    in.tools,
 		Prefix:   in.prefix,
@@ -23,6 +22,7 @@ func runPicker(ctx context.Context, in pickInput) (config.Toolset, error) {
 		Selected: in.selected,
 		Lint:     in.lint,
 	}, os.Stdin, os.Stdout)
+	return pickResult{toolset: ts, mode: mode}, err
 }
 
 // chooseClients returns the interactive client chooser for install and

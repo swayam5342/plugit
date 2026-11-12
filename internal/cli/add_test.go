@@ -39,8 +39,8 @@ func addSettingsFor(spec string, mut func(*addSettings)) addSettings {
 }
 
 // pickKeys is a fake picker that selects the given operation keys.
-func pickKeys(got *pickInput, keys ...string) func(context.Context, pickInput) (config.Toolset, error) {
-	return func(_ context.Context, in pickInput) (config.Toolset, error) {
+func pickKeys(got *pickInput, keys ...string) func(context.Context, pickInput) (pickResult, error) {
+	return func(_ context.Context, in pickInput) (pickResult, error) {
 		if got != nil {
 			*got = in
 		}
@@ -48,7 +48,35 @@ func pickKeys(got *pickInput, keys ...string) func(context.Context, pickInput) (
 		for _, k := range keys {
 			ts.Tools[k] = config.ToolOverride{}
 		}
-		return ts, nil
+		return pickResult{toolset: ts}, nil
+	}
+}
+
+// The mode set in the picker (m) is the one saved.
+func TestAddSavesPickerMode(t *testing.T) {
+	up := newUpstream(t)
+	p, d, _ := addEnv(t)
+	var in pickInput
+	pick := pickKeys(&in, "GET /pets", "POST /pets")
+	d.pick = func(ctx context.Context, got pickInput) (pickResult, error) {
+		r, err := pick(ctx, got)
+		r.mode = policy.ConfirmWrites
+		return r, err
+	}
+	d.confirm = func(string) (bool, error) { return true, nil }
+	specPath := writeSpec(t, fmt.Sprintf(petSpec, up.URL))
+	if err := addAPI(t.Context(), addSettingsFor(specPath, nil), d); err != nil {
+		t.Fatal(err)
+	}
+	if in.mode != policy.ReadOnly {
+		t.Errorf("picker started in %q, want the --mode default read-only", in.mode)
+	}
+	cfg, err := config.LoadAPI(p, "pets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Policy.Mode != string(policy.ConfirmWrites) {
+		t.Errorf("saved policy.mode = %q, want confirm-writes", cfg.Policy.Mode)
 	}
 }
 

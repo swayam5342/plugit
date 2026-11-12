@@ -251,6 +251,64 @@ func TestPickerReadOnlyBudget(t *testing.T) {
 	}
 }
 
+func TestPickerModeKey(t *testing.T) {
+	t.Run("cycles and offers writes", func(t *testing.T) {
+		p := newTest("GET /pets", "POST /pets")
+		if p.Mode() != policy.ReadOnly {
+			t.Fatalf("start mode = %q", p.Mode())
+		}
+		if !strings.Contains(view(p), "not offered") {
+			t.Fatalf("read-only should not offer the write:\n%s", view(p))
+		}
+		press(p, "m")
+		if p.Mode() != policy.ConfirmWrites {
+			t.Fatalf("after m: %q, want confirm-writes", p.Mode())
+		}
+		v := view(p)
+		if strings.Contains(v, "not offered") || !strings.Contains(v, "confirm-writes") || !strings.Contains(v, "unsaved") {
+			t.Errorf("confirm-writes view wrong:\n%s", v)
+		}
+	})
+	t.Run("full needs a second press", func(t *testing.T) {
+		p := newTest("GET /pets")
+		press(p, "m", "m")
+		if p.Mode() != policy.ConfirmWrites {
+			t.Fatalf("one press past confirm-writes switched to %q without confirmation", p.Mode())
+		}
+		if !strings.Contains(view(p), "press m again") {
+			t.Errorf("no warning before full:\n%s", view(p))
+		}
+		press(p, "m")
+		if p.Mode() != policy.Full {
+			t.Fatalf("second press: %q, want full", p.Mode())
+		}
+	})
+	t.Run("any other key cancels the switch to full", func(t *testing.T) {
+		p := newTest("GET /pets")
+		press(p, "m", "m", "down", "m")
+		if p.Mode() != policy.ConfirmWrites {
+			t.Fatalf("the pending switch survived another key: %q", p.Mode())
+		}
+	})
+	t.Run("full back to read-only needs no confirmation", func(t *testing.T) {
+		p := newTest("GET /pets")
+		press(p, "m", "m", "m", "m")
+		if p.Mode() != policy.ReadOnly {
+			t.Fatalf("got %q, want read-only", p.Mode())
+		}
+	})
+	t.Run("save carries the mode", func(t *testing.T) {
+		p := newTest("GET /pets")
+		press(p, "m", "s")
+		if _, saved := p.Result(); !saved {
+			t.Fatal("s did not save")
+		}
+		if got := p.Mode(); got != policy.ConfirmWrites {
+			t.Errorf("saved mode %q, want confirm-writes", got)
+		}
+	})
+}
+
 func footer(v string) string {
 	for _, l := range strings.Split(v, "\n") {
 		if strings.Contains(l, " tools ·") || strings.Contains(l, " tool ·") {

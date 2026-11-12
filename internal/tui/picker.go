@@ -109,6 +109,11 @@ type Picker struct {
 	dirty bool
 	saved bool
 
+	// policyMode is the API's policy.mode as edited here (m cycles it);
+	// fullPending means the next m confirms the switch to full.
+	policyMode  policy.Mode
+	fullPending bool
+
 	// recomputed on every change
 	conflict   string
 	count      int // selected tools
@@ -130,15 +135,16 @@ type Picker struct {
 // NewPicker builds a picker.
 func NewPicker(in PickerInput) *Picker {
 	p := &Picker{
-		in:        in,
-		tools:     slices.Clone(in.Tools),
-		selected:  map[model.OpKey]bool{},
-		over:      map[model.OpKey]config.ToolOverride{},
-		missing:   map[string]config.ToolOverride{},
-		collapsed: map[int]bool{},
-		width:     100,
-		th:        newTheme(true),
-		height:    30,
+		in:         in,
+		tools:      slices.Clone(in.Tools),
+		selected:   map[model.OpKey]bool{},
+		over:       map[model.OpKey]config.ToolOverride{},
+		missing:    map[string]config.ToolOverride{},
+		collapsed:  map[int]bool{},
+		width:      100,
+		th:         newTheme(true),
+		height:     30,
+		policyMode: in.Mode,
 	}
 	present := map[model.OpKey]bool{}
 	for _, t := range p.tools {
@@ -300,7 +306,7 @@ func (p *Picker) recompute() {
 		if t.Safety != model.ReadOnly {
 			p.writes++
 		}
-		if policy.Lists(t.Safety, p.in.Mode) && st.Override != policy.OverrideDeny {
+		if policy.Lists(t.Safety, p.policyMode) && st.Override != policy.OverrideDeny {
 			p.offered++
 			p.budget += n
 		}
@@ -361,6 +367,35 @@ func (p *Picker) Result() (config.Toolset, bool) {
 	return p.toolset(), p.saved
 }
 
+// Mode returns the API's policy mode as set in the picker.
+func (p *Picker) Mode() policy.Mode { return p.policyMode }
+
+// nextMode is the mode m moves to: read-only, confirm-writes, full, and round.
+func nextMode(m policy.Mode) policy.Mode {
+	switch m {
+	case policy.ReadOnly:
+		return policy.ConfirmWrites
+	case policy.ConfirmWrites:
+		return policy.Full
+	}
+	return policy.ReadOnly
+}
+
+// cycleMode moves to the next policy mode. Loosening to full takes a second
+// press, so writes never start running unasked because of one stray key.
+func (p *Picker) cycleMode(confirmed bool) {
+	next := nextMode(p.policyMode)
+	if next == policy.Full && !confirmed {
+		p.fullPending = true
+		p.status = "full runs write tools without asking: press m again to confirm, any other key to cancel"
+		return
+	}
+	p.policyMode = next
+	p.dirty = true
+	p.recompute()
+	p.status = "policy mode: " + string(next) + " (saved with s)"
+}
+
 // Init implements tea.Model.
 // It asks the terminal for its background colour to pick the palette.
 func (p *Picker) Init() tea.Cmd { return tea.RequestBackgroundColor }
@@ -409,8 +444,12 @@ func (p *Picker) current() (row, bool) {
 
 func (p *Picker) updateList(msg tea.KeyPressMsg) tea.Cmd {
 	p.status = ""
+	confirmFull := p.fullPending
+	p.fullPending = false
 	r, ok := p.current()
 	switch msg.String() {
+	case "m":
+		p.cycleMode(confirmFull)
 	case "down", "j":
 		p.cursor++
 	case "up", "k":
@@ -698,7 +737,7 @@ func (p *Picker) helpLines() []string {
 	return p.th.keyGrid(max(p.width, 20),
 		"↑↓ j k", "move", "space", "toggle tool or group", "enter", "fold group",
 		"a / n", "all / none shown", "/", "filter", "esc", "clear filter",
-		"r", "rename", "e", "edit description", "p", "cycle policy",
+		"r", "rename", "e", "edit description", "p", "tool policy", "m", "API mode",
 		"i", "tool detail", "f", "response fields", "s", "save", "q", "quit", "?", "hide shortcuts")
 }
 
@@ -734,7 +773,7 @@ func (p *Picker) rowSegs(r row, cursor bool) []seg {
 	}
 
 	t := p.tools[r.tool]
-	offered := policy.Lists(t.Safety, p.in.Mode)
+	offered := policy.Lists(t.Safety, p.policyMode)
 	on := p.selected[t.Key]
 	box := seg{"○ ", th.Dim}
 	if on {
@@ -770,7 +809,7 @@ func (p *Picker) rowSegs(r row, cursor bool) []seg {
 		ss = append(ss, seg{fmt.Sprintf("  %d %s", n, unit), th.Accent})
 	}
 	if !offered {
-		ss = append(ss, seg{"  not offered in " + string(p.in.Mode), th.Warn})
+		ss = append(ss, seg{"  not offered in " + string(p.policyMode), th.Warn})
 	}
 	if sev, ok := p.lintWorst[t.Key]; ok && on && sev > lint.Info {
 		if sev == lint.Error {
@@ -829,7 +868,7 @@ func (p *Picker) View() tea.View {
 	if p.in.Prefix != "" {
 		sub += " · prefix " + safe(p.in.Prefix)
 	}
-	lines = append(lines, th.box(w, th.Border, spread(title, th.pill(p.in.Mode), w-4), th.Dim.Render(sub))...)
+	lines = append(lines, th.box(w, th.Border, spread(title, th.pill(p.policyMode), w-4), th.Dim.Render(sub))...)
 	lines = append(lines, "")
 
 	// The list.
@@ -894,7 +933,7 @@ func (p *Picker) View() tea.View {
 		if p.filter != "" {
 			input = th.Accent.Render("/ ") + safe(p.filter) + th.Dim.Render("   esc clears")
 		} else {
-			input = th.Dim.Render("> / filter · space toggle · i details · s save")
+			input = th.Dim.Render("> / filter · space toggle · m mode · i details · s save")
 		}
 	}
 	lines = append(lines, th.box(w, border, input)...)
@@ -921,18 +960,18 @@ func (p *Picker) View() tea.View {
 	return v
 }
 
-// RunPicker runs the picker on a terminal and returns the saved selection,
-// or ErrCancelled.
-func RunPicker(ctx context.Context, in PickerInput, r io.Reader, w io.Writer) (config.Toolset, error) {
+// RunPicker runs the picker on a terminal and returns the saved selection
+// and policy mode, or ErrCancelled.
+func RunPicker(ctx context.Context, in PickerInput, r io.Reader, w io.Writer) (config.Toolset, policy.Mode, error) {
 	p := NewPicker(in)
 	if _, err := tea.NewProgram(p, programOptions(ctx, r, w)...).Run(); err != nil {
-		return config.Toolset{}, err
+		return config.Toolset{}, "", err
 	}
 	ts, saved := p.Result()
 	if !saved {
-		return config.Toolset{}, ErrCancelled
+		return config.Toolset{}, "", ErrCancelled
 	}
-	return ts, nil
+	return ts, p.Mode(), nil
 }
 
 // Safe strips control and format characters from untrusted text before it
