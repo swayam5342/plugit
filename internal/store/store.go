@@ -42,11 +42,12 @@ type Outcome string
 
 // Outcomes.
 const (
-	OK        Outcome = "ok"         // 2xx/3xx response
-	HTTPError Outcome = "http_error" // the API answered with status >= 400
-	Denied    Outcome = "denied"     // policy refused it (deny or confirm)
-	Invalid   Outcome = "invalid"    // arguments failed validation
-	Failed    Outcome = "error"      // build, network, timeout or internal error
+	OK          Outcome = "ok"           // 2xx/3xx response
+	HTTPError   Outcome = "http_error"   // the API answered with status >= 400
+	Denied      Outcome = "denied"       // policy refused it (deny or confirm)
+	Invalid     Outcome = "invalid"      // arguments failed validation
+	RateLimited Outcome = "rate_limited" // over policy.rate_limit or a tool's rate_limit
+	Failed      Outcome = "error"        // build, network, timeout or internal error
 )
 
 // Call is one logged tool call. Every text field is already redacted.

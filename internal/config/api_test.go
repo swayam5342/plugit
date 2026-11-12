@@ -136,7 +136,7 @@ func TestParseAPIRejects(t *testing.T) {
 		"empty file":            {"", "no documents", ErrInvalidConfig},
 		"not a mapping":         {"- 1\n", "", ErrInvalidConfig},
 		"missing version":       {strings.Replace(base, "version: 1\n", "", 1), "version", ErrInvalidConfig},
-		"future version":        {strings.Replace(base, "version: 1", "version: 2", 1), "newer", ErrUnsupportedVersion},
+		"future version":        {strings.Replace(base, "version: 1", "version: 3", 1), "newer", ErrUnsupportedVersion},
 		"bad name":              {strings.Replace(base, "name: pets", "name: ../etc", 1), "name", ErrInvalidConfig},
 		"missing base_url":      {strings.Replace(base, "base_url: https://pets.example.test/v1\n", "", 1), "base_url", ErrInvalidConfig},
 		"relative base_url":     {strings.Replace(base, "https://pets.example.test/v1", "/v1", 1), "base_url", ErrInvalidConfig},
@@ -350,5 +350,43 @@ func TestRetentionPeriod(t *testing.T) {
 	}
 	if DefaultRetention != 30*24*time.Hour {
 		t.Errorf("DefaultRetention = %v (SPEC §3.6: 30d)", DefaultRetention)
+	}
+}
+
+// Version 2 adds per-tool rate_limit. Version 1 files load unchanged and
+// come out as version 2 (the migration has nothing to rewrite).
+func TestVersionMigration(t *testing.T) {
+	if CurrentVersion != 2 {
+		t.Fatalf("CurrentVersion = %d", CurrentVersion)
+	}
+	c, err := ParseAPI([]byte(minimalConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Version != 2 {
+		t.Errorf("v1 config loaded as version %d, want 2", c.Version)
+	}
+	out, err := MarshalAPI(c)
+	if err != nil || !strings.Contains(string(out), "version: 2") {
+		t.Errorf("marshal = %s, %v", out, err)
+	}
+	v2 := strings.Replace(minimalConfig, "version: 1", "version: 2", 1)
+	if _, err := ParseAPI([]byte(v2)); err != nil {
+		t.Errorf("v2: %v", err)
+	}
+}
+
+func TestToolRateLimit(t *testing.T) {
+	ok := strings.Replace(minimalConfig, `"GET /pets": {}`, `"GET /pets": {rate_limit: 5/min}`, 1)
+	c, err := ParseAPI([]byte(ok))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Toolsets["default"].Tools["GET /pets"].RateLimit; got != "5/min" {
+		t.Errorf("rate_limit = %q", got)
+	}
+	bad := strings.Replace(minimalConfig, `"GET /pets": {}`, `"GET /pets": {rate_limit: fast}`, 1)
+	if _, err := ParseAPI([]byte(bad)); err == nil || !strings.Contains(err.Error(), "rate_limit") {
+		t.Errorf("bad per-tool rate_limit: %v", err)
 	}
 }

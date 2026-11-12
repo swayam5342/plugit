@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/swayam5342/plugit/internal/model"
 )
@@ -92,5 +93,65 @@ func TestAllowsListing(t *testing.T) {
 	}
 	if !Lists(model.ReadOnly, ReadOnly) || !Lists(model.Write, ConfirmWrites) || !Lists(model.Destructive, Full) {
 		t.Error("tools the mode can allow or confirm must be listed")
+	}
+}
+
+func TestParseRate(t *testing.T) {
+	good := map[string]Rate{
+		"60/min": {N: 60, Per: time.Minute},
+		"5/sec":  {N: 5, Per: time.Second},
+		"1/hour": {N: 1, Per: time.Hour},
+	}
+	for in, want := range good {
+		if got, err := ParseRate(in); err != nil || got != want {
+			t.Errorf("ParseRate(%q) = %+v, %v", in, got, err)
+		}
+	}
+	for _, bad := range []string{"", "0/min", "00/sec", "-1/min", "10/day", "10 per min", "1e3/sec", "1/min/x", "9999999999/sec"} {
+		if _, err := ParseRate(bad); err == nil {
+			t.Errorf("ParseRate(%q) accepted", bad)
+		}
+	}
+	if s := (Rate{N: 60, Per: time.Minute}).String(); s != "60/min" {
+		t.Errorf("String = %q", s)
+	}
+}
+
+// The limiter allows a burst of N, then refills N per period evenly.
+func TestLimiter(t *testing.T) {
+	clock := time.Date(2026, 11, 12, 18, 0, 0, 0, time.UTC)
+	now := func() time.Time { return clock }
+	l := NewLimiter(Rate{N: 3, Per: time.Minute}, now)
+	for i := range 3 {
+		if ok, _ := l.Allow(); !ok {
+			t.Fatalf("call %d refused within the burst", i+1)
+		}
+	}
+	ok, wait := l.Allow()
+	if ok || wait != 20*time.Second {
+		t.Fatalf("4th call: ok=%v wait=%v, want refused for 20s", ok, wait)
+	}
+	clock = clock.Add(19 * time.Second)
+	if ok, _ := l.Allow(); ok {
+		t.Error("allowed before a token refilled")
+	}
+	clock = clock.Add(time.Second)
+	if ok, _ := l.Allow(); !ok {
+		t.Error("refused after a token refilled")
+	}
+	clock = clock.Add(time.Hour)
+	n := 0
+	for {
+		if ok, _ := l.Allow(); !ok {
+			break
+		}
+		n++
+	}
+	if n != 3 {
+		t.Errorf("after a long idle, %d calls allowed; the burst is 3", n)
+	}
+	var nilLimiter *Limiter
+	if ok, _ := nilLimiter.Allow(); !ok {
+		t.Error("a nil limiter must allow everything")
 	}
 }

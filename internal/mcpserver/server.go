@@ -41,6 +41,7 @@ import (
 type Tool struct {
 	Tool     model.Tool
 	Override policy.Override
+	Limit    *policy.Limiter // per-tool rate limit; nil for none
 }
 
 // Config configures a server.
@@ -52,8 +53,9 @@ type Config struct {
 	Target   proxy.Target
 	Doer     httpx.Doer
 	Redactor *redact.Redactor
-	Logger   *slog.Logger // must not write to stdout
-	Log      *CallLog     // nil: calls aren't recorded
+	Logger   *slog.Logger    // must not write to stdout
+	Log      *CallLog        // nil: calls aren't recorded
+	Limit    *policy.Limiter // policy.rate_limit, shared by every tool; nil for none
 }
 
 // CallLog sends one redacted record per call to the call log (SPEC §3.7
@@ -153,6 +155,16 @@ func (h *handler) handle(ctx context.Context, req *mcp.CallToolRequest) (res *mc
 		rec.Outcome = store.Denied
 		return errorResult(name + ": denied by policy: " + decision.Reason), nil
 	}
+	// The retry that carries a confirmation answer is the same call: it
+	// doesn't spend the budget again (and only a call that passed here got
+	// a signed state to retry with).
+	if retry := decision.Decision == policy.Confirm && req != nil && req.Params != nil && req.Params.InputResponses != nil; !retry {
+		if why := h.limited(); why != "" {
+			h.log(name, start, 0, true, "rate limited")
+			rec.Outcome = store.RateLimited
+			return errorResult(name + ": " + why), nil
+		}
+	}
 
 	h.once.Do(func() {
 		h.validator = schema.NewValidator(h.tool.Tool)
@@ -197,6 +209,21 @@ func (h *handler) handle(ctx context.Context, req *mcp.CallToolRequest) (res *mc
 		rec.Outcome = store.Failed
 	}
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: r.Text}}, IsError: r.IsError}, nil
+}
+
+// limited takes one call from the tool's and the API's budgets (SPEC §3.7
+// step 3). It returns why the call is refused, or "".
+func (h *handler) limited() string {
+	for _, l := range []struct {
+		lim   *policy.Limiter
+		scope string
+	}{{h.tool.Limit, "this tool"}, {h.cfg.Limit, "this API"}} {
+		if ok, wait := l.lim.Allow(); !ok {
+			return fmt.Sprintf("rate limit reached (%s for %s); retry in %s, and the call was not made",
+				l.lim.Rate(), l.scope, max(wait.Round(time.Second), time.Second))
+		}
+	}
+	return ""
 }
 
 // confirmSchema is the elicitation form: one pre-ticked checkbox. It isn't

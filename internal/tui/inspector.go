@@ -167,7 +167,7 @@ func (m *Inspector) outcomeStyle(o store.Outcome) lipgloss.Style {
 	switch o {
 	case store.OK:
 		return m.th.OK
-	case store.Denied, store.Invalid:
+	case store.Denied, store.Invalid, store.RateLimited:
 		return m.th.Warn
 	}
 	return m.th.Err

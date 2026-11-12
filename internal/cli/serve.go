@@ -87,10 +87,17 @@ func serveAPI(ctx context.Context, s serveSettings, d runDeps) error {
 	logger.Info("plugit serve serving",
 		"api", a.cfg.Name, "toolset", a.toolset, "selected", len(a.tools), "listed", listed, "mode", a.cfg.Policy.Mode,
 		"base_url", a.target.BaseURL.String()) // validated: no userinfo or query
+	// Rate limits are per serve process: each MCP client has its own budget.
+	var apiLimit *policy.Limiter
+	if r, err := policy.ParseRate(a.cfg.Policy.RateLimit); err == nil {
+		apiLimit = policy.NewLimiter(r, nil)
+		logger.Info("rate limit", "rate_limit", r.String(), "scope", "this serve process")
+	}
 	callLog, closeLog := openCallLog(ctx, s.paths, a, logger)
 	defer closeLog()
 	return mcpserver.Serve(ctx, mcpserver.Config{
 		Log:      callLog,
+		Limit:    apiLimit,
 		Name:     "plugit-" + a.cfg.Name,
 		Version:  d.info.withDefaults().Version,
 		Tools:    a.tools,
@@ -153,9 +160,6 @@ func loadActive(ctx context.Context, s serveSettings, d runDeps, logger *slog.Lo
 		return nil, fmt.Errorf("API %s has no toolset %q (it has: %s)", cfg.Name, tsName,
 			strings.Join(slices.Sorted(maps.Keys(cfg.Toolsets)), ", "))
 	}
-	if cfg.Policy.RateLimit != "" {
-		logger.Warn("policy.rate_limit is not enforced by this version of plugit", "api", cfg.Name)
-	}
 
 	m, err := loadManifest(ctx, s.paths, cfg, d, logger)
 	if err != nil {
@@ -186,7 +190,11 @@ func loadActive(ctx context.Context, s serveSettings, d runDeps, logger *slog.Lo
 	}
 	tools := make([]mcpserver.Tool, 0, len(sel.Tools))
 	for _, st := range sel.Tools {
-		tools = append(tools, mcpserver.Tool{Tool: schema.Prepare(st.Tool, schema.Options{Fixed: hidden}), Override: st.Override})
+		mt := mcpserver.Tool{Tool: schema.Prepare(st.Tool, schema.Options{Fixed: hidden}), Override: st.Override}
+		if r, err := policy.ParseRate(ts.Tools[string(st.Tool.Key)].RateLimit); err == nil {
+			mt.Limit = policy.NewLimiter(r, nil)
+		}
+		tools = append(tools, mt)
 	}
 	return &active{
 		cfg:     cfg,

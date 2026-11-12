@@ -289,3 +289,41 @@ func TestServeRecordsCalls(t *testing.T) {
 		t.Error("call log file contains the secret")
 	}
 }
+
+// policy.rate_limit and per-tool rate_limit are enforced by serve.
+func TestServeRateLimits(t *testing.T) {
+	up := newUpstream(t)
+	p := setupAPI(t, up.URL)
+	cfgPath, _ := p.APIConfig("pets")
+	y := strings.Replace(fmt.Sprintf(petsYAML, up.URL), `"GET /pets/{id}": {}`, `"GET /pets/{id}": {rate_limit: 1/min}`, 1)
+	if err := config.WriteFileAtomic(cfgPath, []byte(y)); err != nil {
+		t.Fatal(err)
+	}
+	cs, stderr := startServe(t, serveSettings{paths: p, name: "pets"}, serveDeps(isolate.Parse))
+	call := func(name string, args map[string]any) *mcp.CallToolResult {
+		t.Helper()
+		r, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: name, Arguments: args})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	if r := call("pp_getPet", map[string]any{"id": "1"}); r.IsError {
+		t.Fatalf("first call: %s", resultText(r))
+	}
+	if r := call("pp_getPet", map[string]any{"id": "2"}); !r.IsError || !strings.Contains(resultText(r), "1/min for this tool") {
+		t.Errorf("per-tool limit not enforced: %s", resultText(r))
+	}
+	// The API budget (10/min) is shared: one call already went through.
+	for i := range 9 {
+		if r := call("pp_list_pets", map[string]any{}); r.IsError {
+			t.Fatalf("list call %d: %s", i+1, resultText(r))
+		}
+	}
+	if r := call("pp_list_pets", map[string]any{}); !r.IsError || !strings.Contains(resultText(r), "10/min for this API") {
+		t.Errorf("API limit not enforced: %s", resultText(r))
+	}
+	if strings.Contains(stderr.String(), "not enforced") {
+		t.Errorf("stale warning:\n%s", stderr)
+	}
+}

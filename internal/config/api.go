@@ -23,7 +23,12 @@ import (
 
 // CurrentVersion is the plugit.yaml schema version this build reads and
 // writes. Changing the schema means bumping it and adding a migration.
-const CurrentVersion = 1
+//
+// History:
+//   - 1: the first schema (v0.1).
+//   - 2: adds toolsets.<name>.tools.<key>.rate_limit (per-tool rate limits,
+//     M5). Version 1 files need no changes; migrate just relabels them.
+const CurrentVersion = 2
 
 // MaxConfigBytes caps plugit.yaml. A real config is a few kilobytes.
 const MaxConfigBytes = 1 << 20
@@ -113,7 +118,7 @@ type Auth struct {
 // Policy holds the API-wide call policy.
 type Policy struct {
 	Mode      string `yaml:"mode,omitempty"`
-	RateLimit string `yaml:"rate_limit,omitempty"` // N/sec | N/min | N/hour (enforced from M5)
+	RateLimit string `yaml:"rate_limit,omitempty"` // N/sec | N/min | N/hour, per serve process
 }
 
 // Log holds call-log settings (the call log itself arrives in M4).
@@ -134,7 +139,8 @@ type Toolset struct {
 type ToolOverride struct {
 	Name        string `yaml:"name,omitempty"`
 	Description string `yaml:"description,omitempty"`
-	Policy      string `yaml:"policy,omitempty"` // allow | confirm | deny
+	Policy      string `yaml:"policy,omitempty"`     // allow | confirm | deny
+	RateLimit   string `yaml:"rate_limit,omitempty"` // N/sec | N/min | N/hour, on top of policy.rate_limit (version 2)
 }
 
 // PolicyMode is the validated policy mode.
@@ -217,7 +223,16 @@ func ParseAPI(data []byte) (*API, error) {
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
+	c.migrate()
 	return &c, nil
+}
+
+// migrate brings a validated older config up to CurrentVersion.
+func (c *API) migrate() {
+	if c.Version < 2 {
+		// 1 -> 2 only added an optional field: nothing to rewrite.
+		c.Version = 2
+	}
 }
 
 func yamlOpts() []yaml.Option {
@@ -262,7 +277,6 @@ var (
 	toolNameRe   = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 	headerNameRe = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,256}$")
 	sha256Re     = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	rateLimitRe  = regexp.MustCompile(`^([0-9]{1,9})/(sec|min|hour)$`)
 	retentionRe  = regexp.MustCompile(`^([0-9]{1,5})d$`)
 )
 
@@ -335,8 +349,8 @@ func (c *API) Validate() error {
 		wrap("policy.mode", err)
 	}
 	if c.Policy.RateLimit != "" {
-		if m := rateLimitRe.FindStringSubmatch(c.Policy.RateLimit); m == nil || strings.Trim(m[1], "0") == "" {
-			bad("policy.rate_limit", "%q: use N/sec, N/min or N/hour with N > 0", naming.CleanText(c.Policy.RateLimit, 40))
+		if _, err := policy.ParseRate(c.Policy.RateLimit); err != nil {
+			bad("policy.rate_limit", "%q: %v", naming.CleanText(c.Policy.RateLimit, 40), err)
 		}
 	}
 
@@ -422,6 +436,11 @@ func (c *API) validateToolset(name string, ts Toolset, bad func(string, string, 
 		}
 		if _, err := policy.ParseOverride(o.Policy); err != nil {
 			wrap(kf+".policy", err)
+		}
+		if o.RateLimit != "" {
+			if _, err := policy.ParseRate(o.RateLimit); err != nil {
+				bad(kf+".rate_limit", "%q: %v", naming.CleanText(o.RateLimit, 40), err)
+			}
 		}
 	}
 	for _, m := range ts.Methods {
