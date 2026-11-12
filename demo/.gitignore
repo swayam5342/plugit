@@ -1,0 +1,8 @@
+# Created by each recording; never committed.
+plugit.exe
+plugit
+cfg/
+appdata/
+home/
+shot-*.png
+petstore.json

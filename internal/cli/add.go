@@ -271,7 +271,7 @@ func printAddSummary(w io.Writer, cfg *config.API, active curate.Result) error {
 	if writes > 0 && cfg.PolicyMode() == policy.ReadOnly {
 		note = fmt.Sprintf(" (%d write tools are saved but not offered in read-only mode)", writes)
 	}
-	next := "  plugit install " + cfg.Name + " --client claude-desktop   (or cursor, claude-code)\n"
+	next := "  plugit install " + cfg.Name + "                         add it to Claude, Codex, Cursor, VS Code...\n"
 	if cfg.Auth.Type != config.AuthNone && strings.HasPrefix(cfg.Auth.Secret, "keyring:") {
 		next = "  plugit auth " + cfg.Name + "                          store the credential\n" + next
 	}

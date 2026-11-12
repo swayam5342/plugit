@@ -68,6 +68,10 @@ func TestAddWithPicker(t *testing.T) {
 	if len(asked) != 1 || !strings.Contains(asked[0], up.URL) {
 		t.Errorf("questions = %q", asked)
 	}
+	// The next step points at the client chooser, not a stale client list.
+	if o := out.String(); !strings.Contains(o, "plugit install pets ") || strings.Contains(o, "--client claude-desktop") {
+		t.Errorf("summary:\n%s", o)
+	}
 	// The picker sees every operation, named with the prefix.
 	if len(in.tools) != 3 || !slices.ContainsFunc(in.tools, func(t model.Tool) bool { return t.Name == "pp_createPet" }) {
 		t.Errorf("picker input tools = %v", len(in.tools))
@@ -92,7 +96,7 @@ func TestAddWithPicker(t *testing.T) {
 			t.Errorf("missing %s", path)
 		}
 	}
-	for _, want := range []string{"2 tools", "≈", "plugit install pets --client"} {
+	for _, want := range []string{"2 tools", "≈", "plugit install pets "} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("summary should mention %q:\n%s", want, out)
 		}
