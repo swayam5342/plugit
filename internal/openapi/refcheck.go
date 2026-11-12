@@ -15,10 +15,14 @@ import (
 //   - local refs ("#/...") may chain through other pure-$ref nodes at most
 //     MaxRefDepth hops, and may not form a cycle;
 //   - anything else is external; it is counted (and never resolved);
-//   - every media type under a "content" map must be an object. libopenapi
-//     v0.42.5 panics, unrecoverably, on some non-object media types
-//     (pb33f/libopenapi#705); package isolate contains crashes nobody has
-//     found yet.
+//   - every media type under a "content" map must be an object, not a $ref;
+//   - external $refs that are entries of other object maps (responses,
+//     headers, links, examples, callbacks, ...) are replaced by empty
+//     objects (see neutralizeExternalRefs).
+//
+// The last two avoid unrecoverable panics in libopenapi v0.42.5
+// (pb33f/libopenapi#705); package isolate contains crashes nobody has found
+// yet.
 //
 // The walk tracks whether a mapping's keys are spec keywords or user-chosen
 // names, so a property or component that happens to be called "content" is
@@ -65,6 +69,9 @@ func checkRefs(root *yaml.Node) (external int, err error) {
 						return external, err
 					}
 				}
+				if objectMapKeys[k.Value] && v.Kind == yaml.MappingNode {
+					external += neutralizeExternalRefs(v)
+				}
 				stack = append(stack, item{n: v, names: namesKeys[k.Value] && v.Kind == yaml.MappingNode})
 			}
 		case yaml.AliasNode:
@@ -84,6 +91,32 @@ var namesKeys = map[string]bool{
 	"examples": true, "links": true, "callbacks": true, "securitySchemes": true,
 	"pathItems": true, "content": true, "encoding": true, "variables": true,
 	"securityDefinitions": true, "mapping": true,
+}
+
+// objectMapKeys are names maps whose entries are reference-able objects other
+// than schemas and media types (responses, headers, links, examples, ...).
+var objectMapKeys = map[string]bool{
+	"responses": true, "parameters": true, "requestBodies": true, "headers": true,
+	"examples": true, "links": true, "callbacks": true, "securitySchemes": true,
+	"pathItems": true, "encoding": true, "webhooks": true,
+}
+
+// neutralizeExternalRefs replaces each entry of m that is an external $ref
+// with an empty object and returns how many it replaced. With
+// SkipExternalRefResolution on, libopenapi v0.42.5 builds such entries as
+// placeholders with a nil node store and then panics on its own goroutine
+// (pb33f/libopenapi#705). PlugIt never resolves external refs, so an empty
+// object loses nothing, and the rest of the spec stays usable.
+func neutralizeExternalRefs(m *yaml.Node) int {
+	n := 0
+	for i := 1; i < len(m.Content); i += 2 {
+		e := m.Content[i]
+		if ref, isRef := pureRef(e); isRef && !strings.HasPrefix(ref, "#") {
+			*e = yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Line: e.Line, Column: e.Column}
+			n++
+		}
+	}
+	return n
 }
 
 func freeForm(key string) bool {

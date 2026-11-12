@@ -564,6 +564,42 @@ func TestParseSkipsInvalidPaths(t *testing.T) {
 	}
 }
 
+func TestParseNeutralizesExternalRefObjects(t *testing.T) {
+	// Each of these external refs panics libopenapi in-process if it reaches it
+	// (pb33f/libopenapi#705). They must be dropped, with the operation kept.
+	src := `
+openapi: 3.0.3
+info: {title: t, version: '1'}
+paths:
+  /x:
+    get:
+      operationId: getX
+      parameters:
+        - name: q
+          in: query
+          schema: {type: string}
+          examples:
+            e: {$ref: 'other.yaml#/e'}
+      callbacks:
+        cb: {$ref: 'other.yaml#/cb'}
+      responses:
+        '200':
+          description: ok
+          headers:
+            X-A: {$ref: 'other.yaml#/h'}
+          links:
+            l: {$ref: 'other.yaml#/l'}
+`
+	m := parse(t, src, Options{})
+	tl := tool(t, m, "GET /x")
+	if tl.Name != "getX" || len(tl.Params) != 1 {
+		t.Errorf("tool = %+v", tl)
+	}
+	if !containsWarning(m, "4 external $ref(s) ignored") {
+		t.Errorf("warnings = %v, want 4 external refs reported", m.Warnings)
+	}
+}
+
 func TestParseRejectsNonObjectMediaTypes(t *testing.T) {
 	for name, content := range map[string]string{
 		// pb33f/libopenapi#705: this exact shape panics on a libopenapi goroutine.

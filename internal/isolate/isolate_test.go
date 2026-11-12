@@ -139,6 +139,53 @@ func TestParseKnownLibopenapiCrasherIsRejected(t *testing.T) {
 	}
 }
 
+// External $refs in map-entry positions make libopenapi v0.42.5 panic on its
+// own goroutines when SkipExternalRefResolution is on (pb33f/libopenapi#705).
+// openapi.Parse must turn every one of them into an ordinary result or error,
+// even in-process. Running through the child here means a regression shows up
+// as ErrParserCrashed instead of killing the test binary.
+func TestParseExternalRefMapEntriesNeverCrash(t *testing.T) {
+	const h = "openapi: 3.0.3\ninfo: {title: t, version: '1'}\n"
+	const ext = "{$ref: 'other.yaml#/x'}"
+	cases := map[string]string{
+		"request body content":  h + "paths:\n  /x:\n    post:\n      requestBody:\n        content:\n          application/json: " + ext + "\n      responses: {}\n",
+		"response content":      h + "paths:\n  /x:\n    get:\n      responses:\n        '200':\n          description: ok\n          content:\n            application/json: " + ext + "\n",
+		"response headers":      h + "paths:\n  /x:\n    get:\n      responses:\n        '200':\n          description: ok\n          headers:\n            X-A: " + ext + "\n",
+		"response links":        h + "paths:\n  /x:\n    get:\n      responses:\n        '200':\n          description: ok\n          links:\n            l: " + ext + "\n",
+		"responses entry":       h + "paths:\n  /x:\n    get:\n      responses:\n        '200': " + ext + "\n",
+		"parameter content":     h + "paths:\n  /x:\n    get:\n      parameters:\n        - name: a\n          in: query\n          content:\n            application/json: " + ext + "\n      responses: {}\n",
+		"parameter examples":    h + "paths:\n  /x:\n    get:\n      parameters:\n        - name: a\n          in: query\n          schema: {type: string}\n          examples:\n            e: " + ext + "\n      responses: {}\n",
+		"parameter list item":   h + "paths:\n  /x:\n    get:\n      parameters:\n        - " + ext + "\n      responses: {}\n",
+		"media type examples":   h + "paths:\n  /x:\n    post:\n      requestBody:\n        content:\n          application/json:\n            examples:\n              e: " + ext + "\n      responses: {}\n",
+		"media type encoding":   h + "paths:\n  /x:\n    post:\n      requestBody:\n        content:\n          multipart/form-data:\n            encoding:\n              f: " + ext + "\n      responses: {}\n",
+		"encoding headers":      h + "paths:\n  /x:\n    post:\n      requestBody:\n        content:\n          multipart/form-data:\n            encoding:\n              f:\n                headers:\n                  X-A: " + ext + "\n      responses: {}\n",
+		"operation callbacks":   h + "paths:\n  /x:\n    get:\n      callbacks:\n        cb: " + ext + "\n      responses: {}\n",
+		"request body":          h + "paths:\n  /x:\n    post:\n      requestBody: " + ext + "\n      responses: {}\n",
+		"path item":             h + "paths:\n  /x: " + ext + "\n",
+		"webhooks":              "openapi: 3.1.0\ninfo: {title: t, version: '1'}\npaths: {}\nwebhooks:\n  w: " + ext + "\n",
+		"components responses":  h + "paths: {}\ncomponents:\n  responses:\n    R: " + ext + "\n",
+		"components parameters": h + "paths: {}\ncomponents:\n  parameters:\n    P: " + ext + "\n",
+		"components headers":    h + "paths: {}\ncomponents:\n  headers:\n    H: " + ext + "\n",
+		"components examples":   h + "paths: {}\ncomponents:\n  examples:\n    E: " + ext + "\n",
+		"components bodies":     h + "paths: {}\ncomponents:\n  requestBodies:\n    B: " + ext + "\n",
+		"components links":      h + "paths: {}\ncomponents:\n  links:\n    L: " + ext + "\n",
+		"components callbacks":  h + "paths: {}\ncomponents:\n  callbacks:\n    C: " + ext + "\n",
+		"components security":   h + "paths: {}\ncomponents:\n  securitySchemes:\n    S: " + ext + "\n",
+		"components schemas":    h + "paths: {}\ncomponents:\n  schemas:\n    S: " + ext + "\n",
+		"swagger2 responses":    "swagger: '2.0'\ninfo: {title: t, version: '1'}\npaths:\n  /x:\n    get:\n      responses:\n        '200': " + ext + "\n",
+		"swagger2 parameter":    "swagger: '2.0'\ninfo: {title: t, version: '1'}\npaths:\n  /x:\n    get:\n      parameters:\n        - " + ext + "\n      responses: {'200': {description: ok}}\n",
+	}
+	for name, src := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			_, err := runner("parse").Parse(t.Context(), []byte(src), openapi.Options{})
+			if errors.Is(err, ErrParserCrashed) {
+				t.Errorf("parser crashed: %v", err)
+			}
+		})
+	}
+}
+
 func TestParseChildFailures(t *testing.T) {
 	for mode, want := range map[string]error{
 		"crash":   ErrParserCrashed,
