@@ -129,7 +129,7 @@ export default function Picker() {
         <span className="tui-dim">{current.desc}</span>
       </div>
       <div className="tui-box tui-prompt">
-        <span className="tui-dim">&gt; / filter · space toggle · i details · s save</span>
+        <span className="tui-dim">&gt; / filter · space toggle · m mode · i details · s save</span>
       </div>
       <div className="tui-foot">
         <span className="stats">{stats}</span>
