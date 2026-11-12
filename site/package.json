@@ -1,0 +1,16 @@
+{
+  "name": "plugit-site",
+  "private": true,
+  "version": "0.1.0",
+  "description": "The PlugIt website: a static Next.js export.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "preview": "npx serve@14.2.4 out"
+  },
+  "dependencies": {
+    "next": "16.4.3",
+    "react": "19.2.9",
+    "react-dom": "19.2.9"
+  }
+}
