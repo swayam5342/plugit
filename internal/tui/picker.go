@@ -855,3 +855,7 @@ func RunPicker(ctx context.Context, in PickerInput, r io.Reader, w io.Writer) (c
 	}
 	return ts, nil
 }
+
+// Safe strips control and format characters from untrusted text before it
+// is printed to a terminal.
+func Safe(s string) string { return safe(s) }
