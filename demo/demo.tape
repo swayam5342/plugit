@@ -9,6 +9,7 @@
 # this folder, so no real MCP client config is touched (the tape stops if
 # they don't). PowerShell, because its $env: settings reach plugit.exe.
 Output demo.gif
+Output demo.mp4
 Set Shell "pwsh"
 Set FontSize 15
 Set Width 1280
