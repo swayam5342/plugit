@@ -915,3 +915,26 @@ paths:
 		t.Errorf("file field not reported: %+v", ph.Issues)
 	}
 }
+
+// libopenapi v0.42.5 reads past the end of a Swagger 2.0 path item whose
+// last value is a scalar containing "$ref", and panics on its own
+// goroutine (v2/path_item.go:83; found by FuzzParse, seed 2e86b8e3bffd3ebb).
+// Swagger 2.0 path items have no string fields but $ref, so such a value
+// is invalid: reject it before libopenapi sees it.
+func TestParseRejectsScalarV2PathItemValues(t *testing.T) {
+	for name, src := range map[string]string{
+		"fuzz seed": "swagger: \"2.0\"\npaths:\n  /:\n    put:\n      'arameters:\n        - in: body\n          schema: {$ref: '#User'}\nUser: \n properties:\n  kkkkme:",
+		"plain":     "swagger: '2.0'\ninfo: {title: t, version: '1'}\npaths:\n  /x:\n    get: 'see $ref docs'\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Parse([]byte(src), Options{}); !errors.Is(err, ErrInvalidSpec) {
+				t.Errorf("err = %v, want ErrInvalidSpec", err)
+			}
+		})
+	}
+	// A $ref path item and ordinary operations are fine.
+	ok := "swagger: '2.0'\ninfo: {title: t, version: '1'}\npaths:\n  /x:\n    get:\n      description: uses $ref internally\n      responses: {'200': {description: ok}}\n"
+	if m := parse(t, ok, Options{}); len(m.Tools) != 1 {
+		t.Errorf("valid spec rejected: %v", m.Warnings)
+	}
+}

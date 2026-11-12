@@ -245,3 +245,38 @@ func truncateRef(ref string) string {
 	}
 	return ref
 }
+
+// checkV2PathItems rejects Swagger 2.0 path items with a scalar value that
+// contains "$ref". libopenapi v0.42.5 treats any node of a v2 path item
+// containing "$ref" as a reference and reads the node after it, which is
+// past the end when that node is the item's last value: a panic on its own
+// goroutine that recover can't catch (v2/path_item.go:83). v2 path items
+// have no string fields except $ref, so these values are invalid anyway.
+func checkV2PathItems(root *yaml.Node) error {
+	doc := root
+	if doc.Kind == yaml.DocumentNode && len(doc.Content) > 0 {
+		doc = doc.Content[0]
+	}
+	if doc.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(doc.Content); i += 2 {
+		if doc.Content[i].Value != "paths" || doc.Content[i+1].Kind != yaml.MappingNode {
+			continue
+		}
+		paths := doc.Content[i+1]
+		for j := 0; j+1 < len(paths.Content); j += 2 {
+			item := paths.Content[j+1]
+			if item.Kind != yaml.MappingNode {
+				continue
+			}
+			for k := 0; k+1 < len(item.Content); k += 2 {
+				key, val := item.Content[k], item.Content[k+1]
+				if key.Value != "$ref" && val.Kind == yaml.ScalarNode && strings.Contains(strings.ToLower(val.Value), "$ref") {
+					return fmt.Errorf("%w: path %q (line %d): %q must be an object", ErrInvalidSpec, truncateRef(paths.Content[j].Value), key.Line, truncateRef(key.Value))
+				}
+			}
+		}
+	}
+	return nil
+}

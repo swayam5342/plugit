@@ -101,6 +101,11 @@ func Parse(data []byte, opts Options) (m *model.Manifest, err error) {
 		return nil, fmt.Errorf("parsing spec: %w (got %q %q)", ErrUnsupportedSpec, info.SpecType, info.Version)
 	}
 
+	if info.SpecType == utils.OpenApi2 {
+		if err := checkV2PathItems(info.RootNode); err != nil {
+			return nil, fmt.Errorf("parsing spec: %w", err)
+		}
+	}
 	external, err := checkRefs(info.RootNode)
 	if err != nil {
 		return nil, fmt.Errorf("parsing spec: %w", err)
