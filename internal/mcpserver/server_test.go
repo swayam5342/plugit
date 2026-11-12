@@ -71,6 +71,24 @@ func (s *syncBuffer) String() string {
 
 func setup(t *testing.T, cfg Config, upstream http.HandlerFunc) *rig {
 	t.Helper()
+	return setupClient(t, cfg, upstream, nil)
+}
+
+// setupClient is setup with client options (for example an elicitation
+// handler, which makes the client advertise elicitation).
+func setupClient(t *testing.T, cfg Config, upstream http.HandlerFunc, opts *mcp.ClientOptions) *rig {
+	t.Helper()
+	return setupFull(t, cfg, upstream, opts, "")
+}
+
+// setupClientVersion connects at a given MCP protocol version.
+func setupClientVersion(t *testing.T, cfg Config, opts *mcp.ClientOptions, version string) *rig {
+	t.Helper()
+	return setupFull(t, cfg, nil, opts, version)
+}
+
+func setupFull(t *testing.T, cfg Config, upstream http.HandlerFunc, opts *mcp.ClientOptions, version string) *rig {
+	t.Helper()
 	r := &rig{hits: &atomic.Int32{}, lastReq: &atomic.Value{}, logs: &syncBuffer{}}
 	if upstream == nil {
 		upstream = func(w http.ResponseWriter, req *http.Request) {
@@ -105,8 +123,12 @@ func setup(t *testing.T, cfg Config, upstream http.HandlerFunc) *rig {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = ss.Close() })
-	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "1"}, nil)
-	cs, err := client.Connect(t.Context(), ct, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "1"}, opts)
+	var sopts *mcp.ClientSessionOptions
+	if version != "" {
+		sopts = &mcp.ClientSessionOptions{ProtocolVersion: version}
+	}
+	cs, err := client.Connect(t.Context(), ct, sopts)
 	if err != nil {
 		t.Fatal(err)
 	}

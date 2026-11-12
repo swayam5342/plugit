@@ -9,13 +9,20 @@ package mcpserver
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -72,11 +79,13 @@ func New(cfg Config) *mcp.Server {
 		&mcp.Implementation{Name: cfg.Name, Version: cfg.Version},
 		&mcp.ServerOptions{Logger: cfg.Logger},
 	)
+	key := make([]byte, 32)
+	_, _ = rand.Read(key) // crypto/rand.Read never fails (Go 1.24+)
 	for _, st := range cfg.Tools {
 		if !policy.Lists(st.Tool.Safety, cfg.Mode) || st.Override == policy.OverrideDeny {
 			continue
 		}
-		h := &handler{cfg: &cfg, tool: st}
+		h := &handler{cfg: &cfg, tool: st, key: key}
 		srv.AddTool(&mcp.Tool{
 			Name:        st.Tool.Name,
 			Description: st.Tool.Description,
@@ -112,6 +121,7 @@ func annotations(t model.Tool) *mcp.ToolAnnotations {
 type handler struct {
 	cfg  *Config
 	tool Tool
+	key  []byte // signs confirmation state (see confirmState)
 
 	once      sync.Once
 	validator *schema.Validator
@@ -138,18 +148,10 @@ func (h *handler) handle(ctx context.Context, req *mcp.CallToolRequest) (res *mc
 	}()
 
 	decision := policy.Check(h.tool.Tool.Safety, h.cfg.Mode, h.tool.Override)
-	switch decision.Decision {
-	case policy.Deny:
+	if decision.Decision == policy.Deny {
 		h.log(name, start, 0, true, "denied")
 		rec.Outcome = store.Denied
 		return errorResult(name + ": denied by policy: " + decision.Reason), nil
-	case policy.Confirm:
-		// Elicitation-based confirmation arrives in M5 (SPEC §7); until then,
-		// deny and say how to proceed.
-		h.log(name, start, 0, true, "needs confirmation")
-		rec.Outcome = store.Denied
-		return errorResult(name + ": " + decision.Reason + ", which requires user confirmation; " +
-			"this server can't ask for it yet, so the call was not made. Use `plugit edit` to allow this tool or change policy.mode"), nil
 	}
 
 	h.once.Do(func() {
@@ -170,6 +172,21 @@ func (h *handler) handle(ctx context.Context, req *mcp.CallToolRequest) (res *mc
 		return errorResult(name + ": " + err.Error()), nil
 	}
 
+	// Confirmation comes after validation, so the user is only asked about
+	// calls that would really be made.
+	if decision.Decision == policy.Confirm {
+		ask, ok, why := h.confirm(req, args, decision.Reason)
+		if ask != nil {
+			rec.Outcome = "" // not a call yet: the retry with the answer is recorded
+			return ask, nil
+		}
+		if !ok {
+			h.log(name, start, 0, true, "not confirmed")
+			rec.Outcome = store.Denied
+			return errorResult(h.cfg.Redactor.String(name + ": " + why)), nil
+		}
+	}
+
 	r := proxy.Call(ctx, h.cfg.Doer, h.tool.Tool, args, h.cfg.Target, h.cfg.Redactor)
 	h.log(name, start, r.Status, r.IsError, "", "bytes", r.Bytes, "truncated", r.Truncated)
 	rec.Status, rec.Bytes = r.Status, r.Bytes
@@ -182,12 +199,130 @@ func (h *handler) handle(ctx context.Context, req *mcp.CallToolRequest) (res *mc
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: r.Text}}, IsError: r.IsError}, nil
 }
 
+// confirmSchema is the elicitation form: one pre-ticked checkbox. It isn't
+// required, so a client that only offers accept/decline still works.
+var confirmSchema = json.RawMessage(`{"type":"object","properties":{"confirm":{"type":"boolean","title":"Make this call","default":true}}}`)
+
+// ConfirmTimeout is how long an answer to a confirmation stays valid.
+const ConfirmTimeout = 5 * time.Minute
+
+// maxShownArgs caps the arguments shown in a confirmation.
+const maxShownArgs = 2000
+
+// confirmID names plugit's input request.
+const confirmID = "plugit_confirm"
+
+// now is the clock for confirmation state (tests replace it).
+var now = time.Now
+
+// confirm asks the user, through the MCP client, whether to make this call
+// (SPEC §3.7 step 2). It uses multi round-trip requests (SEP-2322): the
+// first call returns ask, an input-required result carrying an elicitation
+// form; the client fulfils it and calls again with the answer, which this
+// call then judges. The SDK turns the same result into a plain
+// elicitation/create request for clients on older protocol versions.
+//
+// The answer is bound to the exact arguments: requestState is an HMAC of
+// the tool, the arguments and the time, so a retry with different
+// arguments or a stale answer is refused. Without elicitation support, the
+// answer is no (§10 Q3).
+func (h *handler) confirm(req *mcp.CallToolRequest, args map[string]any, reason string) (ask *mcp.CallToolResult, ok bool, why string) {
+	var params *mcp.CallToolParamsRaw
+	var ss *mcp.ServerSession
+	if req != nil {
+		params, ss = req.Params, req.Session
+	}
+	if params != nil && params.InputResponses != nil {
+		ans, _ := params.InputResponses[confirmID].(*mcp.ElicitResult)
+		if ans == nil {
+			return nil, false, "the confirmation answer is missing; the call was not made"
+		}
+		if err := h.checkState(params.RequestState, args); err != nil {
+			return nil, false, err.Error() + "; the call was not made"
+		}
+		switch ans.Action {
+		case "accept":
+			if v, set := ans.Content["confirm"]; set && v != true {
+				return nil, false, "declined by the user; the call was not made"
+			}
+			return nil, true, ""
+		case "decline":
+			return nil, false, "declined by the user; the call was not made"
+		}
+		return nil, false, "confirmation cancelled; the call was not made"
+	}
+
+	if ss == nil || ss.InitializeParams() == nil || ss.InitializeParams().Capabilities == nil || ss.InitializeParams().Capabilities.Elicitation == nil {
+		return nil, false, reason + ", which requires user confirmation; this MCP client can't ask for it (it doesn't support elicitation), " +
+			"so the call was not made. Use `plugit edit` to allow this tool or change policy.mode"
+	}
+	t := h.tool.Tool
+	shown := "(none)"
+	if len(args) > 0 {
+		if b, err := json.MarshalIndent(h.cfg.Redactor.Args(args), "", "  "); err == nil {
+			shown = visible(string(b))
+		}
+	}
+	if len(shown) > maxShownArgs {
+		shown = shown[:maxShownArgs] + "\n… (truncated)"
+	}
+	msg := fmt.Sprintf("%s wants to call %s (%s %s, a %s tool).\n\nArguments:\n%s\n\nAllow this call?",
+		h.cfg.Name, t.Name, t.Method, t.Path, t.Safety, shown)
+	return &mcp.CallToolResult{
+		InputRequests: mcp.InputRequestMap{confirmID: &mcp.ElicitParams{Mode: "form", Message: msg, RequestedSchema: confirmSchema}},
+		RequestState:  h.state(now(), args),
+	}, false, ""
+}
+
+// state signs the tool, the arguments and the time.
+func (h *handler) state(at time.Time, args map[string]any) string {
+	ts := strconv.FormatInt(at.Unix(), 10)
+	return ts + "." + base64.RawURLEncoding.EncodeToString(h.mac(ts, args))
+}
+
+func (h *handler) mac(ts string, args map[string]any) []byte {
+	canon, _ := json.Marshal(args) // maps encode with sorted keys
+	m := hmac.New(sha256.New, h.key)
+	m.Write([]byte(h.tool.Tool.Name + "\x00" + ts + "\x00"))
+	m.Write(canon)
+	return m.Sum(nil)
+}
+
+// checkState verifies requestState against the arguments of this call.
+func (h *handler) checkState(state string, args map[string]any) error {
+	ts, sig, found := strings.Cut(state, ".")
+	got, err := base64.RawURLEncoding.DecodeString(sig)
+	if !found || err != nil || !hmac.Equal(got, h.mac(ts, args)) {
+		return errors.New("the confirmation doesn't match these arguments")
+	}
+	sec, err := strconv.ParseInt(ts, 10, 64)
+	if err != nil || now().Sub(time.Unix(sec, 0)) > ConfirmTimeout {
+		return errors.New("the confirmation expired")
+	}
+	return nil
+}
+
+// visible makes invisible characters visible as \uXXXX, so arguments
+// written by the model can't hide or reorder text in a confirmation (JSON
+// encoding already escapes control characters but not bidi overrides).
+func visible(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if unicode.Is(unicode.Cf, r) || (unicode.IsControl(r) && r != '\n') {
+			fmt.Fprintf(&b, "\\u%04x", r)
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
 // record sends one call to the call log, if there is one. Arguments follow
 // log.args; the error and preview come from the result text, which is
 // already redacted, and are redacted again to be sure.
 func (h *handler) record(start time.Time, raw json.RawMessage, c *store.Call, res *mcp.CallToolResult) {
 	l := h.cfg.Log
-	if l == nil || l.Record == nil {
+	if l == nil || l.Record == nil || c.Outcome == "" {
 		return
 	}
 	c.Time, c.Duration = start.UTC(), time.Since(start)
