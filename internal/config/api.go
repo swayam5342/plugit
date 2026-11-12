@@ -471,3 +471,42 @@ func validRetention(s string) bool {
 func isSpaceOrControl(r rune) bool {
 	return r <= ' ' || r == 0x7f
 }
+
+const apiHeader = `# PlugIt API config. Edit by hand, or with ` + "`plugit edit <name>`" + `.
+# Secrets are references (env:VAR or keyring:service/key), never values.
+`
+
+// MarshalAPI renders c as plugit.yaml. The result is validated by parsing
+// it back, so a file plugit writes always loads.
+func MarshalAPI(c *API) ([]byte, error) {
+	out, err := yaml.Dump(c, yaml.WithIndent(2))
+	if err != nil {
+		return nil, fmt.Errorf("encoding config: %w", err)
+	}
+	out = append([]byte(apiHeader), out...)
+	if _, err := ParseAPI(out); err != nil {
+		return nil, fmt.Errorf("refusing to write an invalid config: %w", err)
+	}
+	return out, nil
+}
+
+// SaveAPI writes apis/<name>/plugit.yaml atomically and owner-only,
+// creating the API directory if needed.
+func SaveAPI(p Paths, c *API) error {
+	data, err := MarshalAPI(c)
+	if err != nil {
+		return err
+	}
+	dir, err := p.APIDir(c.Name)
+	if err != nil {
+		return err
+	}
+	if err := EnsureDir(dir); err != nil {
+		return err
+	}
+	path, err := p.APIConfig(c.Name)
+	if err != nil {
+		return err
+	}
+	return WriteFileAtomic(path, data)
+}

@@ -306,3 +306,32 @@ func TestLoadAPI(t *testing.T) {
 		}
 	})
 }
+
+// A written config always loads back to the same thing.
+func TestMarshalAPIRoundTrip(t *testing.T) {
+	c, err := ParseAPI([]byte(fullConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := MarshalAPI(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(out), "#") {
+		t.Errorf("missing header comment:\n%s", out)
+	}
+	back, err := ParseAPI(out)
+	if err != nil {
+		t.Fatalf("reparse: %v\n%s", err, out)
+	}
+	again, _ := MarshalAPI(back)
+	if string(again) != string(out) {
+		t.Errorf("not stable:\n%s\n---\n%s", out, again)
+	}
+
+	bad := *c
+	bad.Auth.Secret = "literal:test-token-123"
+	if _, err := MarshalAPI(&bad); err == nil || strings.Contains(err.Error(), "test-token-123") {
+		t.Errorf("invalid config marshalled: %v", err)
+	}
+}
