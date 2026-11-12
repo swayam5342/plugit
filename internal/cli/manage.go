@@ -332,8 +332,20 @@ func doctorAPI(d doctorDeps, r *report, name string) {
 		}
 		r.ok("%s %s resolves", field, ref)
 	}
-	if cfg.Auth.Type != config.AuthNone {
+	if cfg.Auth.Type != config.AuthNone && cfg.Auth.Secret != "" {
 		check("auth.secret", cfg.Auth.Secret)
+	}
+	if cfg.Auth.Type == config.AuthOAuth2 {
+		r.info("OAuth2 %s via %s", cfg.Auth.Flow, hostOf(cfg.Auth.TokenURL))
+		if cfg.Auth.Flow == config.FlowDeviceCode {
+			if d.keyring == nil {
+				r.info("%s: keyring not checked", refreshTokenRef(name))
+			} else if _, err := (keyringStore{get: d.keyring, api: name}).Load(); err != nil {
+				r.fail("no OAuth refresh token stored: sign in with `plugit auth %s`", name)
+			} else {
+				r.ok("OAuth refresh token stored in %s", refreshTokenRef(name))
+			}
+		}
 	}
 	for _, f := range cfg.Fixed {
 		check("fixed "+f.Name, f.Value)

@@ -55,6 +55,12 @@ type Auth struct {
 	Header string // AuthHeader
 	Param  string // AuthQuery
 	Secret string
+	// Token, when set, supplies the bearer token for each call (OAuth). Call
+	// fetches it, sets Secret and redacts it by value.
+	Token func(context.Context) (string, error)
+	// Unauthorized, when set, is told about a 401 so a cached token is
+	// dropped (no automatic retry: writes are never repeated).
+	Unauthorized func()
 }
 
 // Fixed is a resolved fixed parameter. If the tool declares a parameter with
@@ -73,6 +79,7 @@ type Target struct {
 	Auth      Auth
 	Fixed     []Fixed
 	UserAgent string
+	Extra     []string // more values to redact (an OAuth client secret)
 }
 
 // SecretValues lists every value that must be redacted wherever it appears
@@ -98,6 +105,9 @@ func (tg Target) SecretValues() []string {
 		if f.Secret {
 			add(f.Value)
 		}
+	}
+	for _, e := range tg.Extra {
+		add(e)
 	}
 	return out
 }

@@ -43,6 +43,7 @@ type Options struct {
 // Redactor masks secrets. It is immutable after New and safe for concurrent
 // use.
 type Redactor struct {
+	opts     Options
 	headers  map[string]bool // normalized names
 	params   map[string]bool // normalized names
 	replacer *strings.Replacer
@@ -51,6 +52,7 @@ type Redactor struct {
 // New builds a Redactor from opts.
 func New(opts Options) *Redactor {
 	r := &Redactor{
+		opts:    opts,
 		headers: make(map[string]bool, len(opts.SecretHeaders)),
 		params:  make(map[string]bool, len(opts.SecretQueryParams)),
 	}
@@ -70,6 +72,24 @@ func New(opts Options) *Redactor {
 		r.replacer = strings.NewReplacer(pairs...)
 	}
 	return r
+}
+
+// With returns a Redactor that also masks extra secrets, for values only
+// known later (an OAuth access token fetched while serving). Empty values
+// are ignored; with none left, it returns r itself.
+func (r *Redactor) With(extra ...string) *Redactor {
+	var add []string
+	for _, e := range extra {
+		if e != "" {
+			add = append(add, e)
+		}
+	}
+	if len(add) == 0 {
+		return r
+	}
+	opts := r.opts
+	opts.Secrets = append(slices.Clone(opts.Secrets), add...)
+	return New(opts)
 }
 
 // String returns s with every secret value and known token format masked.

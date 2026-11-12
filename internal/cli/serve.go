@@ -27,6 +27,7 @@ import (
 	"github.com/swayam5342/plugit/internal/jsonpick"
 	"github.com/swayam5342/plugit/internal/mcpserver"
 	"github.com/swayam5342/plugit/internal/model"
+	"github.com/swayam5342/plugit/internal/oauth"
 	"github.com/swayam5342/plugit/internal/openapi"
 	"github.com/swayam5342/plugit/internal/policy"
 	"github.com/swayam5342/plugit/internal/proxy"
@@ -74,6 +75,7 @@ replaces it. Browser requests from non-loopback origins are refused.`,
 				transport: &mcp.StdioTransport{},
 				stderr:    cmd.ErrOrStderr(),
 				resolver:  secrets.NewResolver(),
+				keyring:   secrets.OSKeyring{},
 				parse:     isolate.Parse,
 				info:      info,
 			})
@@ -253,7 +255,7 @@ func loadActive(ctx context.Context, s serveSettings, d runDeps, logger *slog.Lo
 	if err != nil {
 		return nil, fmt.Errorf("base_url: %w", err)
 	}
-	target, hidden, err := buildTarget(cfg, baseURL, d.resolver, "plugit/"+d.info.withDefaults().Version)
+	target, hidden, err := buildTarget(cfg, baseURL, d, "plugit/"+d.info.withDefaults().Version)
 	if err != nil {
 		return nil, err
 	}
@@ -339,12 +341,26 @@ func parserID(info BuildInfo) string {
 
 // buildTarget resolves the credential and fixed params. It returns the
 // names to hide from the model and to redact by name.
-func buildTarget(cfg *config.API, baseURL *url.URL, res *secrets.Resolver, userAgent string) (proxy.Target, []string, error) {
+func buildTarget(cfg *config.API, baseURL *url.URL, d runDeps, userAgent string) (proxy.Target, []string, error) {
+	res := d.resolver
 	tg := proxy.Target{BaseURL: baseURL, UserAgent: userAgent}
 	var hidden []string
 
 	a := cfg.Auth
-	if a.Type != config.AuthNone {
+	switch a.Type {
+	case config.AuthNone:
+	case config.AuthOAuth2:
+		// Access tokens are fetched per call (and cached in memory), only
+		// ever sent to the pinned base_url origin (SPEC M6 design note).
+		oc, err := oauthConfig(cfg, res)
+		if err != nil {
+			return tg, nil, err
+		}
+		store := keyringStore{get: res.Keyring, set: d.keyring, api: cfg.Name}
+		src := oauth.NewSource(oc, oauthDoer(cfg), store, nil)
+		tg.Auth = proxy.Auth{Type: proxy.AuthBearer, Token: src.Token, Unauthorized: src.Invalidate}
+		tg.Extra = append(tg.Extra, oc.ClientSecret)
+	default:
 		ref, err := secrets.ParseSecretRef(a.Secret)
 		if err != nil {
 			return tg, nil, fmt.Errorf("auth.secret: %w", err)

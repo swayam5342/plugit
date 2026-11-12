@@ -362,6 +362,7 @@ type runDeps struct {
 	transport mcp.Transport
 	stderr    io.Writer
 	resolver  *secrets.Resolver
+	keyring   keyringSetter // stores a rotated OAuth refresh token; nil: not stored
 	parse     func(ctx context.Context, data []byte, opts openapi.Options) (*model.Manifest, error)
 	info      BuildInfo
 }
@@ -398,6 +399,7 @@ real value in the MCP client's env block. When any credential is configured,
 				transport: &mcp.StdioTransport{},
 				stderr:    cmd.ErrOrStderr(),
 				resolver:  secrets.NewResolver(),
+				keyring:   secrets.OSKeyring{},
 				parse:     isolate.Parse,
 				info:      info,
 			})

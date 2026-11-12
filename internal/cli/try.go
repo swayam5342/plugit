@@ -75,6 +75,7 @@ confirmation ask for it on the terminal (or pass --yes).`,
 				runDeps: runDeps{
 					stderr:   cmd.ErrOrStderr(),
 					resolver: secrets.NewResolver(),
+					keyring:  secrets.OSKeyring{},
 					parse:    isolate.Parse,
 					info:     info,
 				},

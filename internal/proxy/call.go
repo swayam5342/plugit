@@ -37,6 +37,14 @@ type Result struct {
 // pick, when not nil, keeps only the tool's response_fields of a complete
 // JSON success response (SPEC M6 design note: response field filtering).
 func Call(ctx context.Context, doer httpx.Doer, t model.Tool, args map[string]any, tg Target, red *redact.Redactor, pick *jsonpick.Picker) Result {
+	if tg.Auth.Token != nil {
+		tok, err := tg.Auth.Token(ctx)
+		if err != nil {
+			return failure(t, red, "couldn't get an access token: "+err.Error())
+		}
+		tg.Auth.Secret = tok
+		red = red.With(tok) // fetched while serving: unknown when red was built
+	}
 	req, err := Build(ctx, t, args, tg)
 	if err != nil {
 		return failure(t, red, "invalid arguments: "+err.Error())
@@ -54,6 +62,9 @@ func Call(ctx context.Context, doer httpx.Doer, t model.Tool, args map[string]an
 	}
 
 	res := Result{Status: resp.StatusCode, Bytes: len(body), Truncated: truncated, IsError: resp.StatusCode >= 400}
+	if resp.StatusCode == http.StatusUnauthorized && tg.Auth.Unauthorized != nil {
+		tg.Auth.Unauthorized()
+	}
 	if res.IsError || truncated {
 		pick = nil // errors and cut-off bodies are shown whole
 	}

@@ -43,7 +43,7 @@ func TestAuthStoresKeyringSecret(t *testing.T) {
 	p := setupAuthAPI(t, "auth: {type: bearer, secret: 'keyring:plugit/pets'}")
 	kr := &fakeKeyring{}
 	var out, errOut bytes.Buffer
-	err := authAPI(p, "pets", authDeps{in: strings.NewReader(runSecret + "\r\n"), out: &out, errOut: &errOut, keyring: kr})
+	err := authAPI(t.Context(), p, "pets", authDeps{in: strings.NewReader(runSecret + "\r\n"), out: &out, errOut: &errOut, keyring: kr})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestAuthRejects(t *testing.T) {
 				kr = &fakeKeyring{}
 			}
 			var out, errOut bytes.Buffer
-			err := authAPI(p, "pets", authDeps{in: strings.NewReader(tc.input), out: &out, errOut: &errOut, keyring: kr})
+			err := authAPI(t.Context(), p, "pets", authDeps{in: strings.NewReader(tc.input), out: &out, errOut: &errOut, keyring: kr})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want mention of %q", err, tc.want)
 			}
@@ -102,7 +102,7 @@ func TestAuthRejects(t *testing.T) {
 func TestAuthInputCap(t *testing.T) {
 	p := setupAuthAPI(t, "auth: {type: bearer, secret: 'keyring:plugit/pets'}")
 	kr := &fakeKeyring{}
-	err := authAPI(p, "pets", authDeps{in: strings.NewReader(strings.Repeat("a", maxSecretBytes+10)), out: &bytes.Buffer{}, errOut: &bytes.Buffer{}, keyring: kr})
+	err := authAPI(t.Context(), p, "pets", authDeps{in: strings.NewReader(strings.Repeat("a", maxSecretBytes+10)), out: &bytes.Buffer{}, errOut: &bytes.Buffer{}, keyring: kr})
 	if err == nil || !strings.Contains(err.Error(), "too long") {
 		t.Errorf("err = %v", err)
 	}

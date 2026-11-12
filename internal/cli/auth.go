@@ -2,16 +2,19 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
 	"github.com/swayam5342/plugit/internal/config"
+	"github.com/swayam5342/plugit/internal/httpx"
 	"github.com/swayam5342/plugit/internal/secrets"
 )
 
@@ -30,6 +33,12 @@ type authDeps struct {
 	// in is not a terminal.
 	readHidden func() ([]byte, error)
 	keyring    keyringSetter
+	// For type oauth2: how to resolve the client secret, reach the
+	// authorization server, and wait between device-flow polls. nil means
+	// the real ones.
+	resolver *secrets.Resolver
+	doer     httpx.Doer
+	sleep    func(context.Context, time.Duration) error
 }
 
 func newAuthCmd(g *globalFlags) *cobra.Command {
@@ -39,31 +48,39 @@ func newAuthCmd(g *globalFlags) *cobra.Command {
 		Long: `Store an API's credential in the OS keyring item named by auth.secret in
 its plugit.yaml (keyring:service/key). The value is read without echo, or from
 stdin when it is not a terminal. For env: secrets, set the variable in the MCP
-client's env block instead.`,
+client's env block instead.
+
+For auth.type oauth2: with flow client_credentials, store the client secret
+(if it lives in the keyring) and check it by fetching a token; with flow
+device_code, sign in in the browser and keep the refresh token in the
+keyring (plugit/oauth-refresh-<name>).`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p, err := g.paths()
 			if err != nil {
 				return err
 			}
-			d := authDeps{in: cmd.InOrStdin(), out: cmd.OutOrStdout(), errOut: cmd.ErrOrStderr(), keyring: secrets.OSKeyring{}}
+			d := authDeps{in: cmd.InOrStdin(), out: cmd.OutOrStdout(), errOut: cmd.ErrOrStderr(), keyring: secrets.OSKeyring{}, resolver: secrets.NewResolver()}
 			if f, ok := cmd.InOrStdin().(*os.File); ok && term.IsTerminal(int(f.Fd())) { // #nosec G115 -- a file descriptor fits in int
 				d.readHidden = func() ([]byte, error) { return term.ReadPassword(int(f.Fd())) } // #nosec G115 -- as above
 			}
-			return authAPI(p, args[0], d)
+			return authAPI(cmd.Context(), p, args[0], d)
 		},
 	}
 }
 
 // authAPI prompts for an API's credential and stores it in the keyring item
 // its config names. The value is never echoed or included in errors.
-func authAPI(p config.Paths, name string, d authDeps) error {
+func authAPI(ctx context.Context, p config.Paths, name string, d authDeps) error {
 	cfg, err := config.LoadAPI(p, name)
 	if err != nil {
 		return err
 	}
-	if cfg.Auth.Type == config.AuthNone {
+	switch cfg.Auth.Type {
+	case config.AuthNone:
 		return fmt.Errorf("API %s has no credential (auth.type is none); set auth in its plugit.yaml first", name)
+	case config.AuthOAuth2:
+		return authOAuth(ctx, cfg, d)
 	}
 	ref, err := secrets.ParseSecretRef(cfg.Auth.Secret)
 	if err != nil {
@@ -72,12 +89,18 @@ func authAPI(p config.Paths, name string, d authDeps) error {
 	if ref.Scheme != secrets.Keyring {
 		return fmt.Errorf("auth.secret is %s, so there is nothing to store: set %s in the MCP client's env block, or change auth.secret to keyring:plugit/%s", ref, ref.Var, name)
 	}
-
 	hint := ""
 	if cfg.Auth.Type == config.AuthBasic {
 		hint = " as user:password"
 	}
-	secret, err := readSecret(d, fmt.Sprintf("Credential for %s%s (input hidden): ", name, hint))
+	return storeSecret(d, cfg, ref, fmt.Sprintf("Credential for %s%s (input hidden): ", name, hint))
+}
+
+// storeSecret reads a secret without echo and stores it in ref's keyring
+// item. The value is never echoed or included in errors.
+func storeSecret(d authDeps, cfg *config.API, ref secrets.Ref, prompt string) error {
+	name := cfg.Name
+	secret, err := readSecret(d, prompt)
 	if err != nil {
 		return err
 	}

@@ -136,7 +136,7 @@ func TestParseAPIRejects(t *testing.T) {
 		"empty file":            {"", "no documents", ErrInvalidConfig},
 		"not a mapping":         {"- 1\n", "", ErrInvalidConfig},
 		"missing version":       {strings.Replace(base, "version: 1\n", "", 1), "version", ErrInvalidConfig},
-		"future version":        {strings.Replace(base, "version: 1", "version: 4", 1), "newer", ErrUnsupportedVersion},
+		"future version":        {strings.Replace(base, "version: 1", "version: 5", 1), "newer", ErrUnsupportedVersion},
 		"bad name":              {strings.Replace(base, "name: pets", "name: ../etc", 1), "name", ErrInvalidConfig},
 		"missing base_url":      {strings.Replace(base, "base_url: https://pets.example.test/v1\n", "", 1), "base_url", ErrInvalidConfig},
 		"relative base_url":     {strings.Replace(base, "https://pets.example.test/v1", "/v1", 1), "base_url", ErrInvalidConfig},
@@ -356,7 +356,7 @@ func TestRetentionPeriod(t *testing.T) {
 // Version 2 adds per-tool rate_limit. Version 1 files load unchanged and
 // come out as version 2 (the migration has nothing to rewrite).
 func TestVersionMigration(t *testing.T) {
-	if CurrentVersion != 3 {
+	if CurrentVersion != 4 {
 		t.Fatalf("CurrentVersion = %d", CurrentVersion)
 	}
 	c, err := ParseAPI([]byte(minimalConfig))
@@ -367,7 +367,7 @@ func TestVersionMigration(t *testing.T) {
 		t.Errorf("v1 config loaded as version %d, want %d", c.Version, CurrentVersion)
 	}
 	out, err := MarshalAPI(c)
-	if err != nil || !strings.Contains(string(out), "version: 3") {
+	if err != nil || !strings.Contains(string(out), "version: 4") {
 		t.Errorf("marshal = %s, %v", out, err)
 	}
 	v2 := strings.Replace(minimalConfig, "version: 1", "version: 2", 1)
@@ -412,7 +412,54 @@ func TestToolResponseFields(t *testing.T) {
 		}
 	}
 	v2 := strings.Replace(minimalConfig, "version: 1", "version: 2", 1)
-	if c, err := ParseAPI([]byte(v2)); err != nil || c.Version != 3 {
+	if c, err := ParseAPI([]byte(v2)); err != nil || c.Version != CurrentVersion {
 		t.Errorf("v2 config: %v, version %d", err, c.Version)
+	}
+}
+
+// Version 4 adds OAuth2 (SPEC M6 design note: OAuth2).
+func TestOAuth2Auth(t *testing.T) {
+	withAuth := func(auth string) string {
+		return strings.Replace(minimalConfig, "toolsets:", auth+"\ntoolsets:", 1)
+	}
+	cc := withAuth(`auth: {type: oauth2, flow: client_credentials, token_url: "https://auth.example.test/oauth/token", client_id: my-client, secret: "keyring:plugit/pets-client", scopes: [read, write]}`)
+	c, err := ParseAPI([]byte(cc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := c.Auth
+	if a.Type != AuthOAuth2 || a.Flow != "client_credentials" || a.TokenURL != "https://auth.example.test/oauth/token" || a.ClientID != "my-client" || len(a.Scopes) != 2 {
+		t.Errorf("auth = %+v", a)
+	}
+	device := withAuth(`auth: {type: oauth2, flow: device_code, token_url: "https://auth.example.test/token", device_url: "https://auth.example.test/device", client_id: cli}`)
+	if _, err := ParseAPI([]byte(device)); err != nil {
+		t.Errorf("device flow without a client secret: %v", err)
+	}
+	local := withAuth(`auth: {type: oauth2, flow: device_code, token_url: "http://127.0.0.1:9000/token", device_url: "http://localhost:9000/device", client_id: cli}`)
+	if _, err := ParseAPI([]byte(local)); err != nil {
+		t.Errorf("loopback http endpoints: %v", err)
+	}
+
+	bad := map[string]string{
+		"no flow":               `auth: {type: oauth2, token_url: "https://a.example.test/t", client_id: c, secret: "env:S"}`,
+		"unknown flow":          `auth: {type: oauth2, flow: password, token_url: "https://a.example.test/t", client_id: c, secret: "env:S"}`,
+		"no token_url":          `auth: {type: oauth2, flow: client_credentials, client_id: c, secret: "env:S"}`,
+		"http token_url":        `auth: {type: oauth2, flow: client_credentials, token_url: "http://a.example.test/t", client_id: c, secret: "env:S"}`,
+		"token_url query":       `auth: {type: oauth2, flow: client_credentials, token_url: "https://a.example.test/t?k=v", client_id: c, secret: "env:S"}`,
+		"token_url userinfo":    `auth: {type: oauth2, flow: client_credentials, token_url: "https://u:p@a.example.test/t", client_id: c, secret: "env:S"}`,
+		"no client_id":          `auth: {type: oauth2, flow: client_credentials, token_url: "https://a.example.test/t", secret: "env:S"}`,
+		"cc without secret":     `auth: {type: oauth2, flow: client_credentials, token_url: "https://a.example.test/t", client_id: c}`,
+		"literal secret":        `auth: {type: oauth2, flow: client_credentials, token_url: "https://a.example.test/t", client_id: c, secret: "hunter2"}`,
+		"device no device_url":  `auth: {type: oauth2, flow: device_code, token_url: "https://a.example.test/t", client_id: c}`,
+		"oauth with header":     `auth: {type: oauth2, flow: device_code, token_url: "https://a.example.test/t", device_url: "https://a.example.test/d", client_id: c, header: X-Key}`,
+		"bad scope":             `auth: {type: oauth2, flow: device_code, token_url: "https://a.example.test/t", device_url: "https://a.example.test/d", client_id: c, scopes: ["a b"]}`,
+		"oauth field on bearer": `auth: {type: bearer, secret: "env:S", token_url: "https://a.example.test/t"}`,
+	}
+	for name, auth := range bad {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseAPI([]byte(withAuth(auth))); err == nil || !strings.Contains(err.Error(), "auth") {
+				t.Errorf("err = %v", err)
+			}
+		})
 	}
 }

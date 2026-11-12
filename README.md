@@ -93,6 +93,26 @@ Already have a working `plugit run` command line? Turn it into a saved config:
 plugit add pets https://petstore.swagger.io/v2/swagger.json --from-run --tags pet --base-url https://petstore.swagger.io/v2
 ```
 
+### OAuth2
+
+APIs that use OAuth2 get `auth.type: oauth2` in their `plugit.yaml`:
+
+```yaml
+auth:
+  type: oauth2
+  flow: device_code              # or client_credentials
+  token_url: https://auth.example.com/oauth/token
+  device_url: https://auth.example.com/oauth/device/code
+  client_id: my-client-id
+  scopes: [read]
+  # secret: keyring:plugit/my-client   # the client secret, required for client_credentials
+```
+
+Then `plugit auth <name>`: for the device flow it shows a URL and a code to approve in the
+browser and keeps the refresh token in the OS keyring; for client credentials it stores the
+client secret and checks it. Access tokens stay in memory, go only to the pinned base URL, and
+are redacted everywhere.
+
 ### Over HTTP instead of stdio
 
 For clients that connect to a URL, serve on loopback:

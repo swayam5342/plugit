@@ -309,3 +309,23 @@ func TestArgs(t *testing.T) {
 		t.Error("Args(nil) should be nil")
 	}
 }
+
+// With adds secrets learned later (an OAuth access token fetched while
+// serving) without losing the original ones; the receiver is unchanged.
+func TestWith(t *testing.T) {
+	base := New(Options{Secrets: []string{"static-secret-1"}, SecretHeaders: []string{"X-Custom"}})
+	r := base.With("dynamic-token-123", "")
+	got := r.String("a static-secret-1 b dynamic-token-123 c")
+	if strings.Contains(got, "static-secret-1") || strings.Contains(got, "dynamic-token-123") {
+		t.Errorf("With lost a secret: %q", got)
+	}
+	if !r.IsSecretHeader("X-Custom") {
+		t.Error("With lost the secret header names")
+	}
+	if strings.Contains(base.String("dynamic-token-123"), Mask) {
+		t.Error("With changed the receiver")
+	}
+	if base.With() != base {
+		t.Error("With() without secrets should return the receiver")
+	}
+}

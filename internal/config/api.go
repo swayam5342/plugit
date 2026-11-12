@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/url"
 	"os"
 	"regexp"
@@ -31,7 +32,9 @@ import (
 //     M5). Version 1 files need no changes; migrate just relabels them.
 //   - 3: adds toolsets.<name>.tools.<key>.response_fields (response field
 //     filtering, M6). Again nothing to rewrite.
-const CurrentVersion = 3
+//   - 4: adds auth.type oauth2 with auth.flow, token_url, device_url,
+//     client_id and scopes (M6). Nothing to rewrite.
+const CurrentVersion = 4
 
 // MaxConfigBytes caps plugit.yaml. A real config is a few kilobytes.
 const MaxConfigBytes = 1 << 20
@@ -61,7 +64,14 @@ const (
 	AuthBearer AuthType = "bearer"
 	AuthHeader AuthType = "header"
 	AuthQuery  AuthType = "query"
-	AuthBasic  AuthType = "basic" // the secret is "user:pass"
+	AuthBasic  AuthType = "basic"  // the secret is "user:pass"
+	AuthOAuth2 AuthType = "oauth2" // version 4; see Auth.Flow
+)
+
+// OAuth flows (auth.flow).
+const (
+	FlowClientCredentials = "client_credentials"
+	FlowDeviceCode        = "device_code"
 )
 
 // LogArgs says how call arguments are logged.
@@ -115,7 +125,15 @@ type Auth struct {
 	Type   AuthType `yaml:"type,omitempty"`
 	Header string   `yaml:"header,omitempty"` // type header
 	Param  string   `yaml:"param,omitempty"`  // type query
-	Secret string   `yaml:"secret,omitempty"` // env:VAR | keyring:service/key
+	Secret string   `yaml:"secret,omitempty"` // env:VAR | keyring:service/key (oauth2: the client secret)
+
+	// type oauth2 (version 4). The endpoints are typed by the user, never
+	// taken from a spec; the client secret goes only to TokenURL.
+	Flow      string   `yaml:"flow,omitempty"`       // client_credentials | device_code
+	TokenURL  string   `yaml:"token_url,omitempty"`  // https (http only to loopback)
+	DeviceURL string   `yaml:"device_url,omitempty"` // device_code only
+	ClientID  string   `yaml:"client_id,omitempty"`  // public identifier
+	Scopes    []string `yaml:"scopes,omitempty"`
 }
 
 // Policy holds the API-wide call policy.
@@ -240,9 +258,9 @@ func ParseAPI(data []byte) (*API, error) {
 
 // migrate brings a validated older config up to CurrentVersion.
 func (c *API) migrate() {
-	if c.Version < 3 {
-		// 1 -> 2 and 2 -> 3 only added optional fields: nothing to rewrite.
-		c.Version = 3
+	if c.Version < 4 {
+		// Every step so far only added optional fields: nothing to rewrite.
+		c.Version = 4
 	}
 }
 
@@ -386,6 +404,9 @@ func (c *API) Validate() error {
 func (c *API) validateAuth(bad func(string, string, ...any), wrap func(string, error)) {
 	a := c.Auth
 	needSecret := true
+	if a.Type != AuthOAuth2 && (a.Flow != "" || a.TokenURL != "" || a.DeviceURL != "" || a.ClientID != "" || len(a.Scopes) > 0) {
+		bad("auth", "flow, token_url, device_url, client_id and scopes are only used with type oauth2")
+	}
 	switch a.Type {
 	case AuthNone:
 		needSecret = false
@@ -415,9 +436,11 @@ func (c *API) validateAuth(bad func(string, string, ...any), wrap func(string, e
 		if a.Header != "" {
 			bad("auth.header", "only used with type header")
 		}
+	case AuthOAuth2:
+		needSecret = c.validateOAuth(bad, wrap)
 	default:
 		needSecret = false
-		bad("auth.type", "%q: use none, bearer, header, query or basic", naming.CleanText(string(a.Type), 40))
+		bad("auth.type", "%q: use none, bearer, header, query, basic or oauth2", naming.CleanText(string(a.Type), 40))
 	}
 	if !needSecret {
 		return
@@ -472,6 +495,64 @@ func (c *API) validateToolset(name string, ts Toolset, bad func(string, string, 
 // validateBaseURL accepts an absolute http(s) URL with a host and no
 // userinfo, query or fragment. The value is never echoed: it may carry
 // credentials.
+// validateOAuth checks type oauth2 and reports whether a client secret is
+// required (client credentials) or optional (device flow).
+func (c *API) validateOAuth(bad func(string, string, ...any), wrap func(string, error)) bool {
+	a := c.Auth
+	if a.Header != "" || a.Param != "" {
+		bad("auth", "type oauth2 takes no header or param: the token is sent as Authorization: Bearer")
+	}
+	if err := validateOAuthURL(a.TokenURL); err != nil {
+		wrap("auth.token_url", err)
+	}
+	if a.ClientID == "" || len(a.ClientID) > 256 || strings.ContainsFunc(a.ClientID, isSpaceOrControl) {
+		bad("auth.client_id", "type oauth2 needs the client_id (no spaces, at most 256 characters)")
+	}
+	for _, s := range a.Scopes {
+		if s == "" || strings.ContainsFunc(s, isSpaceOrControl) {
+			bad("auth.scopes", "scopes are single words without spaces")
+			break
+		}
+	}
+	switch a.Flow {
+	case FlowClientCredentials:
+		if a.DeviceURL != "" {
+			bad("auth.device_url", "only used with flow device_code")
+		}
+		return true
+	case FlowDeviceCode:
+		if err := validateOAuthURL(a.DeviceURL); err != nil {
+			wrap("auth.device_url", err)
+		}
+		if a.Secret != "" {
+			if _, err := secrets.ParseSecretRef(a.Secret); err != nil {
+				wrap("auth.secret", err)
+			}
+		}
+		return false // public clients have no secret
+	default:
+		bad("auth.flow", "%q: use client_credentials or device_code", naming.CleanText(a.Flow, 40))
+		return false
+	}
+}
+
+// validateOAuthURL accepts an absolute https URL (http only to a loopback
+// host, for local authorization servers) with no userinfo, query or
+// fragment.
+func validateOAuthURL(raw string) error {
+	if err := validateBaseURL(raw); err != nil {
+		return err
+	}
+	u, _ := url.Parse(raw)
+	if u.Scheme == "http" {
+		host := u.Hostname()
+		if ip := net.ParseIP(host); !strings.EqualFold(host, "localhost") && (ip == nil || !ip.IsLoopback()) {
+			return errors.New("must be https (plain http is only allowed to localhost)")
+		}
+	}
+	return nil
+}
+
 func validateBaseURL(raw string) error {
 	if raw == "" {
 		return errors.New("missing")
