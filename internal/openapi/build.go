@@ -90,10 +90,26 @@ func (b *builder) newTool(method, path, summary, description string, tags []stri
 		Method:      strings.ToUpper(method),
 		Path:        path,
 		Description: naming.Describe(summary, description, method, path, b.opts.MaxDescription),
-		Tags:        slices.Clone(tags),
+		Tags:        cleanTags(tags),
 		Deprecated:  deprecated,
 		Safety:      model.SafetyForMethod(method),
 	}
+}
+
+// maxTagLen caps a tag in runes.
+const maxTagLen = 64
+
+// cleanTags cleans tags like every other spec string: they reach the user's
+// terminal (picker, hints), where an escape sequence could rewrite the
+// screen. Empty and duplicate tags are dropped.
+func cleanTags(tags []string) []string {
+	var out []string
+	for _, tag := range tags {
+		if c := naming.CleanText(tag, maxTagLen); c != "" && !slices.Contains(out, c) {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // validPath rejects path templates that could smuggle a query or fragment,
