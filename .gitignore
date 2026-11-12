@@ -1,0 +1,26 @@
+# Local-only project docs (never commit)
+/CLAUDE.md
+/docs/SPEC.md
+/docs/PROGRESS.md
+
+# Build output
+/plugit
+/plugit.exe
+/dist/
+/bin/
+
+# Go
+*.test
+*.out
+coverage.*
+/testdata/fuzz/**/corpus-local/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Claude Code local settings
+.claude/settings.local.json

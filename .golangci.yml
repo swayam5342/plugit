@@ -1,0 +1,82 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - gosec
+    - revive
+    - bodyclose
+    - errorlint
+    - forbidigo
+    - misspell
+    - noctx
+    - nolintlint
+    - unconvert
+    - usestdlibvars
+  settings:
+    forbidigo:
+      # stdout is reserved for JSON-RPC in `serve` and `run`. Write to an explicit
+      # io.Writer (cmd.OutOrStdout(), os.Stderr, a logger) instead.
+      forbid:
+        - pattern: ^fmt\.Print.*$
+          msg: write to an explicit io.Writer; stdout is reserved for JSON-RPC
+        - pattern: ^print(ln)?$
+          msg: use log/slog
+    gosec:
+      excludes:
+        - G104 # duplicate of errcheck
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    revive:
+      rules:
+        - name: exported
+        - name: package-comments
+        - name: var-naming
+        - name: indent-error-flow
+        - name: error-strings
+        - name: error-naming
+        - name: error-return
+        - name: errorf
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: unused-parameter
+        - name: unreachable-code
+        - name: redefines-builtin-id
+        - name: superfluous-else
+        - name: time-naming
+        - name: increment-decrement
+        - name: range
+        - name: receiver-naming
+        - name: blank-imports
+        - name: dot-imports
+  exclusions:
+    generated: lax
+    presets:
+      - std-error-handling
+    rules:
+      # Tests read back files they wrote under t.TempDir() (G304), create
+      # deliberately loose files/dirs to prove PlugIt tightens them (G301, G306),
+      # use unsafe to read SIDs out of Windows ACEs (G103), and feed obviously
+      # fake credentials to the redaction suite (G101). Production code keeps
+      # all of these checks.
+      - path: _test\.go
+        linters: [gosec]
+        text: "G(101|103|301|304|306):"
+      # Test helpers close response bodies via t.Cleanup, which bodyclose
+      # cannot follow. Production code keeps the check.
+      - path: _test\.go
+        linters: [bodyclose]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/swayam5342/plugit
