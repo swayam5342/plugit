@@ -12,7 +12,7 @@ const base = process.env.NEXT_PUBLIC_BASE_PATH || '';
 
 export const metadata = {
   // Where the site is hosted, for absolute share-image URLs.
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'https://swayamcyber.in'),
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'https://plugit.swayam.li'),
   title: 'PlugIt: plug any REST API into your AI',
   description:
     'PlugIt turns an OpenAPI, Swagger or Postman spec into curated, safe MCP tools for Claude, Codex, Cursor and VS Code. One local binary, no accounts, no telemetry.',

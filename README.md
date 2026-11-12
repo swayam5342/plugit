@@ -7,7 +7,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/swayam5342/plugit.svg)](https://pkg.go.dev/github.com/swayam5342/plugit)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-**Website and live demo:** [swayamcyber.in/plugit](https://swayamcyber.in/plugit/)
+**Website and live demo:** [plugit.swayam.li](https://plugit.swayam.li/)
 
 ![PlugIt: add an API, pick and inspect tools, lint, try a call, install into Claude Desktop](demo/demo.gif)
 
