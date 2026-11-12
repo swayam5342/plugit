@@ -137,7 +137,7 @@ func TestAddFromRun(t *testing.T) {
 		t.Errorf("network/base = %+v %s", cfg.Network, cfg.BaseURL)
 	}
 	// Same selection rules as run: the mode and the filters.
-	if ts := cfg.Toolsets["default"]; len(ts.Tools) != 1 || ts.Tools["GET /pets/{id}"] != (config.ToolOverride{}) {
+	if ts := cfg.Toolsets["default"]; len(ts.Tools) != 1 || !ts.Tools["GET /pets/{id}"].IsZero() {
 		t.Errorf("toolset = %+v", ts)
 	}
 	// The yaml never contains a resolved secret, only references.

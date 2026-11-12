@@ -122,7 +122,7 @@ func tryTool(ctx context.Context, s serveSettings, toolName string, f tryFlags, 
 			}
 		}
 		return d.form(ctx, tui.TryInput{API: a.cfg.Name, Tool: t, Mode: a.cfg.PolicyMode(), Confirm: confirm,
-			Send: func(ctx context.Context, values map[string]string) tui.TryResult { return formSend(ctx, a, t, values) }})
+			Send: func(ctx context.Context, values map[string]string) tui.TryResult { return formSend(ctx, a, st, values) }})
 	}
 
 	switch dec.Decision {
@@ -142,7 +142,7 @@ func tryTool(ctx context.Context, s serveSettings, toolName string, f tryFlags, 
 		}
 	}
 
-	r, err := callTool(ctx, a, t, f.args, d.out)
+	r, err := callTool(ctx, a, st, f.args, d.out)
 	if err != nil {
 		return err
 	}
@@ -157,7 +157,8 @@ func tryTool(ctx context.Context, s serveSettings, toolName string, f tryFlags, 
 
 // callTool validates name=value arguments and makes the call, writing the
 // redacted request to reqOut. Policy has already been checked.
-func callTool(ctx context.Context, a *active, t model.Tool, kv []string, reqOut io.Writer) (proxy.Result, error) {
+func callTool(ctx context.Context, a *active, st mcpserver.Tool, kv []string, reqOut io.Writer) (proxy.Result, error) {
+	t := st.Tool
 	args, err := parseTryArgs(t, kv)
 	if err != nil {
 		return proxy.Result{}, fmt.Errorf("%s: %w", t.Name, err)
@@ -174,7 +175,7 @@ func callTool(ctx context.Context, a *active, t model.Tool, kv []string, reqOut 
 		return proxy.Result{}, fmt.Errorf("%s: %w", t.Name, err)
 	}
 	rec := &printingDoer{next: a.doer, out: reqOut, red: a.red}
-	r := proxy.Call(ctx, rec, t, decoded, a.target, a.red)
+	r := proxy.Call(ctx, rec, t, decoded, a.target, a.red, st.Fields)
 	if !rec.printed {
 		if _, err := fmt.Fprintln(reqOut, "→ (no request sent)"); err != nil {
 			return r, err
@@ -185,13 +186,13 @@ func callTool(ctx context.Context, a *active, t model.Tool, kv []string, reqOut 
 
 // formSend is the Try it screen's Send: field values as typed become
 // name=value arguments, exactly as with --arg.
-func formSend(ctx context.Context, a *active, t model.Tool, values map[string]string) tui.TryResult {
+func formSend(ctx context.Context, a *active, st mcpserver.Tool, values map[string]string) tui.TryResult {
 	kv := make([]string, 0, len(values))
 	for _, k := range slices.Sorted(maps.Keys(values)) {
 		kv = append(kv, k+"="+values[k])
 	}
 	var req bytes.Buffer
-	r, err := callTool(ctx, a, t, kv, &req)
+	r, err := callTool(ctx, a, st, kv, &req)
 	if err != nil {
 		return tui.TryResult{Request: a.red.String(req.String()), Err: a.red.String(err.Error())}
 	}

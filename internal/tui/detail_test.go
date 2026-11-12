@@ -134,3 +134,38 @@ func TestToolDetailFitsAndSanitizes(t *testing.T) {
 		}
 	}
 }
+
+// f edits a tool's response_fields (comma-separated); the detail shows them.
+func TestPickerResponseFields(t *testing.T) {
+	p := newTest("GET /pets")
+	moveTo(t, p, "pp_listPets")
+	press(p, "f", "id, owner.login", "enter")
+	ts, _ := p.Result()
+	if got := ts.Tools["GET /pets"].ResponseFields; len(got) != 2 || got[0] != "id" || got[1] != "owner.login" {
+		t.Fatalf("fields = %v", got)
+	}
+	if !strings.Contains(p.currentRowText(), "2 fields") {
+		t.Errorf("row = %q", p.currentRowText())
+	}
+	press(p, "i")
+	if v := view(p); !strings.Contains(v, "Response fields") || !strings.Contains(v, "owner.login") {
+		t.Errorf("detail:\n%s", v)
+	}
+	press(p, "esc")
+
+	// Invalid paths are refused and the editor stays open.
+	press(p, "f", "ctrl+u", "a..b", "enter")
+	if !strings.Contains(view(p), "response field") {
+		t.Errorf("no validation message:\n%s", view(p))
+	}
+	press(p, "esc")
+	if ts, _ := p.Result(); len(ts.Tools["GET /pets"].ResponseFields) != 2 {
+		t.Error("invalid fields replaced the valid ones")
+	}
+
+	// Empty clears them.
+	press(p, "f", "ctrl+u", "enter")
+	if ts, _ := p.Result(); len(ts.Tools["GET /pets"].ResponseFields) != 0 {
+		t.Errorf("not cleared: %v", ts.Tools["GET /pets"].ResponseFields)
+	}
+}

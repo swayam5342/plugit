@@ -167,7 +167,7 @@ func TestSyncAddNew(t *testing.T) {
 	}
 	for name, ts := range before {
 		for k, o := range ts.Tools {
-			if after[name].Tools[k] != o {
+			if !reflect.DeepEqual(after[name].Tools[k], o) {
 				t.Errorf("%s %s changed", name, k)
 			}
 		}

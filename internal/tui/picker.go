@@ -22,6 +22,7 @@ import (
 
 	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/curate"
+	"github.com/swayam5342/plugit/internal/jsonpick"
 	"github.com/swayam5342/plugit/internal/lint"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/naming"
@@ -79,6 +80,7 @@ const (
 	modeFilter
 	modeRename
 	modeDescribe
+	modeFields
 	modeConfirmQuit
 )
 
@@ -148,7 +150,7 @@ func NewPicker(in PickerInput) *Picker {
 			continue
 		}
 		p.selected[model.OpKey(k)] = true
-		if o != (config.ToolOverride{}) {
+		if !o.IsZero() {
 			p.over[model.OpKey(k)] = o
 		}
 	}
@@ -381,7 +383,7 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return p, p.updateDetail(msg)
 		}
 		switch p.mode {
-		case modeFilter, modeRename, modeDescribe:
+		case modeFilter, modeRename, modeDescribe, modeFields:
 			return p, p.updateInput(msg)
 		case modeConfirmQuit:
 			switch msg.String() {
@@ -464,6 +466,12 @@ func (p *Picker) updateList(msg tea.KeyPressMsg) tea.Cmd {
 		} else {
 			p.startInput(modeDescribe, "description: ", t.Description)
 		}
+	case "f":
+		if !ok || r.kind != rowTool {
+			p.status = "move to a tool first"
+			break
+		}
+		p.startInput(modeFields, "response fields: ", strings.Join(p.over[p.tools[r.tool].Key].ResponseFields, ", "))
 	case "p":
 		if !ok || r.kind != rowTool {
 			p.status = "move to a tool first"
@@ -537,7 +545,7 @@ func (p *Picker) setSelected(k model.OpKey, on bool) {
 
 // setOverride stores an override; editing a tool selects it.
 func (p *Picker) setOverride(k model.OpKey, o config.ToolOverride) {
-	if o == (config.ToolOverride{}) {
+	if o.IsZero() {
 		delete(p.over, k)
 	} else {
 		p.over[k] = o
@@ -586,7 +594,7 @@ func (p *Picker) commitInput() tea.Cmd {
 	case modeFilter:
 		p.mode = modeList
 		return nil
-	case modeRename, modeDescribe:
+	case modeRename, modeDescribe, modeFields:
 		r, ok := p.current()
 		if !ok || r.kind != rowTool {
 			p.mode = modeList
@@ -594,7 +602,8 @@ func (p *Picker) commitInput() tea.Cmd {
 		}
 		k := p.tools[r.tool].Key
 		o := p.over[k]
-		if p.mode == modeRename {
+		switch p.mode {
+		case modeRename:
 			if v != "" && !toolNameRe.MatchString(v) {
 				p.status = "names use 1-64 letters, digits, '_' or '-'"
 				return nil
@@ -604,7 +613,19 @@ func (p *Picker) commitInput() tea.Cmd {
 				return nil
 			}
 			o.Name = v
-		} else {
+		case modeFields:
+			var fields []string
+			for f := range strings.SplitSeq(v, ",") {
+				if f = strings.TrimSpace(f); f != "" {
+					fields = append(fields, f)
+				}
+			}
+			if _, err := jsonpick.Parse(fields); err != nil {
+				p.status = err.Error()
+				return nil
+			}
+			o.ResponseFields = fields
+		default:
 			if v == p.tools[r.tool].Description {
 				v = ""
 			}
@@ -678,7 +699,7 @@ func (p *Picker) helpLines() []string {
 		"↑↓ j k", "move", "space", "toggle tool or group", "enter", "fold group",
 		"a / n", "all / none shown", "/", "filter", "esc", "clear filter",
 		"r", "rename", "e", "edit description", "p", "cycle policy",
-		"i", "tool detail", "s", "save", "q", "quit", "?", "hide shortcuts")
+		"i", "tool detail", "f", "response fields", "s", "save", "q", "quit", "?", "hide shortcuts")
 }
 
 func (p *Picker) listHeight() int {
@@ -740,6 +761,13 @@ func (p *Picker) rowSegs(r row, cursor bool) []seg {
 	}
 	if o := p.over[t.Key]; o.Policy != "" {
 		ss = append(ss, seg{"  " + o.Policy, th.policy(o.Policy)})
+	}
+	if n := len(p.over[t.Key].ResponseFields); n > 0 {
+		unit := "fields"
+		if n == 1 {
+			unit = "field"
+		}
+		ss = append(ss, seg{fmt.Sprintf("  %d %s", n, unit), th.Accent})
 	}
 	if !offered {
 		ss = append(ss, seg{"  not offered in " + string(p.in.Mode), th.Warn})
@@ -856,7 +884,7 @@ func (p *Picker) View() tea.View {
 	var input string
 	border := th.Border
 	switch p.mode {
-	case modeFilter, modeRename, modeDescribe:
+	case modeFilter, modeRename, modeDescribe, modeFields:
 		border = th.Focus
 		input = th.Accent.Render(p.inputLabel) + p.input.View()
 	case modeConfirmQuit:

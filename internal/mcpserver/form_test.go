@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 
+	"github.com/swayam5342/plugit/internal/jsonpick"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/policy"
 	"github.com/swayam5342/plugit/internal/schema"
@@ -41,5 +43,25 @@ func TestFormBodyEndToEnd(t *testing.T) {
 	form, _ := got.Load().(url.Values)
 	if form.Get("email") != "a@b.test" || form.Get("metadata[plan]") != "pro" || form.Get("expand[0]") != "tax" {
 		t.Errorf("upstream form = %v", form)
+	}
+}
+
+// A tool's response_fields reach the model filtered.
+func TestResponseFields(t *testing.T) {
+	p, err := jsonpick.Parse([]string{"id"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	upstream := func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"id":1,"secret_notes":"long text"}]`))
+	}
+	r := setup(t, Config{Tools: []Tool{{Tool: listPets, Fields: p}}, Mode: policy.ReadOnly}, upstream)
+	res, err := r.call(t, "listPets", map[string]any{})
+	if err != nil || res.IsError {
+		t.Fatalf("err=%v text=%s", err, text(res))
+	}
+	if strings.Contains(text(res), "secret_notes") || !strings.Contains(text(res), "Filtered to fields: id") {
+		t.Errorf("text = %s", text(res))
 	}
 }

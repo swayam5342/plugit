@@ -34,7 +34,7 @@ func call(t *testing.T, srvURL string, tl model.Tool, rawArgs string, tg Target,
 		tg.BaseURL = base(t, srvURL)
 	}
 	red := redact.New(redact.Options{Secrets: tg.SecretValues()})
-	return Call(t.Context(), httpx.NewClient(opts), tl, args(t, rawArgs), tg, red)
+	return Call(t.Context(), httpx.NewClient(opts), tl, args(t, rawArgs), tg, red, nil)
 }
 
 func TestSecretValues(t *testing.T) {
@@ -216,7 +216,7 @@ func TestCallNetworkErrorsAreToolErrors(t *testing.T) {
 	t.Run("blocked by SSRF guard", func(t *testing.T) {
 		s := server(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("hi")) })
 		red := redact.New(redact.Options{})
-		res := Call(t.Context(), httpx.NewClient(httpx.Options{}), listThings, args(t, `{}`), Target{BaseURL: base(t, s.URL)}, red)
+		res := Call(t.Context(), httpx.NewClient(httpx.Options{}), listThings, args(t, `{}`), Target{BaseURL: base(t, s.URL)}, red, nil)
 		if !res.IsError || !strings.Contains(res.Text, "blocked") || !strings.Contains(res.Text, "allow_private") {
 			t.Errorf("isError=%v text=%q", res.IsError, res.Text)
 		}

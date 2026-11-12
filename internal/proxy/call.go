@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/swayam5342/plugit/internal/httpx"
+	"github.com/swayam5342/plugit/internal/jsonpick"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/redact"
 )
@@ -32,7 +33,10 @@ type Result struct {
 // steps 5-8). It never returns a Go error: every failure is an isError
 // result whose text starts with the tool name. All text passes through red,
 // so no resolved secret reaches the model, successful responses included.
-func Call(ctx context.Context, doer httpx.Doer, t model.Tool, args map[string]any, tg Target, red *redact.Redactor) Result {
+//
+// pick, when not nil, keeps only the tool's response_fields of a complete
+// JSON success response (SPEC M6 design note: response field filtering).
+func Call(ctx context.Context, doer httpx.Doer, t model.Tool, args map[string]any, tg Target, red *redact.Redactor, pick *jsonpick.Picker) Result {
 	req, err := Build(ctx, t, args, tg)
 	if err != nil {
 		return failure(t, red, "invalid arguments: "+err.Error())
@@ -50,7 +54,10 @@ func Call(ctx context.Context, doer httpx.Doer, t model.Tool, args map[string]an
 	}
 
 	res := Result{Status: resp.StatusCode, Bytes: len(body), Truncated: truncated, IsError: resp.StatusCode >= 400}
-	text := shape(resp, body, truncated)
+	if res.IsError || truncated {
+		pick = nil // errors and cut-off bodies are shown whole
+	}
+	text := shape(resp, body, truncated, pick)
 	if res.IsError {
 		text = fmt.Sprintf("%s: upstream returned HTTP %d %s\n\n%s", t.Name, resp.StatusCode, http.StatusText(resp.StatusCode), text)
 	}
@@ -91,12 +98,18 @@ func innermost(err error) string {
 	return err.Error()
 }
 
-func shape(resp *http.Response, body []byte, truncated bool) string {
+func shape(resp *http.Response, body []byte, truncated bool, pick *jsonpick.Picker) string {
 	ct := resp.Header.Get("Content-Type")
 	var b strings.Builder
 	fmt.Fprintf(&b, "HTTP %d %s\n", resp.StatusCode, http.StatusText(resp.StatusCode))
 	if ct != "" {
 		fmt.Fprintf(&b, "Content-Type: %s\n", ct)
+	}
+	if pick != nil {
+		if filtered, ok := filterJSON(ct, body, pick); ok {
+			body = filtered
+			fmt.Fprintf(&b, "Filtered to fields: %s (the tool's response_fields; other fields were left out)\n", strings.Join(pick.Paths(), ", "))
+		}
 	}
 	b.WriteString("\n")
 
@@ -127,6 +140,30 @@ func isBinary(ct string, body []byte) bool {
 		return true
 	}
 	return !utf8.Valid(body) || bytes.IndexByte(body, 0) >= 0
+}
+
+// filterJSON applies pick to a JSON body. ok is false for anything that
+// isn't complete JSON, which is then shown unfiltered.
+func filterJSON(ct string, body []byte, pick *jsonpick.Picker) ([]byte, bool) {
+	if isBinary(ct, body) {
+		return nil, false
+	}
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.UseNumber() // keep numbers exactly as sent
+	var v any
+	if dec.Decode(&v) != nil || dec.More() {
+		return nil, false
+	}
+	switch v.(type) {
+	case map[string]any, []any:
+	default:
+		return nil, false
+	}
+	out, err := json.Marshal(pick.Apply(v))
+	if err != nil {
+		return nil, false
+	}
+	return out, true
 }
 
 // prettyJSON indents JSON bodies; anything else (or JSON cut off by the size

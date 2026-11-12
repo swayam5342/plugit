@@ -21,6 +21,7 @@ import (
 	"github.com/swayam5342/plugit/internal/curate"
 	"github.com/swayam5342/plugit/internal/httpx"
 	"github.com/swayam5342/plugit/internal/isolate"
+	"github.com/swayam5342/plugit/internal/jsonpick"
 	"github.com/swayam5342/plugit/internal/mcpserver"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/openapi"
@@ -193,6 +194,9 @@ func loadActive(ctx context.Context, s serveSettings, d runDeps, logger *slog.Lo
 		mt := mcpserver.Tool{Tool: schema.Prepare(st.Tool, schema.Options{Fixed: hidden}), Override: st.Override}
 		if r, err := policy.ParseRate(ts.Tools[string(st.Tool.Key)].RateLimit); err == nil {
 			mt.Limit = policy.NewLimiter(r, nil)
+		}
+		if p, err := jsonpick.Parse(ts.Tools[string(st.Tool.Key)].ResponseFields); err == nil {
+			mt.Fields = p // validated with the config
 		}
 		tools = append(tools, mt)
 	}

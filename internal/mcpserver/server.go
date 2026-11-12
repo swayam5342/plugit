@@ -28,6 +28,7 @@ import (
 
 	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/httpx"
+	"github.com/swayam5342/plugit/internal/jsonpick"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/policy"
 	"github.com/swayam5342/plugit/internal/proxy"
@@ -41,7 +42,8 @@ import (
 type Tool struct {
 	Tool     model.Tool
 	Override policy.Override
-	Limit    *policy.Limiter // per-tool rate limit; nil for none
+	Limit    *policy.Limiter  // per-tool rate limit; nil for none
+	Fields   *jsonpick.Picker // response_fields; nil keeps the whole response
 }
 
 // Config configures a server.
@@ -199,7 +201,7 @@ func (h *handler) handle(ctx context.Context, req *mcp.CallToolRequest) (res *mc
 		}
 	}
 
-	r := proxy.Call(ctx, h.cfg.Doer, h.tool.Tool, args, h.cfg.Target, h.cfg.Redactor)
+	r := proxy.Call(ctx, h.cfg.Doer, h.tool.Tool, args, h.cfg.Target, h.cfg.Redactor, h.tool.Fields)
 	h.log(name, start, r.Status, r.IsError, "", "bytes", r.Bytes, "truncated", r.Truncated)
 	rec.Status, rec.Bytes = r.Status, r.Bytes
 	switch {

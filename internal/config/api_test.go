@@ -136,7 +136,7 @@ func TestParseAPIRejects(t *testing.T) {
 		"empty file":            {"", "no documents", ErrInvalidConfig},
 		"not a mapping":         {"- 1\n", "", ErrInvalidConfig},
 		"missing version":       {strings.Replace(base, "version: 1\n", "", 1), "version", ErrInvalidConfig},
-		"future version":        {strings.Replace(base, "version: 1", "version: 3", 1), "newer", ErrUnsupportedVersion},
+		"future version":        {strings.Replace(base, "version: 1", "version: 4", 1), "newer", ErrUnsupportedVersion},
 		"bad name":              {strings.Replace(base, "name: pets", "name: ../etc", 1), "name", ErrInvalidConfig},
 		"missing base_url":      {strings.Replace(base, "base_url: https://pets.example.test/v1\n", "", 1), "base_url", ErrInvalidConfig},
 		"relative base_url":     {strings.Replace(base, "https://pets.example.test/v1", "/v1", 1), "base_url", ErrInvalidConfig},
@@ -356,18 +356,18 @@ func TestRetentionPeriod(t *testing.T) {
 // Version 2 adds per-tool rate_limit. Version 1 files load unchanged and
 // come out as version 2 (the migration has nothing to rewrite).
 func TestVersionMigration(t *testing.T) {
-	if CurrentVersion != 2 {
+	if CurrentVersion != 3 {
 		t.Fatalf("CurrentVersion = %d", CurrentVersion)
 	}
 	c, err := ParseAPI([]byte(minimalConfig))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Version != 2 {
-		t.Errorf("v1 config loaded as version %d, want 2", c.Version)
+	if c.Version != CurrentVersion {
+		t.Errorf("v1 config loaded as version %d, want %d", c.Version, CurrentVersion)
 	}
 	out, err := MarshalAPI(c)
-	if err != nil || !strings.Contains(string(out), "version: 2") {
+	if err != nil || !strings.Contains(string(out), "version: 3") {
 		t.Errorf("marshal = %s, %v", out, err)
 	}
 	v2 := strings.Replace(minimalConfig, "version: 1", "version: 2", 1)
@@ -388,5 +388,31 @@ func TestToolRateLimit(t *testing.T) {
 	bad := strings.Replace(minimalConfig, `"GET /pets": {}`, `"GET /pets": {rate_limit: fast}`, 1)
 	if _, err := ParseAPI([]byte(bad)); err == nil || !strings.Contains(err.Error(), "rate_limit") {
 		t.Errorf("bad per-tool rate_limit: %v", err)
+	}
+}
+
+// Version 3 adds response_fields to tool overrides.
+func TestToolResponseFields(t *testing.T) {
+	ok := strings.Replace(minimalConfig, `"GET /pets": {}`, `"GET /pets": {response_fields: [id, name, "owner.login", "items[*].title"]}`, 1)
+	c, err := ParseAPI([]byte(ok))
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := c.Toolsets["default"].Tools["GET /pets"]
+	if len(o.ResponseFields) != 4 || o.ResponseFields[3] != "items[*].title" || o.IsZero() {
+		t.Errorf("override = %+v", o)
+	}
+	if !(ToolOverride{}).IsZero() {
+		t.Error("empty override isn't zero")
+	}
+	for _, bad := range []string{`[""]`, `["a..b"]`, `["a[0]"]`} {
+		y := strings.Replace(minimalConfig, `"GET /pets": {}`, `"GET /pets": {response_fields: `+bad+`}`, 1)
+		if _, err := ParseAPI([]byte(y)); err == nil || !strings.Contains(err.Error(), "response_fields") {
+			t.Errorf("%s: %v", bad, err)
+		}
+	}
+	v2 := strings.Replace(minimalConfig, "version: 1", "version: 2", 1)
+	if c, err := ParseAPI([]byte(v2)); err != nil || c.Version != 3 {
+		t.Errorf("v2 config: %v, version %d", err, c.Version)
 	}
 }

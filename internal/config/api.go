@@ -14,6 +14,7 @@ import (
 
 	"github.com/pb33f/go-yaml"
 
+	"github.com/swayam5342/plugit/internal/jsonpick"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/naming"
 	"github.com/swayam5342/plugit/internal/policy"
@@ -28,7 +29,9 @@ import (
 //   - 1: the first schema (v0.1).
 //   - 2: adds toolsets.<name>.tools.<key>.rate_limit (per-tool rate limits,
 //     M5). Version 1 files need no changes; migrate just relabels them.
-const CurrentVersion = 2
+//   - 3: adds toolsets.<name>.tools.<key>.response_fields (response field
+//     filtering, M6). Again nothing to rewrite.
+const CurrentVersion = 3
 
 // MaxConfigBytes caps plugit.yaml. A real config is a few kilobytes.
 const MaxConfigBytes = 1 << 20
@@ -141,6 +144,14 @@ type ToolOverride struct {
 	Description string `yaml:"description,omitempty"`
 	Policy      string `yaml:"policy,omitempty"`     // allow | confirm | deny
 	RateLimit   string `yaml:"rate_limit,omitempty"` // N/sec | N/min | N/hour, on top of policy.rate_limit (version 2)
+	// ResponseFields keeps only these parts of a JSON success response
+	// (version 3; see package jsonpick for the path syntax).
+	ResponseFields []string `yaml:"response_fields,omitempty"`
+}
+
+// IsZero reports whether the override changes nothing.
+func (o ToolOverride) IsZero() bool {
+	return o.Name == "" && o.Description == "" && o.Policy == "" && o.RateLimit == "" && len(o.ResponseFields) == 0
 }
 
 // PolicyMode is the validated policy mode.
@@ -229,9 +240,9 @@ func ParseAPI(data []byte) (*API, error) {
 
 // migrate brings a validated older config up to CurrentVersion.
 func (c *API) migrate() {
-	if c.Version < 2 {
-		// 1 -> 2 only added an optional field: nothing to rewrite.
-		c.Version = 2
+	if c.Version < 3 {
+		// 1 -> 2 and 2 -> 3 only added optional fields: nothing to rewrite.
+		c.Version = 3
 	}
 }
 
@@ -441,6 +452,9 @@ func (c *API) validateToolset(name string, ts Toolset, bad func(string, string, 
 			if _, err := policy.ParseRate(o.RateLimit); err != nil {
 				bad(kf+".rate_limit", "%q: %v", naming.CleanText(o.RateLimit, 40), err)
 			}
+		}
+		if _, err := jsonpick.Parse(o.ResponseFields); err != nil {
+			wrap(kf+".response_fields", err)
 		}
 	}
 	for _, m := range ts.Methods {

@@ -124,6 +124,13 @@ func (p *Picker) detailBody(w int) []string {
 		add("    " + th.Dim.Render("request body: "+safe(t.Body.ContentType)))
 	}
 
+	section("Response fields")
+	if fields := p.over[t.Key].ResponseFields; len(fields) > 0 {
+		add("    " + safe(strings.Join(fields, ", ")) + th.Dim.Render("  (only these parts of a JSON success response reach the model; f edits)"))
+	} else {
+		add("    " + th.Dim.Render("the whole response (f to keep only some fields and save tokens)"))
+	}
+
 	section("Token cost")
 	add("    " + tokens.Format(tokens.Tool(t)) + " tokens " + th.Dim.Render("in the tool list the model sees (name, description and input schema)"))
 
