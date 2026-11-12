@@ -101,7 +101,10 @@ plugit add pets https://petstore.swagger.io/v2/swagger.json --from-run --tags pe
 | `plugit add <name> <spec>` | Fetch, pin the base URL, pick tools, save |
 | `plugit edit <name> [--toolset T]` | Reopen the picker |
 | `plugit auth <name>` | Store or rotate the credential in the OS keyring |
-| `plugit try <name> <tool> [--arg k=v]` | One call, printing the redacted request and the result |
+| `plugit try <name> <tool> [--arg k=v]` | One call, printing the redacted request and the result (no `--arg` on a terminal: a Try it form) |
+| `plugit logs [name]` | Live inspector of the calls MCP clients made (`--plain`, `-f`, `--json` when piped) |
+| `plugit stats [name]` | Calls, error rate, p50/p95 latency and token budget per tool |
+| `plugit lint <name>` | Quality and safety checks, including hidden instructions in descriptions (`--json`, exit 1 on errors) |
 | `plugit serve <name> [--toolset T]` | The MCP server (what clients run) |
 | `plugit install / uninstall <name> [--client C,…]` | Add to or remove from one or more MCP clients |
 | `plugit list`, `plugit remove <name>` | Manage saved APIs |
