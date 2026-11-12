@@ -61,12 +61,13 @@ linters:
     rules:
       # Tests read back files they wrote under t.TempDir() (G304), create
       # deliberately loose files/dirs to prove PlugIt tightens them (G301, G306),
-      # use unsafe to read SIDs out of Windows ACEs (G103), and feed obviously
-      # fake credentials to the redaction suite (G101). Production code keeps
-      # all of these checks.
+      # use unsafe to read SIDs out of Windows ACEs (G103), feed obviously
+      # fake credentials to the redaction suite (G101), and run fake upstreams
+      # that echo request data back on purpose, as in the echo-secret fixture
+      # (G705). Production code keeps all of these checks.
       - path: _test\.go
         linters: [gosec]
-        text: "G(101|103|301|304|306):"
+        text: "G(101|103|301|304|306|705):"
       # Test helpers close response bodies via t.Cleanup, which bodyclose
       # cannot follow. Production code keeps the check.
       - path: _test\.go
