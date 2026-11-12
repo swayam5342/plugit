@@ -22,6 +22,7 @@ import (
 
 	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/curate"
+	"github.com/swayam5342/plugit/internal/lint"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/naming"
 	"github.com/swayam5342/plugit/internal/policy"
@@ -48,6 +49,9 @@ type PickerInput struct {
 	Prefix   string
 	Mode     policy.Mode
 	Selected config.Toolset // initial selection and overrides
+	// Lint, if set, lints a selection (as a toolset); the picker shows the
+	// findings as row badges, in the footer and in the tool detail.
+	Lint func(config.Toolset) []lint.Finding
 }
 
 type rowKind int
@@ -115,6 +119,10 @@ type Picker struct {
 
 	th       theme
 	showHelp bool
+
+	detail     *detailState                  // the open Tool detail screen, if any
+	lintErrors int                           // errors in the current selection
+	lintWorst  map[model.OpKey]lint.Severity // most severe finding per tool
 }
 
 // NewPicker builds a picker.
@@ -275,6 +283,7 @@ func (p *Picker) recompute() {
 		p.toolTokens = map[model.OpKey]int{}
 	}
 	defer p.measureNames()
+	p.relint()
 	res, err := curate.Apply(p.tools, p.toolset(), p.in.Prefix)
 	if err != nil {
 		p.conflict = err.Error()
@@ -292,6 +301,22 @@ func (p *Picker) recompute() {
 		if policy.Lists(t.Safety, p.in.Mode) && st.Override != policy.OverrideDeny {
 			p.offered++
 			p.budget += n
+		}
+	}
+}
+
+// relint lints the current selection, when the picker has a linter.
+func (p *Picker) relint() {
+	p.lintErrors, p.lintWorst = 0, map[model.OpKey]lint.Severity{}
+	if p.in.Lint == nil {
+		return
+	}
+	for _, f := range p.in.Lint(p.toolset()) {
+		if f.Severity == lint.Error {
+			p.lintErrors++
+		}
+		if w, ok := p.lintWorst[f.Tool]; !ok || f.Severity > w {
+			p.lintWorst[f.Tool] = f.Severity
 		}
 	}
 }
@@ -351,6 +376,9 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		if msg.String() == "ctrl+c" {
 			return p, tea.Quit
+		}
+		if p.detail != nil {
+			return p, p.updateDetail(msg)
 		}
 		switch p.mode {
 		case modeFilter, modeRename, modeDescribe:
@@ -449,6 +477,12 @@ func (p *Picker) updateList(msg tea.KeyPressMsg) tea.Cmd {
 		return p.save()
 	case "?":
 		p.showHelp = !p.showHelp
+	case "i":
+		if !ok || r.kind != rowTool {
+			p.status = "move to a tool first"
+			break
+		}
+		p.openDetail(r.tool)
 	case "q":
 		if !p.dirty {
 			return tea.Quit
@@ -644,7 +678,7 @@ func (p *Picker) helpLines() []string {
 		"↑↓ j k", "move", "space", "toggle tool or group", "enter", "fold group",
 		"a / n", "all / none shown", "/", "filter", "esc", "clear filter",
 		"r", "rename", "e", "edit description", "p", "cycle policy",
-		"s", "save", "q", "quit", "?", "hide shortcuts")
+		"i", "tool detail", "s", "save", "q", "quit", "?", "hide shortcuts")
 }
 
 func (p *Picker) listHeight() int {
@@ -710,6 +744,13 @@ func (p *Picker) rowSegs(r row, cursor bool) []seg {
 	if !offered {
 		ss = append(ss, seg{"  not offered in " + string(p.in.Mode), th.Warn})
 	}
+	if sev, ok := p.lintWorst[t.Key]; ok && on && sev > lint.Info {
+		if sev == lint.Error {
+			ss = append(ss, seg{"  ✗ lint", th.Err})
+		} else {
+			ss = append(ss, seg{"  ! lint", th.Warn})
+		}
+	}
 	return ss
 }
 
@@ -732,11 +773,21 @@ func (p *Picker) footerText() string {
 	if off := p.count - p.offered; off > 0 {
 		f += fmt.Sprintf(" · %d not offered", off)
 	}
+	switch p.lintErrors {
+	case 0:
+	case 1:
+		f += " · 1 lint error"
+	default:
+		f += fmt.Sprintf(" · %d lint errors", p.lintErrors)
+	}
 	return f
 }
 
 // View implements tea.Model.
 func (p *Picker) View() tea.View {
+	if p.detail != nil {
+		return p.detailView()
+	}
 	th := p.th
 	w := max(p.width, 20)
 	var lines []string
@@ -815,7 +866,7 @@ func (p *Picker) View() tea.View {
 		if p.filter != "" {
 			input = th.Accent.Render("/ ") + safe(p.filter) + th.Dim.Render("   esc clears")
 		} else {
-			input = th.Dim.Render("> press / to filter, space to toggle, s to save")
+			input = th.Dim.Render("> / filter · space toggle · i details · s save")
 		}
 	}
 	lines = append(lines, th.box(w, border, input)...)
@@ -846,7 +897,7 @@ func (p *Picker) View() tea.View {
 // or ErrCancelled.
 func RunPicker(ctx context.Context, in PickerInput, r io.Reader, w io.Writer) (config.Toolset, error) {
 	p := NewPicker(in)
-	if _, err := tea.NewProgram(p, tea.WithContext(ctx), tea.WithInput(r), tea.WithOutput(w)).Run(); err != nil {
+	if _, err := tea.NewProgram(p, programOptions(ctx, r, w)...).Run(); err != nil {
 		return config.Toolset{}, err
 	}
 	ts, saved := p.Result()

@@ -21,6 +21,7 @@ func runPicker(ctx context.Context, in pickInput) (config.Toolset, error) {
 		Prefix:   in.prefix,
 		Mode:     in.mode,
 		Selected: in.selected,
+		Lint:     in.lint,
 	}, os.Stdin, os.Stdout)
 }
 

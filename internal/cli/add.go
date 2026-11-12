@@ -17,6 +17,7 @@ import (
 	"github.com/swayam5342/plugit/internal/curate"
 	"github.com/swayam5342/plugit/internal/httpx"
 	"github.com/swayam5342/plugit/internal/isolate"
+	"github.com/swayam5342/plugit/internal/lint"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/openapi"
 	"github.com/swayam5342/plugit/internal/policy"
@@ -49,6 +50,7 @@ type pickInput struct {
 	prefix   string
 	mode     policy.Mode
 	selected config.Toolset // initial selection
+	lint     func(config.Toolset) []lint.Finding
 }
 
 type addDeps struct {
@@ -166,7 +168,9 @@ func addAPI(ctx context.Context, s addSettings, d addDeps) error {
 			ts.Tools[string(t.Key)] = config.ToolOverride{}
 		}
 	} else {
-		ts, err = d.pick(ctx, pickInput{api: s.name, tools: prepared, prefix: s.prefix, mode: s.mode, selected: initialSelection(prepared, s.mode)})
+		draft := config.API{Name: s.name, BaseURL: baseURL, Prefix: s.prefix, Auth: auth, Fixed: fixed, Policy: config.Policy{Mode: string(s.mode)}}
+		ts, err = d.pick(ctx, pickInput{api: s.name, tools: prepared, prefix: s.prefix, mode: s.mode, selected: initialSelection(prepared, s.mode),
+			lint: pickerLint(draft, defaultToolset, m.Tools)})
 		if errors.Is(err, tui.ErrCancelled) {
 			_, err := fmt.Fprintln(d.out, "Cancelled; nothing saved.")
 			return err
@@ -216,6 +220,17 @@ func addAPI(ctx context.Context, s addSettings, d addDeps) error {
 		return err
 	}
 	return printAddSummary(d.out, cfg, active)
+}
+
+// pickerLint lints a picker selection as toolset ts of api. tools are the
+// manifest's tools as parsed (lint prepares them itself).
+func pickerLint(api config.API, ts string, tools []model.Tool) func(config.Toolset) []lint.Finding {
+	hidden := hiddenParams(api.Auth, api.Fixed)
+	return func(sel config.Toolset) []lint.Finding {
+		a := api
+		a.Toolsets = map[string]config.Toolset{ts: sel}
+		return lint.Toolset(lint.Input{API: a, Tools: tools, Hidden: hidden}, ts)
+	}
 }
 
 // saveAPIFiles writes the snapshot and manifest first and plugit.yaml last:

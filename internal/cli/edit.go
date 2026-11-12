@@ -68,7 +68,8 @@ func editAPI(ctx context.Context, p config.Paths, name, toolset string, d addDep
 	if current.Tools == nil {
 		current.Tools = map[string]config.ToolOverride{}
 	}
-	ts, err := d.pick(ctx, pickInput{api: name, tools: tools, prefix: cfg.Prefix, mode: cfg.PolicyMode(), selected: current})
+	ts, err := d.pick(ctx, pickInput{api: name, tools: tools, prefix: cfg.Prefix, mode: cfg.PolicyMode(), selected: current,
+		lint: pickerLint(*cfg, tsName, m.Tools)})
 	if errors.Is(err, tui.ErrCancelled) {
 		_, err := fmt.Fprintln(d.out, "Cancelled; nothing saved.")
 		return err
