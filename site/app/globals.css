@@ -14,6 +14,7 @@
   --accent: #4cb3f0;
   --accent-strong: #7cc8f5;
   --accent-ink: #00263a;
+  --danger: #ff8a80;
   --deep: #245f84;
   --field-1: #0d3a55;
   --field-1-ink: #ffffff;
@@ -250,8 +251,7 @@ textarea.field { resize: vertical; line-height: 1.45; }
 .rows .val { color: var(--muted); font-size: var(--step-small); font-variant-numeric: tabular-nums; text-align: right; }
 
 
-/* ---------- install: a sentence with a blank ---------- */
-.commands pre { background: var(--field-1); padding: 1.25rem 1.5rem; overflow-x: auto; }
+.commands pre { background: var(--field-1); padding: 1.25rem 1.5rem; white-space: pre-wrap; overflow-wrap: anywhere; }
 .commands code { font-family: var(--t-font); font-size: 0.8125rem; line-height: 1.7; color: var(--ink); }
 .commands-row { display: flex; align-items: center; gap: 1.75rem; flex-wrap: wrap; margin-top: 1.25rem; }
 .commands .small { margin-top: 1rem; }
@@ -351,7 +351,13 @@ textarea.field { resize: vertical; line-height: 1.45; }
 .tok-group:not(.is-offered) .tok-name { color: var(--muted); text-decoration: line-through; text-decoration-color: rgb(255 255 255 / 0.35); }
 
 /* ---------- install: a sentence with a blank ---------- */
-.blank-sentence { font-size: var(--step-head); display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.1em 0.28em; line-height: 1.15; }
+.blank-sentence { font-size: var(--step-head); display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.1em 0.28em; line-height: 1.15; font-weight: 600; letter-spacing: -0.03em; }
+.blank-input { display: block; resize: none; overflow: hidden; field-sizing: content; min-height: 0; white-space: pre-wrap; }
+.blank-input[aria-invalid="true"] { border-bottom-color: var(--danger); }
+.blank.has-value .blank-input { order: 1; flex: 1 0 100%; width: 100%; margin-top: 0.4rem; padding: 0.6rem 0.8rem; font-family: var(--t-font); font-size: 1.0625rem; font-weight: 400; letter-spacing: 0; line-height: 1.5; overflow-wrap: anywhere; }
+.blank-hint, .blank-error { margin-top: 0.75rem; font-size: var(--step-small); }
+.blank-hint { color: var(--muted); }
+.blank-error { color: var(--danger); }
 .blank-input { width: 7.2em; padding: 0.02em 0.22em 0.08em; border: 0; border-bottom: 0.06em solid var(--accent); border-radius: 0; background: var(--surface); font-size: inherit; font-weight: 500; letter-spacing: -0.03em; line-height: 1.15; }
 .blank-input::placeholder { color: var(--muted); opacity: 1; }
 .blank-input:focus { outline: none; background: var(--surface-2); }
