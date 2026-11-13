@@ -10,6 +10,7 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/policy"
@@ -51,12 +52,18 @@ type TryIt struct {
 	width   int
 	height  int
 	th      theme
+
+	// ctx covers the calls made from this screen; quitting cancels it, so a
+	// call still in flight doesn't outlive the screen.
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // NewTryIt builds the form. Hidden params (credentials, fixed values) get
 // no field: plugit fills them in.
 func NewTryIt(in TryInput) *TryIt {
 	m := &TryIt{in: in, width: 100, height: 30, th: newTheme(true)}
+	m.ctx, m.cancel = context.WithCancel(context.Background())
 	for _, p := range in.Tool.Params {
 		if p.Hidden {
 			continue
@@ -73,6 +80,8 @@ func NewTryIt(in TryInput) *TryIt {
 	return m
 }
 
+// paramType is a parameter's schema type for display. It comes from the
+// spec, so it is sanitized like all spec text.
 func paramType(p model.Param) string {
 	var s struct {
 		Type any `json:"type"`
@@ -80,13 +89,13 @@ func paramType(p model.Param) string {
 	if json.Unmarshal(p.Schema, &s) == nil {
 		switch t := s.Type.(type) {
 		case string:
-			return t
+			return safe(t)
 		case []any:
 			parts := make([]string, 0, len(t))
 			for _, x := range t {
 				parts = append(parts, fmt.Sprint(x))
 			}
-			return strings.Join(parts, "|")
+			return safe(strings.Join(parts, "|"))
 		}
 	}
 	return "any"
@@ -117,9 +126,9 @@ func (m *TryIt) send() tea.Cmd {
 			args[m.params[i].Name] = v
 		}
 	}
-	send := m.in.Send
+	send, parent := m.in.Send, m.ctx
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		ctx, cancel := context.WithTimeout(parent, 10*time.Minute)
 		defer cancel()
 		return tryResultMsg(send(ctx, args))
 	}
@@ -148,6 +157,7 @@ func (m *TryIt) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.String() {
 		case "ctrl+c", "esc":
+			m.cancel()
 			return m, tea.Quit
 		case "ctrl+s":
 			return m, m.trySend()
@@ -190,19 +200,17 @@ func (m *TryIt) trySend() tea.Cmd {
 	return m.send()
 }
 
-// wrapLines splits text into sanitized lines of at most w cells.
+// wrapLines splits text into sanitized lines of at most w terminal cells
+// (a wide character takes two, so counting characters would overflow).
 func wrapLines(text string, w int) []string {
 	var out []string
 	for line := range strings.SplitSeq(strings.TrimRight(text, "\n"), "\n") {
-		r := []rune(safe(strings.ReplaceAll(line, "\t", "  ")))
-		if len(r) == 0 {
+		s := safe(strings.ReplaceAll(line, "\t", "  "))
+		if s == "" {
 			out = append(out, "")
+			continue
 		}
-		for len(r) > 0 {
-			n := min(len(r), max(w, 1))
-			out = append(out, string(r[:n]))
-			r = r[n:]
-		}
+		out = append(out, strings.Split(ansi.Hardwrap(s, max(w, 2), true), "\n")...)
 	}
 	return out
 }
@@ -213,7 +221,7 @@ func (m *TryIt) View() tea.View {
 	w := max(m.width, 20)
 	t := m.in.Tool
 	title := th.Accent.Render("✦ ") + th.Title.Render("plugit") + th.Dim.Render(" · try · ") + th.Title.Render(safe(t.Name))
-	sub := th.method(t.Method).Render(t.Method) + " " + safe(t.Path) + th.Dim.Render("  "+safe(t.Description))
+	sub := th.method(t.Method).Render(safe(t.Method)) + " " + safe(t.Path) + th.Dim.Render("  "+safe(t.Description))
 	lines := th.box(w, th.Border, spread(title, th.pill(m.in.Mode), w-4), sub)
 	lines = append(lines, "")
 
@@ -308,6 +316,8 @@ func (m *TryIt) View() tea.View {
 
 // RunTryIt shows the Try it screen until the user quits.
 func RunTryIt(ctx context.Context, in TryInput, r io.Reader, w io.Writer) error {
-	_, err := tea.NewProgram(NewTryIt(in), programOptions(ctx, r, w)...).Run()
+	m := NewTryIt(in)
+	defer m.cancel() // also when the program ends some other way
+	_, err := tea.NewProgram(m, programOptions(ctx, r, w)...).Run()
 	return err
 }

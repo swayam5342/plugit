@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/swayam5342/plugit/internal/config"
+	"github.com/swayam5342/plugit/internal/curate"
 	"github.com/swayam5342/plugit/internal/isolate"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/tui"
@@ -254,5 +255,27 @@ func TestSyncFailures(t *testing.T) {
 	s.spec = writeSpec(t, petSpecV2)
 	if err := syncAPI(t.Context(), p, "nope", s); err == nil || !errors.Is(err, config.ErrAPINotFound) {
 		t.Errorf("unknown API: %v", err)
+	}
+}
+
+// A new operation that a tag- or method-based toolset will serve straight
+// away is called out in the plain diff.
+func TestSyncDiffFlagsAutoServedOperations(t *testing.T) {
+	added := model.Tool{Key: "POST /pets/{id}/photos", Name: "addPhoto", Method: "POST", Path: "/pets/{id}/photos"}
+	quiet := model.Tool{Key: "GET /owners", Name: "listOwners", Method: "GET", Path: "/owners"}
+	d := curate.SyncDiff{Added: []curate.OpChange{
+		{Key: added.Key, New: &added, AutoSelected: []string{"by-tag", "posts"}},
+		{Key: quiet.Key, New: &quiet},
+	}}
+	var out bytes.Buffer
+	if err := printSyncDiff(&out, "https://api.example.test", d, "", nil); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(out.String(), "\n")
+	if !strings.Contains(lines[0], "served at once by by-tag, posts") {
+		t.Errorf("auto-served operation not flagged: %q", lines[0])
+	}
+	if strings.Contains(lines[1], "served") {
+		t.Errorf("unselected operation flagged: %q", lines[1])
 	}
 }

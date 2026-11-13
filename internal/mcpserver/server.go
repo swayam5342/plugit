@@ -129,6 +129,9 @@ type handler struct {
 
 	once      sync.Once
 	validator *schema.Validator
+
+	mu   sync.Mutex
+	used map[string]time.Time // accepted confirmation states and their issue time
 }
 
 func (h *handler) handle(ctx context.Context, req *mcp.CallToolRequest) (res *mcp.CallToolResult, _ error) {
@@ -252,9 +255,10 @@ var now = time.Now
 // elicitation/create request for clients on older protocol versions.
 //
 // The answer is bound to the exact arguments: requestState is an HMAC of
-// the tool, the arguments and the time, so a retry with different
-// arguments or a stale answer is refused. Without elicitation support, the
-// answer is no (§10 Q3).
+// the tool, the arguments, the time and a nonce, so a retry with different
+// arguments or a stale answer is refused, and each state is accepted once:
+// one approval makes one call. Without elicitation support, the answer is
+// no (§10 Q3).
 func (h *handler) confirm(req *mcp.CallToolRequest, args map[string]any, reason string) (ask *mcp.CallToolResult, ok bool, why string) {
 	var params *mcp.CallToolParamsRaw
 	var ss *mcp.ServerSession
@@ -303,31 +307,58 @@ func (h *handler) confirm(req *mcp.CallToolRequest, args map[string]any, reason 
 	}, false, ""
 }
 
-// state signs the tool, the arguments and the time.
+// state signs the tool, the arguments, the time and a fresh nonce:
+// "<unix time>.<nonce>.<mac>".
 func (h *handler) state(at time.Time, args map[string]any) string {
-	ts := strconv.FormatInt(at.Unix(), 10)
-	return ts + "." + base64.RawURLEncoding.EncodeToString(h.mac(ts, args))
+	nonce := make([]byte, 12)
+	_, _ = rand.Read(nonce) // crypto/rand.Read never fails (Go 1.24+)
+	stamp := strconv.FormatInt(at.Unix(), 10) + "." + base64.RawURLEncoding.EncodeToString(nonce)
+	return stamp + "." + base64.RawURLEncoding.EncodeToString(h.mac(stamp, args))
 }
 
-func (h *handler) mac(ts string, args map[string]any) []byte {
+func (h *handler) mac(stamp string, args map[string]any) []byte {
 	canon, _ := json.Marshal(args) // maps encode with sorted keys
 	m := hmac.New(sha256.New, h.key)
-	m.Write([]byte(h.tool.Tool.Name + "\x00" + ts + "\x00"))
+	m.Write([]byte(h.tool.Tool.Name + "\x00" + stamp + "\x00"))
 	m.Write(canon)
 	return m.Sum(nil)
 }
 
-// checkState verifies requestState against the arguments of this call.
+// checkState verifies requestState against the arguments of this call and
+// spends it: a state is accepted once.
 func (h *handler) checkState(state string, args map[string]any) error {
-	ts, sig, found := strings.Cut(state, ".")
-	got, err := base64.RawURLEncoding.DecodeString(sig)
-	if !found || err != nil || !hmac.Equal(got, h.mac(ts, args)) {
+	cut := strings.LastIndexByte(state, '.')
+	if cut < 0 {
 		return errors.New("the confirmation doesn't match these arguments")
 	}
+	stamp, sig := state[:cut], state[cut+1:]
+	got, err := base64.RawURLEncoding.DecodeString(sig)
+	if err != nil || !hmac.Equal(got, h.mac(stamp, args)) {
+		return errors.New("the confirmation doesn't match these arguments")
+	}
+	ts, _, _ := strings.Cut(stamp, ".")
 	sec, err := strconv.ParseInt(ts, 10, 64)
-	if err != nil || now().Sub(time.Unix(sec, 0)) > ConfirmTimeout {
+	issued := time.Unix(sec, 0)
+	if err != nil || now().Sub(issued) > ConfirmTimeout {
 		return errors.New("the confirmation expired")
 	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if _, spent := h.used[state]; spent {
+		return errors.New("the confirmation was already used")
+	}
+	// Only states this server signed get here, so the set stays small;
+	// expired ones can't be replayed anyway and are dropped.
+	for st, at := range h.used {
+		if now().Sub(at) > ConfirmTimeout {
+			delete(h.used, st)
+		}
+	}
+	if h.used == nil {
+		h.used = map[string]time.Time{}
+	}
+	h.used[state] = issued
 	return nil
 }
 

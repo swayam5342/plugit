@@ -373,6 +373,11 @@ func (c *API) Validate() error {
 	}
 
 	c.validateAuth(bad, wrap)
+	if c.hasCredential() {
+		if err := CheckCredentialTransport(c.BaseURL, c.Network.AllowPrivate); err != nil {
+			bad("base_url", "%s", err)
+		}
+	}
 
 	if _, err := policy.ParseMode(c.Policy.Mode); err != nil {
 		wrap("policy.mode", err)
@@ -571,6 +576,37 @@ func validateBaseURL(raw string) error {
 		return errors.New("must not have a query or fragment; use fixed for query parameters")
 	}
 	return nil
+}
+
+// hasCredential reports whether requests carry a secret: an auth credential,
+// or a fixed parameter resolved from env: or the keyring.
+func (c *API) hasCredential() bool {
+	if c.Auth.Type != AuthNone && c.Auth.Type != "" {
+		return true
+	}
+	for _, f := range c.Fixed {
+		if ref, err := secrets.ParseRef(f.Value); err == nil && ref.IsSecret() {
+			return true
+		}
+	}
+	return false
+}
+
+// CheckCredentialTransport refuses to send a credential to baseURL in
+// cleartext (SPEC T8). Plain http is allowed only to this machine, or when
+// the user has opted into private networks with allowPrivate. The URL is
+// never echoed.
+func CheckCredentialTransport(baseURL string, allowPrivate bool) error {
+	u, err := url.Parse(baseURL)
+	if err != nil || u.Scheme != "http" || allowPrivate {
+		return nil // not http, or not ours to judge (validateBaseURL reports bad URLs)
+	}
+	host := u.Hostname()
+	if ip := net.ParseIP(host); strings.EqualFold(host, "localhost") || (ip != nil && ip.IsLoopback()) {
+		return nil
+	}
+	return errors.New("must be https when a credential is configured: plain http would send it unencrypted " +
+		"(http is only allowed to localhost, or with network.allow_private for an API on your own network)")
 }
 
 func validRetention(s string) bool {

@@ -147,7 +147,8 @@ func tryTool(ctx context.Context, s serveSettings, toolName string, f tryFlags, 
 	if err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(d.out, "←\n%s\n", r.Text); err != nil {
+	// The body is the upstream's: nothing in it may drive the terminal.
+	if _, err := fmt.Fprintf(d.out, "←\n%s\n", tui.SafeText(r.Text)); err != nil {
 		return err
 	}
 	if r.IsError {
@@ -293,7 +294,7 @@ func (p *printingDoer) Do(req *http.Request) (*http.Response, error) {
 			}
 		}
 	}
-	if _, err := io.WriteString(p.out, b.String()); err != nil {
+	if _, err := io.WriteString(p.out, tui.SafeText(b.String())); err != nil {
 		return nil, err
 	}
 	return p.next.Do(req)

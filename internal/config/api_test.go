@@ -463,3 +463,45 @@ func TestOAuth2Auth(t *testing.T) {
 		})
 	}
 }
+
+// A credential never travels over plain http, except to this machine or
+// when the user has opted into private networks (SPEC T8).
+func TestCredentialsNeedHTTPS(t *testing.T) {
+	const (
+		bearer = "auth: {type: bearer, secret: \"env:PETS_TOKEN\"}\n"
+		secret = "fixed: [{name: api_key, value: \"env:PETS_KEY\"}]\n"
+		public = "fixed: [{name: version, value: \"literal:2\"}]\n"
+	)
+	with := func(baseURL, extra string) string {
+		return strings.Replace(minimalConfig, "base_url: https://pets.example.test/v1", "base_url: "+baseURL, 1) + extra
+	}
+	if !strings.Contains(minimalConfig, "base_url: https://pets.example.test/v1") {
+		t.Fatal("minimalConfig changed: update this test")
+	}
+	cases := map[string]struct {
+		yaml string
+		ok   bool
+	}{
+		"https with auth":               {with("https://pets.example.test/v1", bearer), true},
+		"http without credentials":      {with("http://pets.example.test/v1", ""), true},
+		"http with a literal fixed":     {with("http://pets.example.test/v1", public), true},
+		"http with auth":                {with("http://pets.example.test/v1", bearer), false},
+		"http with a secret fixed":      {with("http://pets.example.test/v1", secret), false},
+		"http to localhost with auth":   {with("http://localhost:8080/v1", bearer), true},
+		"http to 127.0.0.1 with auth":   {with("http://127.0.0.1:8080/v1", bearer), true},
+		"http to [::1] with auth":       {with("http://[::1]:8080/v1", bearer), true},
+		"http, allow_private, auth":     {with("http://intranet.example.test/v1", bearer+"network: {allow_private: true}\n"), true},
+		"http to a lookalike with auth": {with("http://localhost.example.test/v1", bearer), false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := ParseAPI([]byte(tc.yaml))
+			switch {
+			case tc.ok && err != nil:
+				t.Errorf("unexpected error: %v", err)
+			case !tc.ok && (!errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), "https")):
+				t.Errorf("err = %v, want an ErrInvalidConfig about https", err)
+			}
+		})
+	}
+}

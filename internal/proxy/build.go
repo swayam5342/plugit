@@ -232,7 +232,13 @@ func Build(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*
 		return nil, fmt.Errorf("%w: path parameter %s has no value", ErrBuild, ph)
 	}
 
-	body, contentType, err := encodeBody(t.Body, bodyFields, bodyRoot, hasBodyRoot)
+	declared := map[string]bool{}
+	for _, p := range t.Params {
+		if p.In == model.InBody {
+			declared[p.UpstreamName] = true
+		}
+	}
+	body, contentType, err := encodeBody(t.Body, bodyFields, bodyRoot, hasBodyRoot, declared)
 	if err != nil {
 		return nil, err
 	}

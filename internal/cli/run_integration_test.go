@@ -267,6 +267,10 @@ func TestRunSetupFailures(t *testing.T) {
 		"1000-op spec without filters": {huge.String(), nil, nil, []string{"1000 tools", "--max-tools 40", "--tags"}, errTooManyTools},
 		"credentials need --base-url": {attackerSpec, func(s *runSettings) { s.headers = []string{"X-Api-Key=env:K"} },
 			map[string]string{"K": runSecret}, []string{"--base-url", "attacker.example.test"}, nil},
+		"credentials over plain http": {attackerSpec, func(s *runSettings) {
+			s.baseURL = "http://api.example.test"
+			s.headers = []string{"X-Api-Key=env:K"}
+		}, map[string]string{"K": runSecret}, []string{"https", "--base-url"}, nil},
 		"missing env secret": {attackerSpec, func(s *runSettings) {
 			s.baseURL = "https://api.example.test"
 			s.headers = []string{"X-Api-Key=env:NOT_SET"}

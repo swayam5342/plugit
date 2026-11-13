@@ -436,7 +436,7 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (p *Picker) current() (row, bool) {
-	if p.cursor < len(p.rows) {
+	if p.cursor >= 0 && p.cursor < len(p.rows) {
 		return p.rows[p.cursor], true
 	}
 	return row{}, false
@@ -461,7 +461,7 @@ func (p *Picker) updateList(msg tea.KeyPressMsg) tea.Cmd {
 	case "home", "g":
 		p.cursor = 0
 	case "end", "G":
-		p.cursor = len(p.rows) - 1
+		p.cursor = max(len(p.rows)-1, 0)
 	case "space", "x":
 		if !ok {
 			break
@@ -788,7 +788,7 @@ func (p *Picker) rowSegs(r row, cursor bool) []seg {
 	}
 	ss := []seg{
 		box,
-		{fmt.Sprintf("%-7s ", t.Method), method},
+		{fmt.Sprintf("%-7s ", safe(t.Method)), method},
 		{fmt.Sprintf("%-*s ", pathWidth, truncate(safe(t.Path), pathWidth)), th.Dim},
 		{fmt.Sprintf("%-*s", p.nameWidth, safe(p.displayName(t))), name},
 	}
@@ -799,7 +799,7 @@ func (p *Picker) rowSegs(r row, cursor bool) []seg {
 		ss = append(ss, seg{"  ✎", th.Accent})
 	}
 	if o := p.over[t.Key]; o.Policy != "" {
-		ss = append(ss, seg{"  " + o.Policy, th.policy(o.Policy)})
+		ss = append(ss, seg{"  " + safe(o.Policy), th.policy(o.Policy)})
 	}
 	if n := len(p.over[t.Key].ResponseFields); n > 0 {
 		unit := "fields"
@@ -913,7 +913,7 @@ func (p *Picker) View() tea.View {
 		if o := p.over[t.Key]; o.Description != "" {
 			d = o.Description
 		}
-		detail = th.method(t.Method).Render(t.Method) + " " + safe(t.Path) + th.Dim.Render("  "+safe(d))
+		detail = th.method(t.Method).Render(safe(t.Method)) + " " + safe(t.Path) + th.Dim.Render("  "+safe(d))
 	case ok:
 		detail = th.Dim.Render("space selects the whole group, enter folds it")
 	}
@@ -977,3 +977,17 @@ func RunPicker(ctx context.Context, in PickerInput, r io.Reader, w io.Writer) (c
 // Safe strips control and format characters from untrusted text before it
 // is printed to a terminal.
 func Safe(s string) string { return safe(s) }
+
+// SafeText is Safe for text of several lines: line breaks and tabs are
+// kept, every other control or format character is removed.
+func SafeText(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' {
+			return r
+		}
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, s)
+}

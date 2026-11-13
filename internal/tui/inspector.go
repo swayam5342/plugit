@@ -19,6 +19,9 @@ import (
 // maxInspectorCalls caps how many calls the inspector keeps in memory.
 const maxInspectorCalls = 2000
 
+// maxDetailLines caps each wrapped field of an expanded call.
+const maxDetailLines = 6
+
 // InspectorInput configures the call inspector (SPEC §2.3).
 type InspectorInput struct {
 	Title    string // the API name, or "all APIs"
@@ -208,7 +211,7 @@ func (m *Inspector) row(c store.Call, cursor bool) string {
 		line += th.Dim.Render(fmt.Sprintf("%-12s ", truncate(safe(c.API), 12)))
 	}
 	line += name.Render(fmt.Sprintf("%-28s", truncate(safe(c.Tool), 28))) + " " +
-		m.outcomeStyle(c.Outcome).Render(fmt.Sprintf("%-10s %s", c.Outcome, status)) + "  " +
+		m.outcomeStyle(c.Outcome).Render(fmt.Sprintf("%-10s %s", safe(string(c.Outcome)), status)) + "  " +
 		th.Dim.Render(fmt.Sprintf("%7s  %8s", Millis(c.Duration), HumanBytes(int64(c.Bytes))))
 	return line
 }
@@ -217,7 +220,25 @@ func (m *Inspector) row(c store.Call, cursor bool) string {
 func (m *Inspector) detail(w int) []string {
 	th := m.th
 	c := m.current()
-	label := func(s string) string { return th.Dim.Render(fmt.Sprintf("%-8s ", s)) }
+	// field is a labelled value, wrapped under its label so long arguments,
+	// errors and previews can be read in full (up to maxDetailLines each).
+	const labelW = 9
+	field := func(name, value string, style lipgloss.Style) []string {
+		wrapped := wrapLines(value, max(w-4-labelW, 10))
+		if len(wrapped) > maxDetailLines {
+			wrapped = append(wrapped[:maxDetailLines-1], "…")
+		}
+		out := make([]string, 0, len(wrapped))
+		for i, l := range wrapped {
+			lead := strings.Repeat(" ", labelW)
+			if i == 0 {
+				lead = th.Dim.Render(fmt.Sprintf("%-*s", labelW, name))
+			}
+			out = append(out, lead+style.Render(l))
+		}
+		return out
+	}
+	plain := lipgloss.NewStyle()
 	content := []string{
 		th.method(strings.SplitN(c.Op, " ", 2)[0]).Render(safe(c.Op)) + th.Dim.Render(fmt.Sprintf("  ·  %s/%s  ·  %s", safe(c.API), safe(c.Toolset), c.Time.Local().Format("2006-01-02 15:04:05"))),
 	}
@@ -225,15 +246,15 @@ func (m *Inspector) detail(w int) []string {
 	if len(c.Args) > 0 {
 		args = oneLineJSON(c.Args)
 	}
-	content = append(content, label("args")+safe(args))
+	content = append(content, field("args", args, plain)...)
 	if c.Error != "" {
-		content = append(content, label("error")+th.Err.Render(safe(c.Error)))
+		content = append(content, field("error", c.Error, th.Err)...)
 	}
-	preview := th.Dim.Render("(off: set log.response_preview: true to keep one)")
 	if c.Preview != "" {
-		preview = safe(strings.Join(strings.Fields(c.Preview), " "))
+		content = append(content, field("preview", strings.Join(strings.Fields(c.Preview), " "), plain)...)
+	} else {
+		content = append(content, field("preview", "(off: set log.response_preview: true to keep one)", th.Dim)...)
 	}
-	content = append(content, label("preview")+preview)
 	return m.th.box(w, m.th.Border, content...)
 }
 

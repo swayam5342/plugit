@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -225,5 +228,26 @@ func TestTryFormPolicy(t *testing.T) {
 	}
 	if err := runTryForm(t, p, "", "pp_createPet", tryFlags{yes: true}, func(_ context.Context, in tui.TryInput) error { confirm = in.Confirm; return nil }); err != nil || confirm != "" {
 		t.Errorf("--yes should pre-confirm: err=%v confirm=%q", err, confirm)
+	}
+}
+
+// An upstream body is untrusted: escape sequences in it must not reach the
+// terminal (they can retitle it, rewrite the screen or set the clipboard).
+func TestTryStripsTerminalEscapesFromResponse(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = io.WriteString(w, "line one\n\x1b]0;owned\x07\x1b[2Jline two\u202e")
+	}))
+	t.Cleanup(up.Close)
+	p := setupTryAPI(t, up.URL, "")
+	out, err := runTry(t, p, "", "pp_getPet", tryFlags{args: []string{"id=7"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.ContainsAny(out, "\x1b\x07\u202e") {
+		t.Errorf("output carries terminal control characters: %q", out)
+	}
+	if !strings.Contains(out, "line one\n") || !strings.Contains(out, "line two") {
+		t.Errorf("text or line breaks lost: %q", out)
 	}
 }

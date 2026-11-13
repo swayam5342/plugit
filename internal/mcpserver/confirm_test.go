@@ -185,3 +185,32 @@ func TestConfirmOlderProtocol(t *testing.T) {
 		t.Fatalf("err=%v isError=%v hits=%d asked=%d text=%s", err, res != nil && res.IsError, r.hits.Load(), e.asked.Load(), text(res))
 	}
 }
+
+// One approval makes one call: an accepted confirmation can't be replayed,
+// and two requests for the same arguments get separate ones.
+func TestConfirmStateSingleUse(t *testing.T) {
+	h := &handler{tool: Tool{Tool: createPetBody}, key: []byte("0123456789abcdef0123456789abcdef")}
+	args := map[string]any{"name": "rex"}
+	at := now()
+	first, second := h.state(at, args), h.state(at, args)
+	if first == second {
+		t.Fatal("two confirmations for the same arguments share a state")
+	}
+	if err := h.checkState(first, args); err != nil {
+		t.Fatalf("valid state refused: %v", err)
+	}
+	if err := h.checkState(first, args); err == nil || !strings.Contains(err.Error(), "already used") {
+		t.Errorf("replayed state: err = %v, want already used", err)
+	}
+	if err := h.checkState(second, args); err != nil {
+		t.Errorf("the other confirmation was refused: %v", err)
+	}
+	// A state that fails for another reason isn't spent.
+	third := h.state(at, args)
+	if err := h.checkState(third, map[string]any{"name": "other"}); err == nil {
+		t.Fatal("state accepted for different arguments")
+	}
+	if err := h.checkState(third, args); err != nil {
+		t.Errorf("state spent by a failed check: %v", err)
+	}
+}

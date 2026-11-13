@@ -92,7 +92,7 @@ func (p *Picker) detailBody(w int) []string {
 		meta = append(meta, th.Warn.Render("deprecated"))
 	}
 	if o := p.over[t.Key]; o.Policy != "" {
-		meta = append(meta, "policy: "+th.policy(o.Policy).Render(o.Policy))
+		meta = append(meta, "policy: "+th.policy(o.Policy).Render(safe(o.Policy)))
 	}
 	add("  " + th.Dim.Render(strings.Join(meta, " · ")))
 
@@ -169,8 +169,8 @@ func (p *Picker) detailView() tea.View {
 	w := max(p.width, 20)
 	t := p.finalTool(p.detail.tool)
 	title := th.Accent.Render("✦ ") + th.Title.Render("plugit") + th.Dim.Render(" · tool · ") + th.Title.Render(safe(t.Name))
-	sub := th.method(t.Method).Render(t.Method) + " " + safe(t.Path)
-	lines := th.box(w, th.Border, spread(title, th.pill(p.in.Mode), w-4), sub)
+	sub := th.method(t.Method).Render(safe(t.Method)) + " " + safe(t.Path)
+	lines := th.box(w, th.Border, spread(title, th.pill(p.policyMode), w-4), sub)
 
 	body := p.detailBody(w)
 	h := max(p.height-len(lines)-1, 1)

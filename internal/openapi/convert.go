@@ -95,7 +95,15 @@ func (c *converter) schema(s *base.Schema, depth int) map[string]any {
 		return map[string]any{"not": map[string]any{}}
 	}
 
-	types := append([]string(nil), s.Type...)
+	// Only JSON Schema's own type names are kept: "type" is spec text that
+	// reaches the model and the terminal, and an unknown name can't be
+	// validated against anyway (the schema wouldn't compile).
+	types := make([]string, 0, len(s.Type))
+	for _, typ := range s.Type {
+		if jsonSchemaTypes[typ] {
+			types = append(types, typ)
+		}
+	}
 	if c.is30 && s.Nullable != nil && *s.Nullable && len(types) > 0 && !slices.Contains(types, "null") {
 		types = append(types, "null")
 	}
@@ -280,4 +288,10 @@ func setPtr[T any](out map[string]any, key string, v *T) {
 	if v != nil {
 		out[key] = *v
 	}
+}
+
+// jsonSchemaTypes are the type names JSON Schema defines.
+var jsonSchemaTypes = map[string]bool{
+	"string": true, "number": true, "integer": true, "boolean": true,
+	"array": true, "object": true, "null": true,
 }

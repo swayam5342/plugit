@@ -19,6 +19,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
+	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/httpx"
 	"github.com/swayam5342/plugit/internal/isolate"
 	"github.com/swayam5342/plugit/internal/mcpserver"
@@ -444,6 +445,11 @@ func runServe(ctx context.Context, s runSettings, d runDeps) error {
 	baseURL, err := chooseBaseURL(s.baseURL, m.Servers, credentials)
 	if err != nil {
 		return err
+	}
+	if credentials {
+		if err := config.CheckCredentialTransport(baseURL.String(), s.allowPrivate); err != nil {
+			return fmt.Errorf("--base-url %w", err)
+		}
 	}
 	selected := selectTools(m.Tools, s.mode, s.tags, s.methods, s.paths)
 	if err := checkToolCount(selected, s.maxTools); err != nil {

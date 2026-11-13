@@ -194,7 +194,12 @@ func printSyncDiff(w io.Writer, baseURL string, d curate.SyncDiff, lintNote stri
 		return "  (in " + strings.Join(c.Listed, ", ") + ")"
 	}
 	for _, a := range d.Added {
-		fmt.Fprintf(&b, "+ %s  %s\n", a.Key, tui.Safe(a.New.Name))
+		note := ""
+		if len(a.AutoSelected) > 0 {
+			// Toolset names are validated ([a-z0-9_-]).
+			note = "  ! served at once by " + strings.Join(a.AutoSelected, ", ") + " (selected by tags or methods)"
+		}
+		fmt.Fprintf(&b, "+ %s  %s%s\n", a.Key, tui.Safe(a.New.Name), note)
 	}
 	for _, c := range d.Changed {
 		fmt.Fprintf(&b, "~ %s  %s%s\n", c.Key, strings.Join(c.What, ", "), served(c))

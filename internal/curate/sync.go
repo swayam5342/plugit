@@ -19,6 +19,10 @@ type OpChange struct {
 	New    *model.Tool // nil when removed
 	What   []string    // for changes: which aspects differ
 	Listed []string    // toolsets that list this key, sorted
+	// AutoSelected, for an added operation, names the toolsets that will
+	// serve it as soon as the spec is adopted: those that select by
+	// include_tags or methods instead of listing keys (see Select).
+	AutoSelected []string
 }
 
 // SyncDiff is what `plugit sync` shows before adopting a new spec (SPEC
@@ -58,11 +62,21 @@ func DiffManifests(old, updated *model.Manifest, cfg config.API) SyncDiff {
 		}
 		return out
 	}
+	auto := func(t *model.Tool) []string {
+		var out []string
+		for _, name := range slices.Sorted(maps.Keys(cfg.Toolsets)) {
+			ts := cfg.Toolsets[name]
+			if len(ts.Tools) == 0 && (len(ts.IncludeTags) > 0 || len(ts.Methods) > 0) && matchesFilters(*t, ts) {
+				out = append(out, name)
+			}
+		}
+		return out
+	}
 	for k, n := range after {
 		o, ok := before[k]
 		switch {
 		case !ok:
-			d.Added = append(d.Added, OpChange{Key: k, New: n, Listed: listed(k)})
+			d.Added = append(d.Added, OpChange{Key: k, New: n, Listed: listed(k), AutoSelected: auto(n)})
 		default:
 			if what := differences(o, n); len(what) > 0 {
 				d.Changed = append(d.Changed, OpChange{Key: k, Old: o, New: n, What: what, Listed: listed(k)})
