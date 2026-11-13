@@ -196,7 +196,6 @@ func printSyncDiff(w io.Writer, baseURL string, d curate.SyncDiff, lintNote stri
 	for _, a := range d.Added {
 		note := ""
 		if len(a.AutoSelected) > 0 {
-			// Toolset names are validated ([a-z0-9_-]).
 			note = "  ! served at once by " + strings.Join(a.AutoSelected, ", ") + " (selected by tags or methods)"
 		}
 		fmt.Fprintf(&b, "+ %s  %s%s\n", tui.Safe(string(a.Key)), tui.Safe(a.New.Name), note)

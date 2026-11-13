@@ -147,7 +147,6 @@ func tryTool(ctx context.Context, s serveSettings, toolName string, f tryFlags, 
 	if err != nil {
 		return err
 	}
-	// The body is the upstream's: nothing in it may drive the terminal.
 	if _, err := fmt.Fprintf(d.out, "←\n%s\n", tui.SafeText(r.Text)); err != nil {
 		return err
 	}

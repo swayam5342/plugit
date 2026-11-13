@@ -227,8 +227,6 @@ func (p *pmWalk) request(it pmItem, tag string) {
 		b.warn(fmt.Sprintf("request %q has no usable URL; skipped", naming.CleanText(it.Name, 80)))
 		return
 	}
-	// The same rules as an OpenAPI path template: a collection is just as
-	// untrusted, and its URLs are free text.
 	if !b.validPath(path) {
 		return
 	}

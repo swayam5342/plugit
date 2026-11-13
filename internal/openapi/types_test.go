@@ -5,10 +5,6 @@ import (
 	"testing"
 )
 
-// A schema's "type" is spec text like any other, and it reaches the
-// terminal (tool detail, Try it) and the model. Only JSON Schema's own type
-// names are kept: anything else is dropped, leaving that part of the
-// schema unconstrained instead of carrying attacker-chosen text (T4).
 func TestParseKeepsOnlyKnownSchemaTypes(t *testing.T) {
 	src := `
 openapi: 3.1.0

@@ -150,9 +150,6 @@ func TestJSONBodyUnchanged(t *testing.T) {
 	}
 }
 
-// A spread object may not supply a key that another top-level field owns: it
-// would put a second, model-chosen value beside a fixed (hidden) field, and
-// many servers read the first one (SPEC T6).
 func TestFormSpreadObjectCannotShadowFields(t *testing.T) {
 	tl := formTool(nil, "email", "filter")
 	tl.Params = append(tl.Params, model.Param{Name: "tenant_id", UpstreamName: "tenant_id", In: model.InBody, Hidden: true, Schema: json.RawMessage(`{}`)})

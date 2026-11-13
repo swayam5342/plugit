@@ -274,7 +274,7 @@ func TestRunSetupFailures(t *testing.T) {
 		"credentials over plain http, private networks allowed": {attackerSpec, func(s *runSettings) {
 			s.baseURL = "http://api.example.test"
 			s.headers = []string{"X-Api-Key=env:K"}
-			s.allowPrivate = true // where plugit may connect, not whether it encrypts
+			s.allowPrivate = true
 		}, map[string]string{"K": runSecret}, []string{"https", "--allow-insecure"}, nil},
 		"missing env secret": {attackerSpec, func(s *runSettings) {
 			s.baseURL = "https://api.example.test"

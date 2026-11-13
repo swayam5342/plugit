@@ -242,8 +242,6 @@ func itoa(i int) string {
 	return string(b)
 }
 
-// Every parse option reaches the child: a switch that only worked
-// in-process would silently parse differently in the real commands.
 func TestParsePassesAllowUnsafePaths(t *testing.T) {
 	const src = `
 openapi: 3.0.3

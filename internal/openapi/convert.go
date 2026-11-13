@@ -95,9 +95,6 @@ func (c *converter) schema(s *base.Schema, depth int) map[string]any {
 		return map[string]any{"not": map[string]any{}}
 	}
 
-	// Only JSON Schema's own type names are kept: "type" is spec text that
-	// reaches the model and the terminal, and an unknown name can't be
-	// validated against anyway (the schema wouldn't compile).
 	types, isFile := knownTypes(s.Type)
 	if c.is30 && s.Nullable != nil && *s.Nullable && len(types) > 0 && !slices.Contains(types, "null") {
 		types = append(types, "null")
@@ -294,10 +291,9 @@ func setPtr[T any](out map[string]any, key string, v *T) {
 	}
 }
 
-// hiddenValue reports hidden content in a schema value the model reads but
-// that cleaning must leave alone, because changing it would change what the
-// API accepts: enum, const and default values, patterns, formats and
-// property names (L007). v is a string or a decoded JSON value.
+// hiddenValue reports hidden content in a schema value that can't be cleaned
+// without changing what the API accepts (L007). v is a string or a decoded
+// JSON value.
 func (c *converter) hiddenValue(where string, v any) {
 	switch x := v.(type) {
 	case string:
@@ -316,8 +312,8 @@ func (c *converter) hiddenValue(where string, v any) {
 	}
 }
 
-// knownTypes keeps the JSON Schema type names in types. isFile reports
-// Swagger's "file", which is not one: see markFile.
+// knownTypes keeps the JSON Schema type names in types: "type" is spec text
+// that reaches the model. isFile reports Swagger's "file".
 func knownTypes(types []string) (known []string, isFile bool) {
 	known = make([]string, 0, len(types))
 	for _, typ := range types {
@@ -331,9 +327,8 @@ func knownTypes(types []string) (known []string, isFile bool) {
 	return known, isFile
 }
 
-// markFile turns Swagger's type "file" into what it means in JSON Schema
-// terms, a binary string, so form bodies still recognize the field as file
-// content (isFileField) and the schema still compiles.
+// markFile makes out a binary string, JSON Schema's form of Swagger's
+// "file" (see isFileField).
 func markFile(out map[string]any) {
 	if _, typed := out["type"]; !typed {
 		out["type"] = "string"
@@ -341,7 +336,6 @@ func markFile(out map[string]any) {
 	out["format"] = "binary"
 }
 
-// jsonSchemaTypes are the type names JSON Schema defines.
 var jsonSchemaTypes = map[string]bool{
 	"string": true, "number": true, "integer": true, "boolean": true,
 	"array": true, "object": true, "null": true,

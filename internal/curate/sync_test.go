@@ -119,9 +119,6 @@ func TestAddToToolsetKeepsOverrides(t *testing.T) {
 	}
 }
 
-// A toolset that selects by tags or methods (and lists no keys) serves a new
-// matching operation as soon as the spec is adopted, without anyone adding
-// it. The diff says so, so a sync can't widen a toolset unnoticed (T4).
 func TestDiffAddedAutoSelected(t *testing.T) {
 	old, updated, cfg := syncFixture()
 	cfg.Toolsets["by-tag"] = config.Toolset{IncludeTags: []string{"Pets"}}
@@ -133,7 +130,6 @@ func TestDiffAddedAutoSelected(t *testing.T) {
 	if got := d.Added[0].AutoSelected; !slices.Equal(got, []string{"by-tag", "posts"}) {
 		t.Errorf("auto-selected = %v, want [by-tag posts]", got)
 	}
-	// Listing keys turns a toolset into an explicit selection.
 	if got := d.Added[0].Listed; len(got) != 0 {
 		t.Errorf("listed = %v", got)
 	}

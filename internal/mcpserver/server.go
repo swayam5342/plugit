@@ -256,9 +256,8 @@ var now = time.Now
 //
 // The answer is bound to the exact arguments: requestState is an HMAC of
 // the tool, the arguments, the time and a nonce, so a retry with different
-// arguments or a stale answer is refused, and each state is accepted once:
-// one approval makes one call. Without elicitation support, the answer is
-// no (§10 Q3).
+// arguments or a stale answer is refused, and each state is accepted once.
+// Without elicitation support, the answer is no (§10 Q3).
 func (h *handler) confirm(req *mcp.CallToolRequest, args map[string]any, reason string) (ask *mcp.CallToolResult, ok bool, why string) {
 	var params *mcp.CallToolParamsRaw
 	var ss *mcp.ServerSession
@@ -348,8 +347,6 @@ func (h *handler) checkState(state string, args map[string]any) error {
 	if _, spent := h.used[state]; spent {
 		return errors.New("the confirmation was already used")
 	}
-	// Only states this server signed get here, so the set stays small;
-	// expired ones can't be replayed anyway and are dropped.
 	for st, at := range h.used {
 		if now().Sub(at) > ConfirmTimeout {
 			delete(h.used, st)

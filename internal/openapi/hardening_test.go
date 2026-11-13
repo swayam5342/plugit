@@ -7,8 +7,6 @@ import (
 	"github.com/swayam5342/plugit/internal/model"
 )
 
-// Swagger 2.0 parameters and array items carry their own "type": it is
-// filtered like every other schema type.
 func TestSwagger2ParamTypesAreFiltered(t *testing.T) {
 	src := `
 swagger: "2.0"
@@ -28,12 +26,9 @@ paths:
 	assertJSON(t, "ok", param(t, tl, "ok").Schema, `{"type":"integer"}`)
 	assertJSON(t, "evil", param(t, tl, "evil").Schema, `{}`)
 	assertJSON(t, "list", param(t, tl, "list").Schema, `{"type":"array","items":{}}`)
-	// "file" isn't a JSON Schema type: left in, the tool's schema wouldn't compile.
 	assertJSON(t, "blob", param(t, tl, "blob").Schema, `{"type":"string","format":"binary"}`)
 }
 
-// A file field is still recognized (and left out: a model can't supply file
-// content) whichever way the spec marks it, in Swagger 2.0 and OpenAPI 3.
 func TestFileFieldsStayOutOfFormBodies(t *testing.T) {
 	v2 := `
 swagger: "2.0"
@@ -78,8 +73,6 @@ paths:
 	}
 }
 
-// Path templates are checked the same way whatever the source format, and a
-// percent-encoded dot segment is still a dot segment (T6).
 func TestPathsCannotLeaveTheBasePath(t *testing.T) {
 	oas := `
 openapi: 3.0.3
@@ -138,10 +131,6 @@ func countWarnings(m *model.Manifest, substr string) int {
 	return n
 }
 
-// Invisible text in the parts of a schema that aren't descriptions (enum
-// values, defaults, patterns, formats, property names) still reaches the
-// model. It can't be removed without changing what the API accepts, so it
-// is reported (lint L007) for the user to see before saving.
 func TestHiddenTextInSchemaValuesIsReported(t *testing.T) {
 	src := `
 openapi: 3.1.0
@@ -179,10 +168,6 @@ paths:
 	}
 }
 
-// Paths that fail the check are skipped unless the user switches
-// AllowUnsafePaths on (network.allow_insecure, --allow-insecure). The switch
-// lets through what is merely risky (spaces, dot segments, backslashes);
-// nothing lets through what would drive the terminal or break the URL.
 func TestUnsafePathsNeedTheSwitch(t *testing.T) {
 	postman := `{"info":{"name":"x","schema":"https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},"item":[
 {"name":"ok","request":{"method":"GET","url":"https://api.example.test/v1/pets/:id"}},

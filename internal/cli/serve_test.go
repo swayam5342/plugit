@@ -65,7 +65,6 @@ func setupAPI(t *testing.T, baseURL string) config.Paths {
 	return p
 }
 
-// rewriteAPI replaces old with new in the saved pets config (once).
 func rewriteAPI(t *testing.T, p config.Paths, old, replacement string) {
 	t.Helper()
 	path, _ := p.APIConfig("pets")
@@ -81,8 +80,6 @@ func rewriteAPI(t *testing.T, p config.Paths, old, replacement string) {
 	}
 }
 
-// setupInsecureAPI is setupAPI for a plain-http remote base URL: the config
-// only loads with network.allow_insecure switched on.
 func setupInsecureAPI(t *testing.T, baseURL string) config.Paths {
 	t.Helper()
 	p := setupAPI(t, "https://placeholder.example.test")

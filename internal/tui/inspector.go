@@ -19,7 +19,6 @@ import (
 // maxInspectorCalls caps how many calls the inspector keeps in memory.
 const maxInspectorCalls = 2000
 
-// maxDetailLines caps each wrapped field of an expanded call.
 const maxDetailLines = 6
 
 // InspectorInput configures the call inspector (SPEC §2.3).
@@ -220,8 +219,6 @@ func (m *Inspector) row(c store.Call, cursor bool) string {
 func (m *Inspector) detail(w int) []string {
 	th := m.th
 	c := m.current()
-	// field is a labelled value, wrapped under its label so long arguments,
-	// errors and previews can be read in full (up to maxDetailLines each).
 	const labelW = 9
 	field := func(name, value string, style lipgloss.Style) []string {
 		wrapped := wrapLines(value, max(w-4-labelW, 10))

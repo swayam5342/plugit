@@ -186,8 +186,6 @@ func TestConfirmOlderProtocol(t *testing.T) {
 	}
 }
 
-// One approval makes one call: an accepted confirmation can't be replayed,
-// and two requests for the same arguments get separate ones.
 func TestConfirmStateSingleUse(t *testing.T) {
 	h := &handler{tool: Tool{Tool: createPetBody}, key: []byte("0123456789abcdef0123456789abcdef")}
 	args := map[string]any{"name": "rex"}
@@ -205,7 +203,6 @@ func TestConfirmStateSingleUse(t *testing.T) {
 	if err := h.checkState(second, args); err != nil {
 		t.Errorf("the other confirmation was refused: %v", err)
 	}
-	// A state that fails for another reason isn't spent.
 	third := h.state(at, args)
 	if err := h.checkState(third, map[string]any{"name": "other"}); err == nil {
 		t.Fatal("state accepted for different arguments")

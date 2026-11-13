@@ -53,8 +53,6 @@ type TryIt struct {
 	height  int
 	th      theme
 
-	// ctx covers the calls made from this screen; quitting cancels it, so a
-	// call still in flight doesn't outlive the screen.
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -80,8 +78,6 @@ func NewTryIt(in TryInput) *TryIt {
 	return m
 }
 
-// paramType is a parameter's schema type for display. It comes from the
-// spec, so it is sanitized like all spec text.
 func paramType(p model.Param) string {
 	var s struct {
 		Type any `json:"type"`
@@ -200,8 +196,7 @@ func (m *TryIt) trySend() tea.Cmd {
 	return m.send()
 }
 
-// wrapLines splits text into sanitized lines of at most w terminal cells
-// (a wide character takes two, so counting characters would overflow).
+// wrapLines splits text into sanitized lines of at most w terminal cells.
 func wrapLines(text string, w int) []string {
 	var out []string
 	for line := range strings.SplitSeq(strings.TrimRight(text, "\n"), "\n") {

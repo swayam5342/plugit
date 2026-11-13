@@ -195,10 +195,8 @@ func Toolset(in Input, name string) []Finding {
 // apiFindings are the API-wide rules.
 func apiFindings(a config.API) []Finding {
 	var out []Finding
-	// L011: credentials over plain http to a remote host. The config
-	// refuses this at load time unless the user switched
-	// network.allow_insecure on; then it is their decision, and this is the
-	// reminder.
+	// L011: credentials over plain http to a remote host (a warning when
+	// network.allow_insecure is on).
 	if u, err := url.Parse(a.BaseURL); err == nil && u.Scheme == "http" && !loopback(u.Hostname()) && sendsSecrets(a) {
 		f := Finding{Rule: "L011", Severity: Error,
 			Message: fmt.Sprintf("base_url %s is plain http to a remote host, and credentials are sent: use https", u.Redacted())}
@@ -278,10 +276,9 @@ func typed(m map[string]any) bool {
 	return false
 }
 
-// walk visits a schema: it reports every title and description, and every
-// string among its enum, const and default values, to text (the model reads
-// them all), and returns the nesting depth and the most properties on one
-// object.
+// walk visits a schema: it reports every title, description and enum, const
+// or default string to text, and returns the nesting depth and the most
+// properties on one object.
 func walk(s any, depth int, text func(field, s string)) (maxD, wide int) {
 	m, ok := s.(map[string]any)
 	if !ok {
@@ -323,8 +320,6 @@ func walk(s any, depth int, text func(field, s string)) (maxD, wide int) {
 	return maxD, wide
 }
 
-// valueStrings calls fn for every string in a JSON value (an enum list, a
-// default object), a few levels deep.
 func valueStrings(v any, depth int, fn func(string)) {
 	if depth > maxDepth {
 		return

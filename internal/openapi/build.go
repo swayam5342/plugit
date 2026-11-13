@@ -117,14 +117,10 @@ func cleanTags(tags []string) []string {
 
 // validPath rejects path templates that could smuggle a query or fragment,
 // climb out of the pinned base path, or carry invisible text into tool keys
-// and descriptions. Path templates come from the untrusted spec, whatever
-// its format.
-//
-// A server decodes the path before using it, so the percent-decoded form is
-// checked too. Problems come in two kinds. Hard ones (no leading '/', '?',
-// '#', control or invisible characters) always skip the path. Risky ones
-// (spaces, dot segments, backslashes) skip it unless the user switched
-// AllowUnsafePaths on.
+// and descriptions. Path templates come from the untrusted spec. The
+// percent-decoded form is checked too, since a server decodes it. Hard
+// problems always skip the path; risky ones skip it unless AllowUnsafePaths
+// is on.
 func (b *builder) validPath(path string) bool {
 	decoded, err := url.PathUnescape(path)
 	if err != nil {
@@ -148,7 +144,6 @@ func (b *builder) validPath(path string) bool {
 	return false
 }
 
-// hardPathProblem says why a path template can never be used, or "".
 func hardPathProblem(path, decoded string) string {
 	unprintable := func(r rune) bool {
 		return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || (unicode.IsSpace(r) && r != ' ')
@@ -166,8 +161,6 @@ func hardPathProblem(path, decoded string) string {
 	return ""
 }
 
-// riskyPathProblem says what makes a usable path template risky, or "".
-// An encoded space is an ordinary path character; a literal one is not.
 func riskyPathProblem(path, decoded string) string {
 	dots := func(s string) bool {
 		for seg := range strings.SplitSeq(s, "/") {

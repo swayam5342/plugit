@@ -52,10 +52,8 @@ type Options struct {
 	Prefix string
 	// MaxDescription caps descriptions in runes (naming.DefaultMaxDescription if 0).
 	MaxDescription int
-	// AllowUnsafePaths keeps paths that are risky but usable: spaces, '.'
-	// and '..' segments, backslashes (also percent-encoded). It is the
-	// user's network.allow_insecure switch. Paths that could drive a
-	// terminal or break the URL are skipped whatever it says.
+	// AllowUnsafePaths keeps paths with spaces, dot segments or backslashes
+	// (network.allow_insecure).
 	AllowUnsafePaths bool
 	// Logger receives libopenapi's diagnostics. nil discards them. Never
 	// pass a logger that writes to stdout.

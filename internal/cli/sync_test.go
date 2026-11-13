@@ -258,8 +258,6 @@ func TestSyncFailures(t *testing.T) {
 	}
 }
 
-// A new operation that a tag- or method-based toolset will serve straight
-// away is called out in the plain diff.
 func TestSyncDiffFlagsAutoServedOperations(t *testing.T) {
 	added := model.Tool{Key: "POST /pets/{id}/photos", Name: "addPhoto", Method: "POST", Path: "/pets/{id}/photos"}
 	quiet := model.Tool{Key: "GET /owners", Name: "listOwners", Method: "GET", Path: "/owners"}
@@ -280,8 +278,6 @@ func TestSyncDiffFlagsAutoServedOperations(t *testing.T) {
 	}
 }
 
-// Operation keys come from the new spec: the plain diff strips control
-// characters from them like every other piece of spec text.
 func TestSyncDiffSanitizesKeys(t *testing.T) {
 	evil := model.Tool{Key: "GET /pets\x1b]0;owned\a", Name: "listPets", Method: "GET", Path: "/pets"}
 	d := curate.SyncDiff{

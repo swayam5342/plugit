@@ -34,10 +34,7 @@ import (
 //     filtering, M6). Again nothing to rewrite.
 //   - 4: adds auth.type oauth2 with auth.flow, token_url, device_url,
 //     client_id and scopes (M6). Nothing to rewrite.
-//   - 5: adds network.allow_insecure, the one switch for what plugit
-//     otherwise refuses: a credential over plain http to a remote host, and
-//     spec paths that fail the path check. Off by default; nothing to
-//     rewrite.
+//   - 5: adds network.allow_insecure. Nothing to rewrite.
 const CurrentVersion = 5
 
 // MaxConfigBytes caps plugit.yaml. A real config is a few kilobytes.
@@ -120,10 +117,8 @@ type Fixed struct {
 // Network holds per-API network limits.
 type Network struct {
 	AllowPrivate bool `yaml:"allow_private"`
-	// AllowInsecure (version 5) accepts what plugit otherwise refuses: a
-	// credential sent over plain http to a remote host, and spec paths that
-	// fail the path check (spaces, dot segments, backslashes). It is about
-	// what is sent; AllowPrivate is about where plugit may connect.
+	// AllowInsecure accepts a credential over plain http to a remote host,
+	// and spec paths with spaces, dot segments or backslashes.
 	AllowInsecure    bool          `yaml:"allow_insecure,omitempty"`
 	Timeout          time.Duration `yaml:"timeout,omitempty"`
 	MaxResponseBytes int64         `yaml:"max_response_bytes,omitempty"`
@@ -587,8 +582,6 @@ func validateBaseURL(raw string) error {
 	return nil
 }
 
-// hasCredential reports whether requests carry a secret: an auth credential,
-// or a fixed parameter resolved from env: or the keyring.
 func (c *API) hasCredential() bool {
 	if c.Auth.Type != AuthNone && c.Auth.Type != "" {
 		return true
@@ -601,10 +594,9 @@ func (c *API) hasCredential() bool {
 	return false
 }
 
-// CheckCredentialTransport refuses to send a credential to baseURL in
-// cleartext (SPEC T8). Plain http is allowed only to this machine, or when
-// the user has switched allowInsecure on. The URL is never echoed; callers
-// add how to switch it on (a config key or a flag).
+// CheckCredentialTransport refuses plain http to a remote host when a
+// credential is sent (SPEC T8), unless allowInsecure is on. The URL is never
+// echoed.
 func CheckCredentialTransport(baseURL string, allowInsecure bool) error {
 	u, err := url.Parse(baseURL)
 	if err != nil || u.Scheme != "http" || allowInsecure {

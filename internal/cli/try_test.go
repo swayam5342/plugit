@@ -231,8 +231,6 @@ func TestTryFormPolicy(t *testing.T) {
 	}
 }
 
-// An upstream body is untrusted: escape sequences in it must not reach the
-// terminal (they can retitle it, rewrite the screen or set the clipboard).
 func TestTryStripsTerminalEscapesFromResponse(t *testing.T) {
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")

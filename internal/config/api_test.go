@@ -464,9 +464,6 @@ func TestOAuth2Auth(t *testing.T) {
 	}
 }
 
-// A credential never travels over plain http, except to this machine or
-// when the user has switched network.allow_insecure on (SPEC T8).
-// allow_private is about where plugit may connect, not about encryption.
 func TestCredentialsNeedHTTPS(t *testing.T) {
 	const (
 		bearer = "auth: {type: bearer, secret: \"env:PETS_TOKEN\"}\n"
@@ -509,8 +506,6 @@ func TestCredentialsNeedHTTPS(t *testing.T) {
 	}
 }
 
-// network.allow_insecure (version 5) is off unless the user writes it, and
-// is written back only when it is on.
 func TestAllowInsecure(t *testing.T) {
 	c, err := ParseAPI([]byte(minimalConfig))
 	if err != nil {

@@ -19,9 +19,8 @@ type OpChange struct {
 	New    *model.Tool // nil when removed
 	What   []string    // for changes: which aspects differ
 	Listed []string    // toolsets that list this key, sorted
-	// AutoSelected, for an added operation, names the toolsets that will
-	// serve it as soon as the spec is adopted: those that select by
-	// include_tags or methods instead of listing keys (see Select).
+	// AutoSelected names the toolsets that serve an added operation at once,
+	// because they select by include_tags or methods.
 	AutoSelected []string
 }
 

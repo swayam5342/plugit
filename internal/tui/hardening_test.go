@@ -12,13 +12,12 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/swayam5342/plugit/internal/config"
+	"github.com/swayam5342/plugit/internal/curate"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/policy"
 	"github.com/swayam5342/plugit/internal/store"
 )
 
-// osc is a terminal escape (set the window title) that plugit never emits:
-// if it shows up in a view, untrusted text reached the terminal raw.
 const osc = "\x1b]0;owned\a"
 
 func assertNoOSC(t *testing.T, what, view string) {
@@ -28,8 +27,6 @@ func assertNoOSC(t *testing.T, what, view string) {
 	}
 }
 
-// End on an empty list (a filter that matches nothing) used to put the
-// cursor at -1 and crash the picker.
 func TestPickerEndOnEmptyList(t *testing.T) {
 	for _, k := range []string{"G", "end"} {
 		t.Run(k, func(t *testing.T) {
@@ -51,7 +48,6 @@ func TestPickerEndOnEmptyList(t *testing.T) {
 	}
 }
 
-// A schema's type comes from the spec: it is sanitized like all spec text.
 func TestParamTypeIsSanitized(t *testing.T) {
 	for name, schema := range map[string]string{
 		"string": `{"type":"\u001b]0;owned\u0007str"}`,
@@ -73,8 +69,6 @@ func TestParamTypeIsSanitized(t *testing.T) {
 	}
 }
 
-// Values that are validated elsewhere are still sanitized where they are
-// drawn: the screens don't depend on every caller having checked them.
 func TestViewsSanitizeValidatedValues(t *testing.T) {
 	tool := tl("GET"+osc, "/pets", "pp_listPets", "pets")
 	ts := config.Toolset{Tools: map[string]config.ToolOverride{string(tool.Key): {Policy: "deny" + osc}}}
@@ -94,22 +88,13 @@ func TestViewsSanitizeValidatedValues(t *testing.T) {
 	assertNoOSC(t, "inspector", in.View().Content)
 
 	s := NewSyncScreen(SyncInput{API: "pets"})
-	s.in.Diff.Added = append(s.in.Diff.Added, struct {
-		Key          model.OpKey
-		Old          *model.Tool
-		New          *model.Tool
-		What         []string
-		Listed       []string
-		AutoSelected []string
-	}{Key: model.OpKey("GET" + osc + " /pets"), New: &tool, Listed: []string{"default" + osc}})
+	s.in.Diff.Added = []curate.OpChange{{Key: model.OpKey("GET" + osc + " /pets"), New: &tool, Listed: []string{"default" + osc}}}
 	s.in.Diff.Changed = s.in.Diff.Added
 	s.in.Diff.Removed = s.in.Diff.Added
 	s.in.Diff.Removed[0].Old = &tool
 	assertNoOSC(t, "sync", s.View().Content)
 }
 
-// The tool detail shows the policy mode as edited with m, not the mode the
-// picker opened with.
 func TestDetailShowsEditedMode(t *testing.T) {
 	p := newTest()
 	press(p, "down", "m", "i")
@@ -119,8 +104,6 @@ func TestDetailShowsEditedMode(t *testing.T) {
 	}
 }
 
-// Lines are wrapped by terminal cells, so wide characters aren't cut off
-// by the box they are drawn in.
 func TestWrapLinesCountsCells(t *testing.T) {
 	const text = "日本語のテキストです" // ten characters, two cells each
 	lines := wrapLines(text, 8)
@@ -137,8 +120,6 @@ func TestWrapLinesCountsCells(t *testing.T) {
 	}
 }
 
-// Long arguments, errors and previews wrap in the inspector instead of
-// being cut at the window edge.
 func TestInspectorWrapsLongDetails(t *testing.T) {
 	long := strings.Repeat("x", 150) + "END-OF-ARGS"
 	args, _ := json.Marshal(map[string]string{"q": long})
@@ -161,7 +142,6 @@ func TestInspectorWrapsLongDetails(t *testing.T) {
 	}
 }
 
-// Quitting the Try it screen cancels a call that is still in flight.
 func TestTryItQuitCancelsCall(t *testing.T) {
 	started, done := make(chan struct{}), make(chan error, 1)
 	m := NewTryIt(TryInput{Tool: tl("GET", "/pets", "pp_listPets", "pets"), Send: func(ctx context.Context, _ map[string]string) TryResult {

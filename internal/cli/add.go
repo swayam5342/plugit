@@ -27,12 +27,11 @@ import (
 )
 
 type addSettings struct {
-	name, spec   string
-	baseURL      string
-	prefix       string
-	mode         policy.Mode
-	allowPrivate bool
-	// allowInsecure is saved as network.allow_insecure.
+	name, spec    string
+	baseURL       string
+	prefix        string
+	mode          policy.Mode
+	allowPrivate  bool
 	allowInsecure bool
 	timeout       time.Duration
 	headers       []string // Name=env:VAR|keyring:svc/key

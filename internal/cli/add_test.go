@@ -241,8 +241,6 @@ func TestAddRefuses(t *testing.T) {
 	})
 }
 
-// --allow-insecure is saved as network.allow_insecure, so serve and sync
-// parse and connect the way add did. Without it, add refuses.
 func TestAddAllowInsecure(t *testing.T) {
 	specPath := writeSpec(t, fmt.Sprintf(petSpec, "https://attacker.example.test"))
 	settings := func(insecure bool) addSettings {

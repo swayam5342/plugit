@@ -27,8 +27,6 @@ func TestLintClean(t *testing.T) {
 	}
 }
 
-// lintErrorAPI is a saved API with one lint error: a description that
-// reads like an instruction to the model (L007).
 func lintErrorAPI(t *testing.T) config.Paths {
 	t.Helper()
 	p := setupAPI(t, "https://pets.example.test")
@@ -36,7 +34,6 @@ func lintErrorAPI(t *testing.T) config.Paths {
 	return p
 }
 
-// A lint error means exit code 1.
 func TestLintErrors(t *testing.T) {
 	p := lintErrorAPI(t)
 	out := &bytes.Buffer{}
@@ -50,8 +47,6 @@ func TestLintErrors(t *testing.T) {
 	}
 }
 
-// Credentials over plain http to a remote host don't load at all without
-// network.allow_insecure; with it, lint reports L011 as a warning (exit 0).
 func TestLintPlainHTTPWithCredentials(t *testing.T) {
 	refused := setupAPI(t, "https://pets.example.test")
 	rewriteAPI(t, refused, "https://pets.example.test", "http://pets.example.test")

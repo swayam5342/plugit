@@ -32,8 +32,7 @@ type CacheKey struct {
 	SpecSHA256 string `json:"spec_sha256"` // sha256 of spec.snapshot.json
 	Prefix     string `json:"prefix"`      // tool names depend on it
 	Parser     string `json:"parser"`      // plugit build that parsed it
-	// UnsafePaths is network.allow_insecure as it was when parsing: it
-	// decides which paths become tools.
+	// UnsafePaths is network.allow_insecure: it decides which paths become tools.
 	UnsafePaths bool `json:"unsafe_paths,omitempty"`
 }
 
