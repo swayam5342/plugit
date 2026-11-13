@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -116,31 +117,79 @@ func cleanTags(tags []string) []string {
 
 // validPath rejects path templates that could smuggle a query or fragment,
 // climb out of the pinned base path, or carry invisible text into tool keys
-// and descriptions. Path templates come from the untrusted spec.
+// and descriptions. Path templates come from the untrusted spec, whatever
+// its format.
+//
+// A server decodes the path before using it, so the percent-decoded form is
+// checked too. Problems come in two kinds. Hard ones (no leading '/', '?',
+// '#', control or invisible characters) always skip the path. Risky ones
+// (spaces, dot segments, backslashes) skip it unless the user switched
+// AllowUnsafePaths on.
 func (b *builder) validPath(path string) bool {
-	reason := ""
+	decoded, err := url.PathUnescape(path)
+	if err != nil {
+		decoded = path
+	}
+	reason, risky := hardPathProblem(path, decoded), false
+	if reason == "" {
+		reason, risky = riskyPathProblem(path, decoded), true
+	}
+	switch {
+	case reason == "":
+		return true
+	case risky && b.opts.AllowUnsafePaths:
+		return true
+	}
+	msg := fmt.Sprintf("path %+q skipped: %s", truncateRef(path), reason)
+	if risky {
+		msg += "; to import it anyway, set network.allow_insecure (--allow-insecure)"
+	}
+	b.warn(msg)
+	return false
+}
+
+// hardPathProblem says why a path template can never be used, or "".
+func hardPathProblem(path, decoded string) string {
+	unprintable := func(r rune) bool {
+		return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || (unicode.IsSpace(r) && r != ' ')
+	}
 	switch {
 	case !strings.HasPrefix(path, "/"):
-		reason = "it must start with '/'"
-	case strings.ContainsAny(path, `?#\`):
-		reason = `it contains '?', '#' or '\'`
-	case strings.IndexFunc(path, func(r rune) bool {
-		return unicode.IsControl(r) || unicode.IsSpace(r) || unicode.Is(unicode.Cf, r)
-	}) >= 0:
-		reason = "it contains whitespace, control or invisible characters"
-	default:
-		for seg := range strings.SplitSeq(path, "/") {
+		return "it must start with '/'"
+	case strings.ContainsAny(path, "?#"):
+		return "it contains '?' or '#'"
+	case strings.IndexFunc(path, unprintable) >= 0:
+		return "it contains control or invisible characters"
+	case strings.IndexFunc(decoded, unprintable) >= 0:
+		return "it contains percent-encoded control or invisible characters"
+	}
+	return ""
+}
+
+// riskyPathProblem says what makes a usable path template risky, or "".
+// An encoded space is an ordinary path character; a literal one is not.
+func riskyPathProblem(path, decoded string) string {
+	dots := func(s string) bool {
+		for seg := range strings.SplitSeq(s, "/") {
 			if seg == "." || seg == ".." {
-				reason = "it contains a '.' or '..' segment"
-				break
+				return true
 			}
 		}
-	}
-	if reason != "" {
-		b.warn(fmt.Sprintf("path %+q skipped: %s", truncateRef(path), reason))
 		return false
 	}
-	return true
+	switch {
+	case strings.Contains(path, " "):
+		return "it contains a space"
+	case strings.Contains(path, `\`):
+		return `it contains '\'`
+	case dots(path):
+		return "it contains a '.' or '..' segment"
+	case strings.Contains(decoded, `\`):
+		return `it contains a percent-encoded '\'`
+	case dots(decoded):
+		return "it contains a percent-encoded '.' or '..' segment"
+	}
+	return ""
 }
 
 // ---- OpenAPI 3.x ----
@@ -442,9 +491,17 @@ func v2ParamSchema(c *converter, p *v2.Parameter) map[string]any {
 		c.issue(model.IssueUnsupported, "file parameter %q not supported yet", p.Name)
 	}
 	out := map[string]any{}
-	setStr(out, "type", p.Type)
+	types, isFile := knownTypes([]string{p.Type})
+	if len(types) == 1 {
+		out["type"] = types[0]
+	}
 	setStr(out, "format", p.Format)
 	setStr(out, "pattern", p.Pattern)
+	if isFile {
+		markFile(out)
+	}
+	c.hiddenValue("schema format", p.Format)
+	c.hiddenValue("schema pattern", p.Pattern)
 	setPtr(out, "minimum", p.Minimum)
 	setPtr(out, "maximum", p.Maximum)
 	if p.ExclusiveMinimum != nil && *p.ExclusiveMinimum && p.Minimum != nil {
@@ -462,11 +519,13 @@ func v2ParamSchema(c *converter, p *v2.Parameter) map[string]any {
 	setPtr(out, "uniqueItems", p.UniqueItems)
 	setPtr(out, "multipleOf", p.MultipleOf)
 	setEnum(out, p.Enum)
+	c.hiddenValue("schema enum value", out["enum"])
 	if v, ok := decodeNode(p.Default); ok {
 		out["default"] = v
+		c.hiddenValue("schema default value", v)
 	}
 	if p.Items != nil {
-		out["items"] = v2Items(p.Items, 1)
+		out["items"] = v2Items(c, p.Items, 1)
 	}
 	return out
 }
@@ -474,17 +533,22 @@ func v2ParamSchema(c *converter, p *v2.Parameter) map[string]any {
 // v2Items converts Swagger 2.0 array items. Numeric constraints are dropped:
 // libopenapi exposes them as plain ints, so "absent" and "0" look the same,
 // and dropping a constraint only makes the schema more permissive.
-func v2Items(it *v2.Items, depth int) map[string]any {
+func v2Items(c *converter, it *v2.Items, depth int) map[string]any {
 	out := map[string]any{}
 	if depth > MaxSchemaDepth {
 		return out
 	}
-	setStr(out, "type", it.Type)
+	if types, _ := knownTypes([]string{it.Type}); len(types) == 1 {
+		out["type"] = types[0]
+	}
 	setStr(out, "format", it.Format)
 	setStr(out, "pattern", it.Pattern)
+	c.hiddenValue("schema format", it.Format)
+	c.hiddenValue("schema pattern", it.Pattern)
 	setEnum(out, it.Enum)
+	c.hiddenValue("schema enum value", out["enum"])
 	if it.Items != nil {
-		out["items"] = v2Items(it.Items, depth+1)
+		out["items"] = v2Items(c, it.Items, depth+1)
 	}
 	return out
 }

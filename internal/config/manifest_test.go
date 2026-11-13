@@ -59,6 +59,7 @@ func TestManifestCacheMisses(t *testing.T) {
 		"spec changed":   {SpecSHA256: strings.Repeat("b", 64), Prefix: "pets", Parser: "v1.2.3"},
 		"prefix changed": {SpecSHA256: key.SpecSHA256, Prefix: "", Parser: "v1.2.3"},
 		"plugit changed": {SpecSHA256: key.SpecSHA256, Prefix: "pets", Parser: "v1.2.4"},
+		"switch changed": {SpecSHA256: key.SpecSHA256, Prefix: "pets", Parser: "v1.2.3", UnsafePaths: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := ReadManifest(path, k); !errors.Is(err, ErrCacheMiss) {

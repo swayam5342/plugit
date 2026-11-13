@@ -151,7 +151,7 @@ func apiBudget(p config.Paths, name string, info BuildInfo) string {
 		return ""
 	}
 	cache, _ := p.Manifest(name)
-	m, err := config.ReadManifest(cache, config.CacheKey{SpecSHA256: sum, Prefix: cfg.Prefix, Parser: parserID(info)})
+	m, err := config.ReadManifest(cache, config.CacheKey{SpecSHA256: sum, Prefix: cfg.Prefix, Parser: parserID(info), UnsafePaths: cfg.Network.AllowInsecure})
 	if err != nil {
 		return ""
 	}

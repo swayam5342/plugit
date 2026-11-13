@@ -50,6 +50,7 @@ type request struct {
 	Spec           []byte `json:"spec"`
 	Prefix         string `json:"prefix,omitempty"`
 	MaxDescription int    `json:"maxDescription,omitempty"`
+	UnsafePaths    bool   `json:"unsafePaths,omitempty"`
 }
 
 type response struct {
@@ -106,7 +107,7 @@ func (r *Runner) Parse(ctx context.Context, data []byte, opts openapi.Options) (
 	if maxOut <= 0 {
 		maxOut = DefaultMaxOutput
 	}
-	req, err := json.Marshal(request{Spec: data, Prefix: opts.Prefix, MaxDescription: opts.MaxDescription})
+	req, err := json.Marshal(request{Spec: data, Prefix: opts.Prefix, MaxDescription: opts.MaxDescription, UnsafePaths: opts.AllowUnsafePaths})
 	if err != nil {
 		return nil, fmt.Errorf("encoding parse request: %w", err)
 	}
@@ -160,7 +161,7 @@ func ChildMain(stdin io.Reader, stdout io.Writer) int {
 		return 2
 	}
 
-	m, err := openapi.Parse(req.Spec, openapi.Options{Prefix: req.Prefix, MaxDescription: req.MaxDescription})
+	m, err := openapi.Parse(req.Spec, openapi.Options{Prefix: req.Prefix, MaxDescription: req.MaxDescription, AllowUnsafePaths: req.UnsafePaths})
 	if err != nil {
 		resp := response{Err: err.Error()}
 		for _, k := range errorKinds {

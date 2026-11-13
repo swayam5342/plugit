@@ -45,7 +45,7 @@ type runFlags struct {
 	tags, methods, paths        []string
 	maxTools                    int
 	timeout                     time.Duration
-	allowPrivate                bool
+	allowPrivate, allowInsecure bool
 }
 
 // runSettings are the effective settings: flags, then PLUGIT_* env vars,
@@ -57,6 +57,7 @@ type runSettings struct {
 	maxTools              int
 	timeout               time.Duration
 	allowPrivate          bool
+	allowInsecure         bool
 	mode                  policy.Mode
 }
 
@@ -144,6 +145,19 @@ func resolveRunSettings(f runFlags, changed map[string]bool, lookup func(string)
 				return s, fmt.Errorf("PLUGIT_ALLOW_PRIVATE: %q is not true or false", v)
 			}
 			s.allowPrivate = b
+		}
+	}
+
+	switch {
+	case changed["allow-insecure"]:
+		s.allowInsecure = f.allowInsecure
+	default:
+		if v, ok := lookup("PLUGIT_ALLOW_INSECURE"); ok && v != "" {
+			b, err := strconv.ParseBool(v)
+			if err != nil {
+				return s, fmt.Errorf("PLUGIT_ALLOW_INSECURE: %q is not true or false", v)
+			}
+			s.allowInsecure = b
 		}
 	}
 	return s, nil
@@ -378,6 +392,7 @@ func newRunCmd(info BuildInfo) *cobra.Command {
 Settings come from flags, then PLUGIT_* environment variables (PLUGIT_SPEC,
 PLUGIT_BASE_URL, PLUGIT_PREFIX, PLUGIT_MODE, PLUGIT_TAGS, PLUGIT_METHODS,
 PLUGIT_PATHS, PLUGIT_MAX_TOOLS, PLUGIT_TIMEOUT, PLUGIT_ALLOW_PRIVATE,
+PLUGIT_ALLOW_INSECURE,
 PLUGIT_HEADER, PLUGIT_FIXED), then defaults.
 
 Secrets in --header and --fixed must be env: or keyring: references; put the
@@ -389,7 +404,7 @@ real value in the MCP client's env block. When any credential is configured,
 				f.spec = args[0]
 			}
 			changed := map[string]bool{}
-			for _, n := range []string{"base-url", "prefix", "mode", "header", "fixed", "tags", "methods", "paths", "max-tools", "timeout", "allow-private"} {
+			for _, n := range []string{"base-url", "prefix", "mode", "header", "fixed", "tags", "methods", "paths", "max-tools", "timeout", "allow-private", "allow-insecure"} {
 				changed[n] = cmd.Flags().Changed(n)
 			}
 			s, err := resolveRunSettings(f, changed, os.LookupEnv)
@@ -418,6 +433,7 @@ real value in the MCP client's env block. When any credential is configured,
 	fl.IntVar(&f.maxTools, "max-tools", defaultMaxTools, "refuse to start if more tools than this are selected")
 	fl.DurationVar(&f.timeout, "timeout", httpx.DefaultTimeout, "per-request timeout")
 	fl.BoolVar(&f.allowPrivate, "allow-private", false, "allow loopback and private-network addresses (spec fetch and API calls)")
+	fl.BoolVar(&f.allowInsecure, "allow-insecure", false, "accept what plugit otherwise refuses: credentials over plain http to a remote host, and spec paths with spaces, '..' or backslashes")
 	return cmd
 }
 
@@ -438,7 +454,7 @@ func runServe(ctx context.Context, s runSettings, d runDeps) error {
 	if err != nil {
 		return err
 	}
-	m, err := d.parse(ctx, sp.Bytes, openapi.Options{Prefix: s.prefix})
+	m, err := d.parse(ctx, sp.Bytes, openapi.Options{Prefix: s.prefix, AllowUnsafePaths: s.allowInsecure})
 	if err != nil {
 		return err
 	}
@@ -447,8 +463,8 @@ func runServe(ctx context.Context, s runSettings, d runDeps) error {
 		return err
 	}
 	if credentials {
-		if err := config.CheckCredentialTransport(baseURL.String(), s.allowPrivate); err != nil {
-			return fmt.Errorf("--base-url %w", err)
+		if err := config.CheckCredentialTransport(baseURL.String(), s.allowInsecure); err != nil {
+			return fmt.Errorf("--base-url %w; to send it over http anyway, pass --allow-insecure", err)
 		}
 	}
 	selected := selectTools(m.Tools, s.mode, s.tags, s.methods, s.paths)

@@ -129,7 +129,7 @@ func TestEditNewToolsetAndCancel(t *testing.T) {
 // The picker gets a linter for the API being edited (lint badges, the
 // footer count and the tool detail).
 func TestEditPickerLints(t *testing.T) {
-	p := setupAPI(t, "http://pets.example.test") // plain http + auth: L011 is API-wide, not per toolset
+	p := setupInsecureAPI(t, "http://pets.example.test") // plain http + auth: L011 is API-wide, not per toolset
 	var findings []lint.Finding
 	pick := func(_ context.Context, in pickInput) (pickResult, error) {
 		if in.lint == nil {

@@ -32,9 +32,11 @@ type addSettings struct {
 	prefix       string
 	mode         policy.Mode
 	allowPrivate bool
-	timeout      time.Duration
-	headers      []string // Name=env:VAR|keyring:svc/key
-	fixed        []string // name=literal:V|env:VAR|keyring:svc/key
+	// allowInsecure is saved as network.allow_insecure.
+	allowInsecure bool
+	timeout       time.Duration
+	headers       []string // Name=env:VAR|keyring:svc/key
+	fixed         []string // name=literal:V|env:VAR|keyring:svc/key
 	// fromRun selects tools the way `plugit run` does (mode + filters),
 	// without the picker.
 	fromRun              bool
@@ -116,6 +118,7 @@ store a keyring value with plugit auth.`,
 	fl.StringVar(&s.prefix, "prefix", "", "tool name prefix, e.g. gh -> gh_listIssues")
 	fl.StringVar(&mode, "mode", string(policy.ReadOnly), "policy mode: read-only, confirm-writes or full")
 	fl.BoolVar(&s.allowPrivate, "allow-private", false, "allow loopback and private-network addresses")
+	fl.BoolVar(&s.allowInsecure, "allow-insecure", false, "accept what plugit otherwise refuses: credentials over plain http to a remote host, and spec paths with spaces, '..' or backslashes")
 	fl.DurationVar(&s.timeout, "timeout", httpx.DefaultTimeout, "per-request timeout")
 	fl.StringArrayVar(&s.headers, "header", nil, "credential header Name=env:VAR or Name=keyring:service/key")
 	fl.StringArrayVar(&s.fixed, "fixed", nil, "fixed hidden parameter name=literal:V, name=env:VAR or name=keyring:service/key")
@@ -153,7 +156,7 @@ func addAPI(ctx context.Context, s addSettings, d addDeps) error {
 	if err != nil {
 		return err
 	}
-	m, err := d.parse(ctx, sp.Bytes, openapi.Options{Prefix: s.prefix})
+	m, err := d.parse(ctx, sp.Bytes, openapi.Options{Prefix: s.prefix, AllowUnsafePaths: s.allowInsecure})
 	if err != nil {
 		return err
 	}
@@ -207,7 +210,7 @@ func addAPI(ctx context.Context, s addSettings, d addDeps) error {
 		BaseURL:  baseURL,
 		Prefix:   s.prefix,
 		Fixed:    fixed,
-		Network:  config.Network{AllowPrivate: s.allowPrivate, Timeout: s.timeout},
+		Network:  config.Network{AllowPrivate: s.allowPrivate, AllowInsecure: s.allowInsecure, Timeout: s.timeout},
 		Auth:     auth,
 		Policy:   config.Policy{Mode: string(mode)},
 		Toolsets: map[string]config.Toolset{defaultToolset: ts},
@@ -264,7 +267,7 @@ func saveAPIFiles(p config.Paths, cfg *config.API, snapshot []byte, m *model.Man
 		return err
 	}
 	cachePath, _ := p.Manifest(cfg.Name)
-	if err := config.WriteManifest(cachePath, config.CacheKey{SpecSHA256: sum, Prefix: cfg.Prefix, Parser: parser}, m); err != nil {
+	if err := config.WriteManifest(cachePath, config.CacheKey{SpecSHA256: sum, Prefix: cfg.Prefix, Parser: parser, UnsafePaths: cfg.Network.AllowInsecure}, m); err != nil {
 		return err
 	}
 	return config.SaveAPI(p, cfg)

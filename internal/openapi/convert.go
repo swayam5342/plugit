@@ -98,12 +98,7 @@ func (c *converter) schema(s *base.Schema, depth int) map[string]any {
 	// Only JSON Schema's own type names are kept: "type" is spec text that
 	// reaches the model and the terminal, and an unknown name can't be
 	// validated against anyway (the schema wouldn't compile).
-	types := make([]string, 0, len(s.Type))
-	for _, typ := range s.Type {
-		if jsonSchemaTypes[typ] {
-			types = append(types, typ)
-		}
-	}
+	types, isFile := knownTypes(s.Type)
 	if c.is30 && s.Nullable != nil && *s.Nullable && len(types) > 0 && !slices.Contains(types, "null") {
 		types = append(types, "null")
 	}
@@ -125,6 +120,11 @@ func (c *converter) schema(s *base.Schema, depth int) map[string]any {
 	}
 	setStr(out, "format", s.Format)
 	setStr(out, "pattern", s.Pattern)
+	if isFile {
+		markFile(out)
+	}
+	c.hiddenValue("schema format", s.Format)
+	c.hiddenValue("schema pattern", s.Pattern)
 	setPtr(out, "multipleOf", s.MultipleOf)
 	setPtr(out, "minimum", s.Minimum)
 	setPtr(out, "maximum", s.Maximum)
@@ -139,11 +139,14 @@ func (c *converter) schema(s *base.Schema, depth int) map[string]any {
 	setPtr(out, "maxProperties", s.MaxProperties)
 
 	setEnum(out, s.Enum)
+	c.hiddenValue("schema enum value", out["enum"])
 	if v, ok := decodeNode(s.Const); ok {
 		out["const"] = v
+		c.hiddenValue("schema const value", v)
 	}
 	if v, ok := decodeNode(s.Default); ok {
 		out["default"] = v
+		c.hiddenValue("schema default value", v)
 	}
 
 	if s.Properties != nil && s.Properties.Len() > 0 {
@@ -153,6 +156,7 @@ func (c *converter) schema(s *base.Schema, depth int) map[string]any {
 			if child := pair.Value().Schema(); child != nil && child.ReadOnly != nil && *child.ReadOnly {
 				continue
 			}
+			c.hiddenValue("schema property name", pair.Key())
 			props[pair.Key()] = c.proxy(pair.Value(), depth+1)
 		}
 		out["properties"] = props
@@ -288,6 +292,53 @@ func setPtr[T any](out map[string]any, key string, v *T) {
 	if v != nil {
 		out[key] = *v
 	}
+}
+
+// hiddenValue reports hidden content in a schema value the model reads but
+// that cleaning must leave alone, because changing it would change what the
+// API accepts: enum, const and default values, patterns, formats and
+// property names (L007). v is a string or a decoded JSON value.
+func (c *converter) hiddenValue(where string, v any) {
+	switch x := v.(type) {
+	case string:
+		if r := naming.Hidden(x); r != "" {
+			c.issue(model.IssueHiddenText, "%s contains %s (left in: it is part of what the API accepts)", where, r)
+		}
+	case []any:
+		for _, e := range x {
+			c.hiddenValue(where, e)
+		}
+	case map[string]any:
+		for k, e := range x {
+			c.hiddenValue(where, k)
+			c.hiddenValue(where, e)
+		}
+	}
+}
+
+// knownTypes keeps the JSON Schema type names in types. isFile reports
+// Swagger's "file", which is not one: see markFile.
+func knownTypes(types []string) (known []string, isFile bool) {
+	known = make([]string, 0, len(types))
+	for _, typ := range types {
+		switch {
+		case jsonSchemaTypes[typ]:
+			known = append(known, typ)
+		case typ == "file":
+			isFile = true
+		}
+	}
+	return known, isFile
+}
+
+// markFile turns Swagger's type "file" into what it means in JSON Schema
+// terms, a binary string, so form bodies still recognize the field as file
+// content (isFileField) and the schema still compiles.
+func markFile(out map[string]any) {
+	if _, typed := out["type"]; !typed {
+		out["type"] = "string"
+	}
+	out["format"] = "binary"
 }
 
 // jsonSchemaTypes are the type names JSON Schema defines.

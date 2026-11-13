@@ -105,7 +105,7 @@ func syncAPI(ctx context.Context, p config.Paths, name string, s syncSettings) e
 		_, err := fmt.Fprintf(s.out, "%s is up to date: the spec hasn't changed.\n", name)
 		return err
 	}
-	updated, err := s.parse(ctx, sp.Bytes, openapi.Options{Prefix: cfg.Prefix})
+	updated, err := s.parse(ctx, sp.Bytes, openapi.Options{Prefix: cfg.Prefix, AllowUnsafePaths: cfg.Network.AllowInsecure})
 	if err != nil {
 		return err
 	}
@@ -199,10 +199,10 @@ func printSyncDiff(w io.Writer, baseURL string, d curate.SyncDiff, lintNote stri
 			// Toolset names are validated ([a-z0-9_-]).
 			note = "  ! served at once by " + strings.Join(a.AutoSelected, ", ") + " (selected by tags or methods)"
 		}
-		fmt.Fprintf(&b, "+ %s  %s%s\n", a.Key, tui.Safe(a.New.Name), note)
+		fmt.Fprintf(&b, "+ %s  %s%s\n", tui.Safe(string(a.Key)), tui.Safe(a.New.Name), note)
 	}
 	for _, c := range d.Changed {
-		fmt.Fprintf(&b, "~ %s  %s%s\n", c.Key, strings.Join(c.What, ", "), served(c))
+		fmt.Fprintf(&b, "~ %s  %s%s\n", tui.Safe(string(c.Key)), strings.Join(c.What, ", "), served(c))
 		if len(c.Listed) > 0 && c.New != nil {
 			for _, what := range c.What {
 				if what == "description" {
@@ -216,7 +216,7 @@ func printSyncDiff(w io.Writer, baseURL string, d curate.SyncDiff, lintNote stri
 		if len(r.Listed) > 0 {
 			note = "  (listed in " + strings.Join(r.Listed, ", ") + "; overrides kept)"
 		}
-		fmt.Fprintf(&b, "- %s%s\n", r.Key, note)
+		fmt.Fprintf(&b, "- %s%s\n", tui.Safe(string(r.Key)), note)
 	}
 	if lintNote != "" {
 		fmt.Fprintf(&b, "\n✗ %s\n", lintNote)

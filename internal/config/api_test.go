@@ -136,7 +136,7 @@ func TestParseAPIRejects(t *testing.T) {
 		"empty file":            {"", "no documents", ErrInvalidConfig},
 		"not a mapping":         {"- 1\n", "", ErrInvalidConfig},
 		"missing version":       {strings.Replace(base, "version: 1\n", "", 1), "version", ErrInvalidConfig},
-		"future version":        {strings.Replace(base, "version: 1", "version: 5", 1), "newer", ErrUnsupportedVersion},
+		"future version":        {strings.Replace(base, "version: 1", "version: 6", 1), "newer", ErrUnsupportedVersion},
 		"bad name":              {strings.Replace(base, "name: pets", "name: ../etc", 1), "name", ErrInvalidConfig},
 		"missing base_url":      {strings.Replace(base, "base_url: https://pets.example.test/v1\n", "", 1), "base_url", ErrInvalidConfig},
 		"relative base_url":     {strings.Replace(base, "https://pets.example.test/v1", "/v1", 1), "base_url", ErrInvalidConfig},
@@ -356,7 +356,7 @@ func TestRetentionPeriod(t *testing.T) {
 // Version 2 adds per-tool rate_limit. Version 1 files load unchanged and
 // come out as version 2 (the migration has nothing to rewrite).
 func TestVersionMigration(t *testing.T) {
-	if CurrentVersion != 4 {
+	if CurrentVersion != 5 {
 		t.Fatalf("CurrentVersion = %d", CurrentVersion)
 	}
 	c, err := ParseAPI([]byte(minimalConfig))
@@ -367,7 +367,7 @@ func TestVersionMigration(t *testing.T) {
 		t.Errorf("v1 config loaded as version %d, want %d", c.Version, CurrentVersion)
 	}
 	out, err := MarshalAPI(c)
-	if err != nil || !strings.Contains(string(out), "version: 4") {
+	if err != nil || !strings.Contains(string(out), "version: 5") {
 		t.Errorf("marshal = %s, %v", out, err)
 	}
 	v2 := strings.Replace(minimalConfig, "version: 1", "version: 2", 1)
@@ -465,7 +465,8 @@ func TestOAuth2Auth(t *testing.T) {
 }
 
 // A credential never travels over plain http, except to this machine or
-// when the user has opted into private networks (SPEC T8).
+// when the user has switched network.allow_insecure on (SPEC T8).
+// allow_private is about where plugit may connect, not about encryption.
 func TestCredentialsNeedHTTPS(t *testing.T) {
 	const (
 		bearer = "auth: {type: bearer, secret: \"env:PETS_TOKEN\"}\n"
@@ -490,7 +491,9 @@ func TestCredentialsNeedHTTPS(t *testing.T) {
 		"http to localhost with auth":   {with("http://localhost:8080/v1", bearer), true},
 		"http to 127.0.0.1 with auth":   {with("http://127.0.0.1:8080/v1", bearer), true},
 		"http to [::1] with auth":       {with("http://[::1]:8080/v1", bearer), true},
-		"http, allow_private, auth":     {with("http://intranet.example.test/v1", bearer+"network: {allow_private: true}\n"), true},
+		"http, allow_private, auth":     {with("http://intranet.example.test/v1", bearer+"network: {allow_private: true}\n"), false},
+		"http, allow_insecure, auth":    {with("http://intranet.example.test/v1", bearer+"network: {allow_insecure: true}\n"), true},
+		"http, allow_insecure, fixed":   {with("http://pets.example.test/v1", secret+"network: {allow_insecure: true}\n"), true},
 		"http to a lookalike with auth": {with("http://localhost.example.test/v1", bearer), false},
 	}
 	for name, tc := range cases {
@@ -499,9 +502,32 @@ func TestCredentialsNeedHTTPS(t *testing.T) {
 			switch {
 			case tc.ok && err != nil:
 				t.Errorf("unexpected error: %v", err)
-			case !tc.ok && (!errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), "https")):
-				t.Errorf("err = %v, want an ErrInvalidConfig about https", err)
+			case !tc.ok && (!errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), "https") || !strings.Contains(err.Error(), "allow_insecure")):
+				t.Errorf("err = %v, want an ErrInvalidConfig about https that names allow_insecure", err)
 			}
 		})
+	}
+}
+
+// network.allow_insecure (version 5) is off unless the user writes it, and
+// is written back only when it is on.
+func TestAllowInsecure(t *testing.T) {
+	c, err := ParseAPI([]byte(minimalConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Network.AllowInsecure {
+		t.Error("allow_insecure defaults to on")
+	}
+	if out, err := MarshalAPI(c); err != nil || strings.Contains(string(out), "allow_insecure") {
+		t.Errorf("an off switch is written out: %s, %v", out, err)
+	}
+	on := strings.Replace(minimalConfig, "toolsets:", "network: {allow_insecure: true}\ntoolsets:", 1)
+	c, err = ParseAPI([]byte(on))
+	if err != nil || !c.Network.AllowInsecure {
+		t.Fatalf("allow_insecure: true not read: %+v, %v", c, err)
+	}
+	if out, err := MarshalAPI(c); err != nil || !strings.Contains(string(out), "allow_insecure: true") {
+		t.Errorf("marshal = %s, %v", out, err)
 	}
 }

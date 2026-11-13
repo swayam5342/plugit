@@ -288,7 +288,7 @@ func doctorAPI(d doctorDeps, r *report, name string) {
 		r.fail("spec snapshot: %v", err)
 	} else {
 		cache, _ := d.paths.Manifest(name)
-		if _, err := config.ReadManifest(cache, config.CacheKey{SpecSHA256: sum, Prefix: cfg.Prefix, Parser: parserID(d.info)}); err != nil {
+		if _, err := config.ReadManifest(cache, config.CacheKey{SpecSHA256: sum, Prefix: cfg.Prefix, Parser: parserID(d.info), UnsafePaths: cfg.Network.AllowInsecure}); err != nil {
 			r.warn("manifest cache missing or stale: the next serve parses the spec once (slower start)")
 		} else {
 			r.ok("manifest cache fresh")

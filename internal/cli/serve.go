@@ -307,7 +307,7 @@ func loadManifest(ctx context.Context, p config.Paths, cfg *config.API, d runDep
 	if err != nil {
 		return nil, err
 	}
-	key := config.CacheKey{SpecSHA256: sum, Prefix: cfg.Prefix, Parser: parserID(d.info)}
+	key := config.CacheKey{SpecSHA256: sum, Prefix: cfg.Prefix, Parser: parserID(d.info), UnsafePaths: cfg.Network.AllowInsecure}
 	m, err := config.ReadManifest(cachePath, key)
 	if err == nil {
 		return m, nil
@@ -315,7 +315,7 @@ func loadManifest(ctx context.Context, p config.Paths, cfg *config.API, d runDep
 	if !errors.Is(err, os.ErrNotExist) {
 		logger.Info("re-parsing the spec snapshot", "reason", err.Error())
 	}
-	m, err = d.parse(ctx, data, openapi.Options{Prefix: cfg.Prefix})
+	m, err = d.parse(ctx, data, openapi.Options{Prefix: cfg.Prefix, AllowUnsafePaths: cfg.Network.AllowInsecure})
 	if err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", snapPath, err)
 	}

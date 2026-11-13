@@ -279,3 +279,24 @@ func TestSyncDiffFlagsAutoServedOperations(t *testing.T) {
 		t.Errorf("unselected operation flagged: %q", lines[1])
 	}
 }
+
+// Operation keys come from the new spec: the plain diff strips control
+// characters from them like every other piece of spec text.
+func TestSyncDiffSanitizesKeys(t *testing.T) {
+	evil := model.Tool{Key: "GET /pets\x1b]0;owned\a", Name: "listPets", Method: "GET", Path: "/pets"}
+	d := curate.SyncDiff{
+		Added:   []curate.OpChange{{Key: evil.Key, New: &evil}},
+		Changed: []curate.OpChange{{Key: evil.Key, Old: &evil, New: &evil, What: []string{"description"}}},
+		Removed: []curate.OpChange{{Key: evil.Key, Old: &evil}},
+	}
+	var out bytes.Buffer
+	if err := printSyncDiff(&out, "https://api.example.test", d, "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if strings.ContainsAny(out.String(), "\x1b\a") {
+		t.Errorf("the diff carries control characters: %q", out.String())
+	}
+	if got := strings.Count(out.String(), "GET /pets]0;owned"); got != 3 {
+		t.Errorf("keys shown %d times, want 3: %q", got, out.String())
+	}
+}

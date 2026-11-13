@@ -34,7 +34,11 @@ import (
 //     filtering, M6). Again nothing to rewrite.
 //   - 4: adds auth.type oauth2 with auth.flow, token_url, device_url,
 //     client_id and scopes (M6). Nothing to rewrite.
-const CurrentVersion = 4
+//   - 5: adds network.allow_insecure, the one switch for what plugit
+//     otherwise refuses: a credential over plain http to a remote host, and
+//     spec paths that fail the path check. Off by default; nothing to
+//     rewrite.
+const CurrentVersion = 5
 
 // MaxConfigBytes caps plugit.yaml. A real config is a few kilobytes.
 const MaxConfigBytes = 1 << 20
@@ -115,7 +119,12 @@ type Fixed struct {
 
 // Network holds per-API network limits.
 type Network struct {
-	AllowPrivate     bool          `yaml:"allow_private"`
+	AllowPrivate bool `yaml:"allow_private"`
+	// AllowInsecure (version 5) accepts what plugit otherwise refuses: a
+	// credential sent over plain http to a remote host, and spec paths that
+	// fail the path check (spaces, dot segments, backslashes). It is about
+	// what is sent; AllowPrivate is about where plugit may connect.
+	AllowInsecure    bool          `yaml:"allow_insecure,omitempty"`
 	Timeout          time.Duration `yaml:"timeout,omitempty"`
 	MaxResponseBytes int64         `yaml:"max_response_bytes,omitempty"`
 }
@@ -258,9 +267,9 @@ func ParseAPI(data []byte) (*API, error) {
 
 // migrate brings a validated older config up to CurrentVersion.
 func (c *API) migrate() {
-	if c.Version < 4 {
+	if c.Version < 5 {
 		// Every step so far only added optional fields: nothing to rewrite.
-		c.Version = 4
+		c.Version = 5
 	}
 }
 
@@ -374,8 +383,8 @@ func (c *API) Validate() error {
 
 	c.validateAuth(bad, wrap)
 	if c.hasCredential() {
-		if err := CheckCredentialTransport(c.BaseURL, c.Network.AllowPrivate); err != nil {
-			bad("base_url", "%s", err)
+		if err := CheckCredentialTransport(c.BaseURL, c.Network.AllowInsecure); err != nil {
+			bad("base_url", "%s; to send it over http anyway, set network.allow_insecure: true", err)
 		}
 	}
 
@@ -594,11 +603,11 @@ func (c *API) hasCredential() bool {
 
 // CheckCredentialTransport refuses to send a credential to baseURL in
 // cleartext (SPEC T8). Plain http is allowed only to this machine, or when
-// the user has opted into private networks with allowPrivate. The URL is
-// never echoed.
-func CheckCredentialTransport(baseURL string, allowPrivate bool) error {
+// the user has switched allowInsecure on. The URL is never echoed; callers
+// add how to switch it on (a config key or a flag).
+func CheckCredentialTransport(baseURL string, allowInsecure bool) error {
 	u, err := url.Parse(baseURL)
-	if err != nil || u.Scheme != "http" || allowPrivate {
+	if err != nil || u.Scheme != "http" || allowInsecure {
 		return nil // not http, or not ours to judge (validateBaseURL reports bad URLs)
 	}
 	host := u.Hostname()
@@ -606,7 +615,7 @@ func CheckCredentialTransport(baseURL string, allowPrivate bool) error {
 		return nil
 	}
 	return errors.New("must be https when a credential is configured: plain http would send it unencrypted " +
-		"(http is only allowed to localhost, or with network.allow_private for an API on your own network)")
+		"(without a switch, http is only allowed to localhost)")
 }
 
 func validRetention(s string) bool {

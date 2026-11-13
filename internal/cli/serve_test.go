@@ -65,6 +65,32 @@ func setupAPI(t *testing.T, baseURL string) config.Paths {
 	return p
 }
 
+// rewriteAPI replaces old with new in the saved pets config (once).
+func rewriteAPI(t *testing.T, p config.Paths, old, replacement string) {
+	t.Helper()
+	path, _ := p.APIConfig("pets")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), old) {
+		t.Fatalf("the pets config has no %q to replace", old)
+	}
+	if err := config.WriteFileAtomic(path, []byte(strings.Replace(string(raw), old, replacement, 1))); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// setupInsecureAPI is setupAPI for a plain-http remote base URL: the config
+// only loads with network.allow_insecure switched on.
+func setupInsecureAPI(t *testing.T, baseURL string) config.Paths {
+	t.Helper()
+	p := setupAPI(t, "https://placeholder.example.test")
+	rewriteAPI(t, p, "network: {allow_private: true}", "network: {allow_private: true, allow_insecure: true}")
+	rewriteAPI(t, p, "https://placeholder.example.test", baseURL)
+	return p
+}
+
 func writeSnapshot(t *testing.T, p config.Paths, content string) {
 	t.Helper()
 	snap, _ := p.SpecSnapshot("pets")

@@ -21,7 +21,7 @@ func TestRunSettingsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.mode != policy.ReadOnly || s.maxTools != 40 || s.timeout != 30*time.Second || s.allowPrivate {
+	if s.mode != policy.ReadOnly || s.maxTools != 40 || s.timeout != 30*time.Second || s.allowPrivate || s.allowInsecure {
 		t.Errorf("defaults = %+v", s)
 	}
 }
@@ -30,14 +30,14 @@ func TestRunSettingsPrecedence(t *testing.T) {
 	e := env(map[string]string{
 		"PLUGIT_SPEC": "from-env.json", "PLUGIT_BASE_URL": "https://env.example.test",
 		"PLUGIT_PREFIX": "envp", "PLUGIT_MODE": "full", "PLUGIT_MAX_TOOLS": "7",
-		"PLUGIT_TIMEOUT": "5s", "PLUGIT_ALLOW_PRIVATE": "true", "PLUGIT_TAGS": "a,b",
+		"PLUGIT_TIMEOUT": "5s", "PLUGIT_ALLOW_PRIVATE": "true", "PLUGIT_ALLOW_INSECURE": "true", "PLUGIT_TAGS": "a,b",
 	})
 	s, err := resolveRunSettings(runFlags{}, nil, e)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if s.spec != "from-env.json" || s.baseURL != "https://env.example.test" || s.prefix != "envp" ||
-		s.mode != policy.Full || s.maxTools != 7 || s.timeout != 5*time.Second || !s.allowPrivate || !slices.Equal(s.tags, []string{"a", "b"}) {
+		s.mode != policy.Full || s.maxTools != 7 || s.timeout != 5*time.Second || !s.allowPrivate || !s.allowInsecure || !slices.Equal(s.tags, []string{"a", "b"}) {
 		t.Errorf("env settings = %+v", s)
 	}
 

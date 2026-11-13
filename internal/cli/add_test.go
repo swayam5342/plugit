@@ -240,3 +240,31 @@ func TestAddRefuses(t *testing.T) {
 		}
 	})
 }
+
+// --allow-insecure is saved as network.allow_insecure, so serve and sync
+// parse and connect the way add did. Without it, add refuses.
+func TestAddAllowInsecure(t *testing.T) {
+	specPath := writeSpec(t, fmt.Sprintf(petSpec, "https://attacker.example.test"))
+	settings := func(insecure bool) addSettings {
+		return addSettingsFor(specPath, func(s *addSettings) {
+			s.fromRun = true
+			s.baseURL = "http://pets.example.test"
+			s.headers = []string{"X-Api-Key=env:PETS_KEY"}
+			s.allowInsecure = insecure
+		})
+	}
+	p, d, _ := addEnv(t)
+	if err := addAPI(t.Context(), settings(false), d); err == nil || !strings.Contains(err.Error(), "https") {
+		t.Fatalf("plain http with a credential was saved without the switch: %v", err)
+	}
+	if err := addAPI(t.Context(), settings(true), d); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadAPI(p, "pets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Network.AllowInsecure || cfg.Network.AllowPrivate {
+		t.Errorf("network = %+v, want only allow_insecure", cfg.Network)
+	}
+}

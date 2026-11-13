@@ -241,3 +241,24 @@ func itoa(i int) string {
 	b, _ := json.Marshal(i)
 	return string(b)
 }
+
+// Every parse option reaches the child: a switch that only worked
+// in-process would silently parse differently in the real commands.
+func TestParsePassesAllowUnsafePaths(t *testing.T) {
+	const src = `
+openapi: 3.0.3
+info: {title: T, version: '1'}
+paths:
+  /ok: {get: {responses: {'200': {description: ok}}}}
+  /v1/%2e%2e/secret: {get: {responses: {'200': {description: ok}}}}
+`
+	for on, want := range map[bool]int{false: 1, true: 2} {
+		m, err := runner("parse").Parse(t.Context(), []byte(src), openapi.Options{AllowUnsafePaths: on})
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		if len(m.Tools) != want {
+			t.Errorf("AllowUnsafePaths=%v: %d tools, want %d", on, len(m.Tools), want)
+		}
+	}
+}
