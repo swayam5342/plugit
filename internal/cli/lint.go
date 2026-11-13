@@ -46,7 +46,7 @@ func newLintCmd(g *globalFlags, info BuildInfo) *cobra.Command {
 		Use:   "lint <name>",
 		Short: "Check a saved API's toolsets for quality and safety problems",
 		Long: `Check a saved API's toolsets for quality and safety problems (rules
-L001-L013): missing descriptions, name clashes, oversized schemas, text
+L001-L019): missing descriptions, name clashes, oversized schemas, text
 aimed at the model (hidden characters, injected instructions, credentials),
 policy overrides that do nothing, and credentials sent over plain http.
 

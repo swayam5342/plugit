@@ -1,5 +1,5 @@
 // Package lint checks an API's toolsets for quality and safety problems
-// (SPEC §4, rules L001-L013). It is pure: it looks only at the parsed
+// (SPEC 4, rules L001-L019). It is pure: it looks only at the parsed
 // manifest and the config it is given.
 package lint
 
@@ -121,6 +121,8 @@ func Toolset(in Input, name string) []Finding {
 	l := &linter{toolset: name}
 
 	seen := map[string]model.Tool{}
+	squashed := map[string]model.Tool{}
+	var unconfirmed []string
 	offered, budget := 0, 0
 	for _, st := range sel.Tools {
 		t := schema.Prepare(st.Tool, schema.Options{Fixed: in.Hidden})
@@ -135,6 +137,12 @@ func Toolset(in Input, name string) []Finding {
 		}
 		if len(t.Name) > naming.MaxNameLen {
 			l.add("L003", Error, "name %q is longer than %d characters with the prefix", t.Name, naming.MaxNameLen)
+		}
+		// L019: names that differ only by case or separators.
+		if other, dup := squashed[squash(t.Name)]; dup && !strings.EqualFold(other.Name, t.Name) {
+			l.add("L019", Warn, "name %q differs from %s (%q) only by case or separators; models mix such names up", t.Name, other.Key, other.Name)
+		} else if !dup {
+			squashed[squash(t.Name)] = t
 		}
 
 		// L001, L002: descriptions.
@@ -177,6 +185,14 @@ func Toolset(in Input, name string) []Finding {
 		if st.Override == policy.OverrideAllow && t.Safety == model.Destructive && mode != policy.Full {
 			l.add("L009", Error, "destructive tool set to allow has no effect under policy mode %s (it stays %s); remove the override or use mode full", mode, policy.Check(t.Safety, mode, policy.None).Decision)
 		}
+		// L015: safety comes from the HTTP method alone, so a GET that
+		// changes something runs unasked in every mode.
+		if w := writeLike(strings.TrimPrefix(t.Name, in.API.Prefix+"_"), t.Path); w != "" && t.Safety == model.ReadOnly && st.Override == policy.None {
+			l.add("L015", Warn, "%s is treated as read-only but looks like it changes something (%q); if it does, set its policy to confirm or deny", t.Method, w)
+		}
+		if mode == policy.Full && t.Safety == model.Destructive && st.Override != policy.OverrideConfirm && st.Override != policy.OverrideDeny {
+			unconfirmed = append(unconfirmed, t.Name)
+		}
 
 		if policy.Lists(t.Safety, mode) && st.Override != policy.OverrideDeny {
 			offered++
@@ -188,6 +204,16 @@ func Toolset(in Input, name string) []Finding {
 	if offered > BudgetTools || budget > BudgetTokens {
 		l.tool = model.Tool{}
 		l.add("L010", Warn, "%d tools, %s tokens offered (thresholds: %d tools, %s tokens); models pick tools less reliably from long lists", offered, tokens.Format(budget), BudgetTools, tokens.Format(BudgetTokens))
+	}
+	// L018: mode full runs destructive tools without asking.
+	if n := len(unconfirmed); n > 0 {
+		l.tool = model.Tool{}
+		shown := unconfirmed[:min(n, 3)]
+		more := ""
+		if n > len(shown) {
+			more = fmt.Sprintf(" and %d more", n-len(shown))
+		}
+		l.add("L018", Warn, "%d destructive tool(s) run without confirmation under policy mode full (%s%s); set their policy to confirm", n, strings.Join(shown, ", "), more)
 	}
 	return l.out
 }
@@ -251,6 +277,16 @@ func (l *linter) add(rule string, sev Severity, format string, a ...any) {
 func (l *linter) param(p model.Param) {
 	where := fmt.Sprintf("parameter %q", p.Name)
 	l.text(where+" description", p.Desc)
+	// L016, L017: what the parameter's name says about its value.
+	if p.In != model.InPath && credentialName.MatchString(strings.Join(words(p.UpstreamName), "_")) {
+		l.add("L016", Warn, "%s looks like a credential the model would have to supply; make it a fixed value so it stays hidden", where)
+	}
+	switch riskyParam(p.UpstreamName) {
+	case "command":
+		l.add("L017", Warn, "%s looks like a command or query the API will run: whatever the model writes there is executed upstream", where)
+	case "target":
+		l.add("L017", Info, "%s looks like a URL, host or file the API will reach for: the model chooses where", where)
+	}
 	var s any
 	if json.Unmarshal(p.Schema, &s) != nil {
 		return
@@ -378,10 +414,26 @@ func (l *linter) text(where, s string) {
 	if s == "" {
 		return
 	}
-	if m := injection.FindString(s); m != "" {
-		l.add("L007", Error, "%s reads like an instruction to the model: %q", where, quote(m))
+	if m, how := instruction(s); m != "" {
+		if how != "" {
+			how = " (" + how + ")"
+		}
+		l.add("L007", Error, "%s reads like an instruction to the model%s: %q", where, how, quote(m))
 	} else if m := weakInstruction.FindString(s); m != "" {
 		l.add("L007", Warn, "%s is phrased as an instruction (%q); check it's meant for the caller", where, quote(m))
+	}
+	if m := localSecrets.FindString(s); m != "" {
+		l.add("L007", Warn, "%s tells the reader to use a local secret file (%q)", where, quote(m))
+	}
+	if w := mixedScript(s); w != "" {
+		l.add("L007", Warn, "%s mixes alphabets in one word (%q): lookalike letters can hide a word from review", where, quote(w))
+	}
+	for _, dec := range encodedText(s) {
+		if m, _ := instruction(dec); m != "" {
+			l.add("L007", Error, "%s hides an instruction to the model in encoded text: %q", where, quote(m))
+		} else {
+			l.add("L014", Warn, "%s contains base64 or hex that decodes to readable text (%q); a model can decode it", where, quote(dec))
+		}
 	}
 	if m := link.FindString(s); m != "" {
 		host := "a link"
