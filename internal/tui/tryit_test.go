@@ -80,7 +80,7 @@ func TestTryItForm(t *testing.T) {
 func TestTryItSends(t *testing.T) {
 	m, s := newTryTest("", TryResult{Request: "→ GET https://pets.example.test/pets/42\n  X-Api-Key: ***", Status: 200, Response: `{"id":42,"name":"rex"}`})
 	typeInto(m, "42")
-	m.Update(key("down")) // to verbose, left empty
+	m.Update(key("down"))
 	_, cmd := m.Update(ctrlS())
 	run(m, cmd)
 	if s.n != 1 || s.args["id"] != "42" || len(s.args) != 1 {

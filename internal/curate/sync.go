@@ -12,27 +12,20 @@ import (
 	"github.com/swayam5342/plugit/internal/model"
 )
 
-// OpChange is one operation that differs between two manifests.
 type OpChange struct {
-	Key    model.OpKey
-	Old    *model.Tool // nil when added
-	New    *model.Tool // nil when removed
-	What   []string    // for changes: which aspects differ
-	Listed []string    // toolsets that list this key, sorted
-	// AutoSelected names the toolsets that serve an added operation at once,
-	// because they select by include_tags or methods.
+	Key          model.OpKey
+	Old          *model.Tool
+	New          *model.Tool
+	What         []string
+	Listed       []string
 	AutoSelected []string
 }
 
-// SyncDiff is what `plugit sync` shows before adopting a new spec (SPEC
-// §2.3 "Sync diff", T3).
 type SyncDiff struct {
-	Added, Removed, Changed     []OpChange // each sorted by key
+	Added, Removed, Changed     []OpChange
 	ServersBefore, ServersAfter []string
 	ServersChanged              bool
-	// BaseURLListed reports whether the new spec still declares the pinned
-	// base_url among its servers. It's only meaningful when ServersChanged.
-	BaseURLListed bool
+	BaseURLListed               bool
 }
 
 // Empty reports whether nothing changed.

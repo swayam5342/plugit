@@ -14,16 +14,14 @@ import (
 	"github.com/swayam5342/plugit/internal/store"
 )
 
-// StatsInput configures the stats screen (SPEC §2.3).
 type StatsInput struct {
 	Title    string
 	Source   func(ctx context.Context, since time.Time) ([]store.ToolStats, error)
-	Budgets  map[string]string // per API, e.g. "≈2.3k tokens · 8 tools"
-	Interval time.Duration     // refresh period
+	Budgets  map[string]string
+	Interval time.Duration
 	Now      func() time.Time
 }
 
-// StatsMsg delivers fresh numbers (or a read error).
 type StatsMsg struct {
 	Stats []store.ToolStats
 	Err   error
@@ -31,7 +29,6 @@ type StatsMsg struct {
 
 type statsTick struct{}
 
-// Windows the stats screen offers, by number key.
 var statsWindows = []struct {
 	label string
 	d     time.Duration
@@ -44,7 +41,6 @@ var statsWindows = []struct {
 
 var statsSorts = []string{"calls", "errors", "p95", "latest"}
 
-// Stats is the per-API, per-tool summary of the call log.
 type Stats struct {
 	in     StatsInput
 	stats  []store.ToolStats

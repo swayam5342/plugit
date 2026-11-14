@@ -62,7 +62,7 @@ func TestBaseName(t *testing.T) {
 }
 
 func TestAssignPrefixAndTruncation(t *testing.T) {
-	long := strings.Repeat("abcdefghij", 10) // 100 chars
+	long := strings.Repeat("abcdefghij", 10)
 	got := Assign([]Candidate{
 		{Key: "GET /a", OperationID: "listPets"},
 		{Key: "GET /b", OperationID: long},
@@ -87,10 +87,9 @@ func TestAssignDedupesInStableOrder(t *testing.T) {
 	cands := []Candidate{
 		{Key: "POST /pets", OperationID: "pets"},
 		{Key: "GET /pets", OperationID: "pets"},
-		{Key: "DELETE /pets", OperationID: "Pets"}, // case-insensitive collision
+		{Key: "DELETE /pets", OperationID: "Pets"},
 	}
 	got := Assign(cands, "")
-	// Sorted OpKey order: "DELETE /pets" < "GET /pets" < "POST /pets".
 	want := map[model.OpKey]string{"DELETE /pets": "Pets", "GET /pets": "pets_2", "POST /pets": "pets_3"}
 	for k, w := range want {
 		if got[k] != w {
@@ -98,7 +97,6 @@ func TestAssignDedupesInStableOrder(t *testing.T) {
 		}
 	}
 
-	// Input order must not matter.
 	rev := []Candidate{cands[2], cands[0], cands[1]}
 	got2 := Assign(rev, "")
 	for k := range want {
@@ -137,7 +135,6 @@ func TestAssignSuffixFitsIn64(t *testing.T) {
 func TestAssignHundredCollisions(t *testing.T) {
 	var cands []Candidate
 	for i := range 100 {
-		// All of these slugify to "get_item".
 		cands = append(cands, Candidate{Key: model.OpKey(fmt.Sprintf("GET /item/%03d", i)), OperationID: "get item" + strings.Repeat("!", i)})
 	}
 	got := Assign(cands, "")
@@ -187,7 +184,7 @@ func TestCleanText(t *testing.T) {
 		{"", 100, ""},
 		{"\u200b<br>", 100, ""},
 		{"abcdef", 4, "abc…"},
-		{"abc", 0, "abc"}, // 0 means the default cap
+		{"abc", 0, "abc"},
 	}
 	for _, tc := range tests {
 		if got := CleanText(tc.in, tc.max); got != tc.want {

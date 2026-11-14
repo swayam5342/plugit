@@ -6,36 +6,33 @@ import (
 	"syscall"
 )
 
-// alwaysBlocked can never be dialed, even with AllowPrivate.
 var alwaysBlocked = mustPrefixes(
-	"0.0.0.0/8",         // "this network"; 0.0.0.0 reaches localhost on Linux
-	"169.254.0.0/16",    // IPv4 link-local, incl. cloud metadata 169.254.169.254
-	"224.0.0.0/4",       // IPv4 multicast
-	"240.0.0.0/4",       // reserved, incl. broadcast 255.255.255.255
-	"::/128",            // unspecified
-	"ff00::/8",          // IPv6 multicast
-	"fd00:ec2::254/128", // AWS instance metadata over IPv6
+	"0.0.0.0/8",
+	"169.254.0.0/16",
+	"224.0.0.0/4",
+	"240.0.0.0/4",
+	"::/128",
+	"ff00::/8",
+	"fd00:ec2::254/128",
 )
 
-// privateBlocked can be dialed only with AllowPrivate.
 var privateBlocked = mustPrefixes(
-	"127.0.0.0/8",    // loopback
-	"10.0.0.0/8",     // RFC1918
-	"172.16.0.0/12",  // RFC1918
-	"192.168.0.0/16", // RFC1918
-	"100.64.0.0/10",  // CGNAT (RFC 6598)
-	"192.0.0.0/24",   // IETF protocol assignments
-	"198.18.0.0/15",  // benchmarking (RFC 2544)
-	"::1/128",        // IPv6 loopback
-	"fc00::/7",       // unique local addresses
-	"fe80::/10",      // IPv6 link-local
+	"127.0.0.0/8",
+	"10.0.0.0/8",
+	"172.16.0.0/12",
+	"192.168.0.0/16",
+	"100.64.0.0/10",
+	"192.0.0.0/24",
+	"198.18.0.0/15",
+	"::1/128",
+	"fc00::/7",
+	"fe80::/10",
 )
 
-// IPv6 ranges that embed an IPv4 address; the embedded address is checked.
 var (
-	nat64WellKnown = netip.MustParsePrefix("64:ff9b::/96")   // RFC 6052, v4 in last 32 bits
-	nat64Local     = netip.MustParsePrefix("64:ff9b:1::/48") // RFC 8215, v4 in last 32 bits
-	sixToFour      = netip.MustParsePrefix("2002::/16")      // RFC 3056, v4 in bits 16-47
+	nat64WellKnown = netip.MustParsePrefix("64:ff9b::/96")
+	nat64Local     = netip.MustParsePrefix("64:ff9b:1::/48")
+	sixToFour      = netip.MustParsePrefix("2002::/16")
 )
 
 func mustPrefixes(cidrs ...string) []netip.Prefix {

@@ -25,17 +25,15 @@ import (
 )
 
 type syncSettings struct {
-	spec    string // new spec location; "" re-fetches source.url
-	toolset string // where new operations go (default: default)
-	yes     bool   // apply without the review screen
-	addNew  bool   // with --yes: add every new operation to the toolset
+	spec    string
+	toolset string
+	yes     bool
+	addNew  bool
 	out     io.Writer
 	stderr  io.Writer
 	parse   func(context.Context, []byte, openapi.Options) (*model.Manifest, error)
 	info    BuildInfo
-	// review shows the Sync diff screen and returns the new operations to
-	// add; nil means no terminal.
-	review func(ctx context.Context, in tui.SyncInput) ([]model.OpKey, error)
+	review  func(ctx context.Context, in tui.SyncInput) ([]model.OpKey, error)
 }
 
 func newSyncCmd(g *globalFlags, info BuildInfo) *cobra.Command {
@@ -111,8 +109,6 @@ func syncAPI(ctx context.Context, p config.Paths, name string, s syncSettings) e
 	}
 	diff := curate.DiffManifests(old, updated, *cfg)
 
-	// Lint the new spec against the current toolsets: an update is where
-	// poisoned descriptions would arrive (T4).
 	findings := lint.Run(lint.Input{API: *cfg, Tools: updated.Tools, Hidden: hiddenParams(cfg.Auth, cfg.Fixed)})
 	lintNote := ""
 	if n := lint.Summarize(findings).Errors; n > 0 {
@@ -122,7 +118,6 @@ func syncAPI(ctx context.Context, p config.Paths, name string, s syncSettings) e
 	var add []model.OpKey
 	switch {
 	case diff.Empty():
-		// Nothing to review: just record the new snapshot.
 	case s.review != nil:
 		add, err = s.review(ctx, tui.SyncInput{API: name, Diff: diff, BaseURL: cfg.BaseURL, Toolset: tsName, LintNote: lintNote})
 		if errors.Is(err, tui.ErrCancelled) {

@@ -105,7 +105,7 @@ func TestDetailShowsEditedMode(t *testing.T) {
 }
 
 func TestWrapLinesCountsCells(t *testing.T) {
-	const text = "日本語のテキストです" // ten characters, two cells each
+	const text = "日本語のテキストです"
 	lines := wrapLines(text, 8)
 	for _, l := range lines {
 		if w := ansi.StringWidth(l); w > 8 {

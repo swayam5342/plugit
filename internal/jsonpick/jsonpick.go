@@ -12,25 +12,20 @@ import (
 	"strings"
 )
 
-// Limits on a field list.
 const (
 	MaxPaths   = 32
 	MaxPathLen = 256
 )
 
-// A segment is a key (anything but '.', '[', ']' and whitespace) with an
-// optional [*], or a bare [*] for "each element".
 var segmentRe = regexp.MustCompile(`^(\[\*\]|[^.\[\]\s]+(\[\*\])?)$`)
 
-// Picker keeps the fields it was parsed from. A nil *Picker keeps
-// everything.
 type Picker struct {
 	root  *node
 	paths []string
 }
 
 type node struct {
-	keep     bool // keep this whole value
+	keep     bool
 	children map[string]*node
 }
 
@@ -52,7 +47,7 @@ func Parse(paths []string) (*Picker, error) {
 		for seg := range strings.SplitSeq(p, ".") {
 			key := strings.TrimSuffix(seg, "[*]")
 			if key == "" {
-				continue // a bare [*]: arrays map anyway
+				continue
 			}
 			c := n.children[key]
 			if c == nil {
@@ -98,7 +93,7 @@ func (p *Picker) Apply(v any) any {
 	}
 	if _, ok := v.(map[string]any); !ok {
 		if _, ok := v.([]any); !ok {
-			return v // a scalar document: nothing to select from
+			return v
 		}
 	}
 	out, _ := apply(v, p.root)

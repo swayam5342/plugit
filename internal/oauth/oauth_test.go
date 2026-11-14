@@ -45,7 +45,6 @@ type clock struct{ t time.Time }
 
 func (c *clock) now() time.Time { return c.t }
 
-// authServer is a fake authorization server.
 type authServer struct {
 	*httptest.Server
 	tokens atomic.Int32
@@ -96,7 +95,7 @@ func TestClientCredentials(t *testing.T) {
 	if again, _ := s.Token(t.Context()); again != tok || a.tokens.Load() != 1 {
 		t.Errorf("not cached: %d fetches", a.tokens.Load())
 	}
-	c.t = c.t.Add(3550 * time.Second) // within a minute of expiry
+	c.t = c.t.Add(3550 * time.Second)
 	if fresh, _ := s.Token(t.Context()); fresh == tok || a.tokens.Load() != 2 {
 		t.Errorf("not refreshed before expiry: %d fetches", a.tokens.Load())
 	}
@@ -233,7 +232,6 @@ func TestDeviceFlow(t *testing.T) {
 	if err != nil || tok.Access != "dev-access" || tok.Refresh != refresh1 {
 		t.Fatalf("Wait = %+v, %v", tok, err)
 	}
-	// slow_down adds 5 seconds to the interval (RFC 8628 §3.5).
 	if !slices.Equal(waits, []time.Duration{5 * time.Second, 5 * time.Second, 10 * time.Second}) {
 		t.Errorf("waits = %v", waits)
 	}
@@ -260,7 +258,6 @@ func TestDeviceFlowStops(t *testing.T) {
 			}
 		})
 	}
-	// The device code's lifetime bounds the polling.
 	a := newAuthServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/device" {
 			reply(w, 200, map[string]any{"device_code": "d", "user_code": "U", "verification_uri": "https://a.example.test/d", "expires_in": 10, "interval": 5})

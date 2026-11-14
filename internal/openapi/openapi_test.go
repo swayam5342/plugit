@@ -140,7 +140,6 @@ func TestParse30Basics(t *testing.T) {
 		t.Errorf("Servers = %v", m.Servers)
 	}
 
-	// Sorted by OpKey.
 	var keys []model.OpKey
 	for _, tl := range m.Tools {
 		keys = append(keys, tl.Key)
@@ -162,7 +161,6 @@ func TestParse30Basics(t *testing.T) {
 		t.Errorf("petId = %+v", pid)
 	}
 	assertJSON(t, "petId schema", pid.Schema, `{"type":"string"}`)
-	// Operation-level parameter overrides the path-level one with the same name and location.
 	verbose := param(t, get, "verbose")
 	assertJSON(t, "verbose schema", verbose.Schema, `{"type":"integer"}`)
 	if verbose.Desc != "overridden" {
@@ -182,7 +180,6 @@ func TestParse30Basics(t *testing.T) {
 	if del.Description != "DELETE /pets/{petId}" {
 		t.Errorf("delete description = %q", del.Description)
 	}
-	// Path-level params are inherited.
 	param(t, del, "petId")
 
 	list := tool(t, m, "GET /pets")
@@ -205,7 +202,6 @@ func TestParse30RequestBody(t *testing.T) {
 	if post.Body.ContentType != "application/json" || !post.Body.Required {
 		t.Errorf("body = %q required=%v", post.Body.ContentType, post.Body.Required)
 	}
-	// readOnly "id" is dropped from the request schema and from required.
 	assertJSON(t, "body", post.Body.Schema, `{
 		"type":"object",
 		"required":["name"],
@@ -315,7 +311,6 @@ paths:
 	if !hasIssue(up, model.IssueUnsupported, "file") {
 		t.Errorf("missing file-field issue: %+v", up.Issues)
 	}
-	// Cookie parameters are supported (SPEC M6 design note).
 	if hasIssue(up, model.IssueUnsupported, "cookie") {
 		t.Errorf("cookie still flagged unsupported: %+v", up.Issues)
 	}
@@ -400,7 +395,6 @@ func jsonDepth(t *testing.T, raw json.RawMessage) int {
 }
 
 func TestParseWideSchemaHitsNodeBudget(t *testing.T) {
-	// Each level references the next level 6 times: 6^8 paths without a budget.
 	var b strings.Builder
 	b.WriteString("openapi: 3.0.3\ninfo: {title: T, version: '1'}\npaths:\n  /x:\n    post:\n      requestBody:\n        content:\n          application/json:\n            schema: {$ref: '#/components/schemas/L0'}\n      responses: {'200': {description: ok}}\ncomponents:\n  schemas:\n")
 	for i := range 8 {
@@ -432,7 +426,6 @@ func TestParseNeverFetchesExternalRefs(t *testing.T) {
 	if err := os.WriteFile(secret, []byte("type: string\ndescription: FILE-MARKER\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// Relative refs would resolve against the working directory.
 	t.Chdir(dir)
 
 	src := `
@@ -570,8 +563,6 @@ func TestParseSkipsInvalidPaths(t *testing.T) {
 }
 
 func TestParseNeutralizesExternalRefObjects(t *testing.T) {
-	// Each of these external refs panics libopenapi in-process if it reaches it
-	// (pb33f/libopenapi#705). They must be dropped, with the operation kept.
 	src := `
 openapi: 3.0.3
 info: {title: t, version: '1'}
@@ -607,14 +598,12 @@ paths:
 
 func TestParseRejectsNonObjectMediaTypes(t *testing.T) {
 	for name, content := range map[string]string{
-		// pb33f/libopenapi#705: this exact shape panics on a libopenapi goroutine.
 		"null next to ref": "          n:\n          a: {$ref: x}\n",
 		"null":             "          application/json:\n",
-		// Also panics libopenapi (same site); Media Type Objects can't be $refs in 3.0/3.1.
-		"ref only":  "          a: {$ref: '/comprnents/schemas/Tree'}\n",
-		"local ref": "          application/json: {$ref: '#/components/schemas/X'}\n",
-		"scalar":    "          application/json: 5\n",
-		"list":      "          application/json: [a]\n",
+		"ref only":         "          a: {$ref: '/comprnents/schemas/Tree'}\n",
+		"local ref":        "          application/json: {$ref: '#/components/schemas/X'}\n",
+		"scalar":           "          application/json: 5\n",
+		"list":             "          application/json: [a]\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			src := "openapi: 3.0.3\ninfo: {title: t, version: '1'}\npaths:\n  /e:\n    post:\n      requestBody:\n        content:\n" + content + "      responses: {}\n"
@@ -626,8 +615,6 @@ func TestParseRejectsNonObjectMediaTypes(t *testing.T) {
 }
 
 func TestParseMediaTypeCheckIgnoresNamesAndFreeForm(t *testing.T) {
-	// A property, a component and an example value may all be called
-	// "content" without being a content map.
 	src := `
 openapi: 3.0.3
 info: {title: t, version: '1'}
@@ -757,8 +744,6 @@ func TestParseRejectsNonSpecs(t *testing.T) {
 }
 
 func TestParseWritesNothingToStdout(t *testing.T) {
-	// libopenapi's default logger writes to stdout, which is reserved for
-	// JSON-RPC in serve/run. Parse must never let it.
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -865,8 +850,6 @@ paths:
 	if b := tool(t, m, "POST /both"); b.Body == nil || b.Body.ContentType != "application/json" {
 		t.Errorf("JSON should win: %+v", b.Body)
 	}
-	// Stripe declares an empty form body on GET and DELETE: nothing to send,
-	// so no body and no "body" parameter.
 	if e := tool(t, m, "GET /empty"); e.Body != nil || len(e.Issues) != 0 {
 		t.Errorf("empty form body: %+v, %+v", e.Body, e.Issues)
 	}
@@ -933,7 +916,6 @@ func TestParseRejectsScalarV2PathItemValues(t *testing.T) {
 			}
 		})
 	}
-	// A $ref path item and ordinary operations are fine.
 	ok := "swagger: '2.0'\ninfo: {title: t, version: '1'}\npaths:\n  /x:\n    get:\n      description: uses $ref internally\n      responses: {'200': {description: ok}}\n"
 	if m := parse(t, ok, Options{}); len(m.Tools) != 1 {
 		t.Errorf("valid spec rejected: %v", m.Warnings)

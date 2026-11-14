@@ -9,7 +9,6 @@ import (
 	"github.com/swayam5342/plugit/internal/model"
 )
 
-// A Postman v2.1 collection (SPEC M6 design note: Postman import).
 const petsCollection = `{
   "info": {"name": "Pets API", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
   "variable": [{"key": "baseUrl", "value": "https://pets.example.test/v1"}],
@@ -64,8 +63,6 @@ func TestParsePostman(t *testing.T) {
 	if m.SpecVersion != "postman-2.1" || m.Title != "Pets API" {
 		t.Errorf("header = %q %q", m.SpecVersion, m.Title)
 	}
-	// The base URL variable is offered like a spec's servers: the user
-	// still confirms it (T3).
 	if !reflect.DeepEqual(m.Servers, []string{"https://pets.example.test/v1"}) {
 		t.Errorf("servers = %v", m.Servers)
 	}

@@ -54,7 +54,7 @@ func TestParseRef(t *testing.T) {
 
 func TestParseRefRejects(t *testing.T) {
 	for _, in := range []string{
-		"", "ghp_abc", fakeSecret, "Bearer xyz", // bare values: no scheme
+		"", "ghp_abc", fakeSecret, "Bearer xyz",
 		"env:", "env:1BAD", "env:A-B", "env:A B",
 		"keyring:", "keyring:svc", "keyring:/key", "keyring:svc/",
 		"file:/etc/passwd", "vault:x",
@@ -162,7 +162,6 @@ func TestResolveErrors(t *testing.T) {
 type failingKeyring struct{}
 
 func (failingKeyring) Get(string, string) (string, error) {
-	// A backend error that (badly) includes the secret must not be surfaced.
 	return "", errors.New("backend exploded near " + fakeSecret)
 }
 

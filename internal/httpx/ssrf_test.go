@@ -18,30 +18,28 @@ func TestCheckIP(t *testing.T) {
 		"8.8.8.8", "1.1.1.1", "172.32.0.1", "100.128.0.1", "192.169.0.1",
 		"2606:4700::1111", "2001:4860:4860::8888",
 	}
-	// Blocked by default, allowed with allow_private.
 	private := []string{
-		"127.0.0.1", "127.1.2.3", // loopback
-		"10.0.0.1", "10.255.255.255", "172.16.0.1", "172.31.255.255", "192.168.1.1", // RFC1918
-		"100.64.0.1", "100.127.255.255", // CGNAT
-		"192.0.0.8", "198.18.0.1", // IETF / benchmarking
-		"::1",                     // IPv6 loopback
-		"fc00::1", "fd12:3456::1", // ULA
-		"fe80::1",          // IPv6 link-local
-		"::ffff:127.0.0.1", // IPv4-mapped loopback
-		"::ffff:10.0.0.1",  // IPv4-mapped RFC1918
-		"64:ff9b::a00:1",   // NAT64 of 10.0.0.1
-		"2002:7f00:1::",    // 6to4 of 127.0.0.1
+		"127.0.0.1", "127.1.2.3",
+		"10.0.0.1", "10.255.255.255", "172.16.0.1", "172.31.255.255", "192.168.1.1",
+		"100.64.0.1", "100.127.255.255",
+		"192.0.0.8", "198.18.0.1",
+		"::1",
+		"fc00::1", "fd12:3456::1",
+		"fe80::1",
+		"::ffff:127.0.0.1",
+		"::ffff:10.0.0.1",
+		"64:ff9b::a00:1",
+		"2002:7f00:1::",
 	}
-	// Blocked even with allow_private.
 	always := []string{
-		"0.0.0.0", "0.1.2.3", // "this network": 0.0.0.0 reaches localhost on Linux
-		"169.254.169.254", "169.254.1.1", // link-local / cloud metadata
+		"0.0.0.0", "0.1.2.3",
+		"169.254.169.254", "169.254.1.1",
 		"::ffff:169.254.169.254",
-		"fd00:ec2::254",                           // AWS IMDS over IPv6
-		"::",                                      // unspecified
-		"224.0.0.1", "239.255.255.250", "ff02::1", // multicast
-		"255.255.255.255", "240.0.0.1", // broadcast / reserved
-		"64:ff9b::a9fe:a9fe", // NAT64 of 169.254.169.254
+		"fd00:ec2::254",
+		"::",
+		"224.0.0.1", "239.255.255.250", "ff02::1",
+		"255.255.255.255", "240.0.0.1",
+		"64:ff9b::a9fe:a9fe",
 	}
 
 	check := func(t *testing.T, addr string, allowPrivate, wantBlocked bool) {
@@ -124,8 +122,6 @@ func get(t *testing.T, c *http.Client, rawURL string) (*http.Response, error) {
 	return resp, err
 }
 
-// fakeResolver returns scripted answers per host; the n-th lookup of a host
-// gets answers[host][n], repeating the last entry once exhausted.
 type fakeResolver struct {
 	mu      sync.Mutex
 	answers map[string][][]netip.Addr
@@ -170,7 +166,6 @@ func TestClientBlocksLoopbackLiteral(t *testing.T) {
 }
 
 func TestClientBlocksMetadataEvenWithAllowPrivate(t *testing.T) {
-	// The guard runs before connect(), so this never touches the network.
 	c := NewClient(Options{AllowPrivate: true})
 	for _, u := range []string{
 		"http://169.254.169.254/latest/meta-data/",
@@ -212,9 +207,6 @@ func TestClientBlocksLocalhostWithSystemResolver(t *testing.T) {
 }
 
 func TestClientDNSRebindingIsCheckedAtDialTime(t *testing.T) {
-	// A validator that resolved the name earlier would have seen a public IP.
-	// The client must check the address it actually dials, not a cached or
-	// earlier answer.
 	srv, hits := countingServer(t)
 	res := newFakeResolver(map[string][][]netip.Addr{
 		"rebind.test": {addrs("93.184.216.34"), addrs("127.0.0.1")},

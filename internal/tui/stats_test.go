@@ -41,7 +41,6 @@ func TestStatsShowsTotalsAndTools(t *testing.T) {
 			t.Errorf("view missing %q:\n%s", want, v)
 		}
 	}
-	// APIs ordered by calls, tools by calls within each.
 	if strings.Index(v, "pp_list_pets") > strings.Index(v, "pp_get_pet") || strings.Index(v, "pets") > strings.Index(v, "gh_list_issues") {
 		t.Errorf("order wrong:\n%s", v)
 	}
@@ -68,7 +67,7 @@ func TestStatsWindow(t *testing.T) {
 func TestStatsSort(t *testing.T) {
 	s := newStatsTest(nil)
 	s.Update(StatsMsg{Stats: sampleStats()})
-	s.Update(key("s")) // by errors
+	s.Update(key("s"))
 	v := statsView(s)
 	if !strings.Contains(v, "sorted by errors") || strings.Index(v, "gh_list_issues") > strings.Index(v, "pp_list_pets") {
 		t.Errorf("not sorted by errors:\n%s", v)

@@ -92,15 +92,12 @@ func TestAddWithPicker(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The spec's single server is offered for confirmation before pinning (T3).
 	if len(asked) != 1 || !strings.Contains(asked[0], up.URL) {
 		t.Errorf("questions = %q", asked)
 	}
-	// The next step points at the client chooser, not a stale client list.
 	if o := out.String(); !strings.Contains(o, "plugit install pets ") || strings.Contains(o, "--client claude-desktop") {
 		t.Errorf("summary:\n%s", o)
 	}
-	// The picker sees every operation, named with the prefix.
 	if len(in.tools) != 3 || !slices.ContainsFunc(in.tools, func(t model.Tool) bool { return t.Name == "pp_createPet" }) {
 		t.Errorf("picker input tools = %v", len(in.tools))
 	}
@@ -130,7 +127,6 @@ func TestAddWithPicker(t *testing.T) {
 		}
 	}
 
-	// The saved API serves straight from the cache.
 	cs, _ := startServe(t, serveSettings{paths: p, name: "pets"}, serveDeps(func(context.Context, []byte, openapi.Options) (*model.Manifest, error) {
 		t.Error("serve re-parsed right after add")
 		return nil, fmt.Errorf("unexpected")
@@ -168,11 +164,9 @@ func TestAddFromRun(t *testing.T) {
 	if !cfg.Network.AllowPrivate || cfg.BaseURL != up.URL {
 		t.Errorf("network/base = %+v %s", cfg.Network, cfg.BaseURL)
 	}
-	// Same selection rules as run: the mode and the filters.
 	if ts := cfg.Toolsets["default"]; len(ts.Tools) != 1 || !ts.Tools["GET /pets/{id}"].IsZero() {
 		t.Errorf("toolset = %+v", ts)
 	}
-	// The yaml never contains a resolved secret, only references.
 	raw, _ := os.ReadFile(must(p.APIConfig("pets")))
 	if strings.Contains(string(raw), runSecret) || !strings.Contains(string(raw), "env:PETS_KEY") {
 		t.Errorf("plugit.yaml:\n%s", raw)

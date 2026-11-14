@@ -14,7 +14,6 @@ import (
 	"github.com/swayam5342/plugit/internal/model"
 )
 
-// Body content types plugit can send.
 const (
 	ctJSON      = "application/json"
 	ctForm      = "application/x-www-form-urlencoded"
@@ -114,8 +113,6 @@ func formField(vals url.Values, key string, v any, enc model.Encoding, explicit 
 		}
 		parts, ok := scalarList(x)
 		if !ok {
-			// Objects can't be repeated keys: the whole array goes in
-			// brackets, so its indexes stay consistent.
 			return deepField(vals, key, v)
 		}
 		for _, s := range parts {

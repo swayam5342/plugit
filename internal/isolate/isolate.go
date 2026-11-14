@@ -30,17 +30,14 @@ import (
 	"github.com/swayam5342/plugit/internal/openapi"
 )
 
-// ChildArg is the hidden first argument that turns plugit into a parse child.
 const ChildArg = "__parse"
 
-// Defaults applied when the corresponding Runner field is zero.
 const (
 	DefaultTimeout   = 30 * time.Second
 	DefaultMaxOutput = 256 << 20
-	maxRequest       = 64 << 20 // a 20 MiB spec, base64-encoded, plus options
+	maxRequest       = 64 << 20
 )
 
-// Sentinel errors callers can match with errors.Is.
 var (
 	ErrParserCrashed = errors.New("spec parser crashed")
 	ErrParseTimeout  = errors.New("spec parser timed out")
@@ -59,7 +56,6 @@ type response struct {
 	Kind     string          `json:"kind,omitempty"`
 }
 
-// errorKinds carries openapi's sentinel errors across the process boundary.
 var errorKinds = []struct {
 	kind string
 	err  error
@@ -71,11 +67,10 @@ var errorKinds = []struct {
 	{"invalid", openapi.ErrInvalidSpec},
 }
 
-// Runner starts parse children.
 type Runner struct {
-	Exe       string   // binary to run
-	Args      []string // arguments, normally just ChildArg
-	Env       []string // extra environment for the child (tests only)
+	Exe       string
+	Args      []string
+	Env       []string
 	Timeout   time.Duration
 	MaxOutput int64
 }
@@ -185,8 +180,6 @@ func writeResponse(w io.Writer, r response) {
 	_, _ = w.Write(b)
 }
 
-// childError is an error reported by the child. It unwraps to the matching
-// openapi sentinel, so errors.Is works as it would in-process.
 type childError struct {
 	msg, kind string
 }
@@ -222,8 +215,6 @@ func firstLine(s string) string {
 	return " (" + naming.CleanText(line, 200) + ")"
 }
 
-// cappedBuffer keeps at most max bytes; on overflow it records the fact and
-// calls onOverflow (which kills the child).
 type cappedBuffer struct {
 	mu         sync.Mutex
 	buf        bytes.Buffer

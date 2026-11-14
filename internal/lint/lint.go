@@ -24,24 +24,20 @@ import (
 	"github.com/swayam5342/plugit/internal/tokens"
 )
 
-// Budget thresholds for L010 (also shown by the picker).
 const (
 	BudgetTools  = 40
 	BudgetTokens = 8000
 )
 
-// Limits for the other rules.
 const (
-	maxDescription = naming.DefaultMaxDescription // L002
-	maxDepth       = 8                            // L005
-	maxProperties  = 50                           // L005
-	maxParams      = 15                           // L006
+	maxDescription = naming.DefaultMaxDescription
+	maxDepth       = 8
+	maxProperties  = 50
+	maxParams      = 15
 )
 
-// Severity is how bad a finding is.
 type Severity int
 
-// Severities, least severe first.
 const (
 	Info Severity = iota
 	Warn
@@ -60,24 +56,21 @@ func (s Severity) String() string {
 // MarshalJSON writes the severity by name.
 func (s Severity) MarshalJSON() ([]byte, error) { return json.Marshal(s.String()) }
 
-// Finding is one problem.
 type Finding struct {
 	Rule     string      `json:"rule"`
 	Severity Severity    `json:"severity"`
-	Toolset  string      `json:"toolset,omitempty"` // "" for API-wide findings
+	Toolset  string      `json:"toolset,omitempty"`
 	Tool     model.OpKey `json:"tool,omitempty"`
-	Name     string      `json:"name,omitempty"` // the tool's final name
+	Name     string      `json:"name,omitempty"`
 	Message  string      `json:"message"`
 }
 
-// Input is what lint looks at.
 type Input struct {
 	API    config.API
-	Tools  []model.Tool // the manifest's tools, named with the prefix
-	Hidden []string     // credential and fixed params, hidden from the model
+	Tools  []model.Tool
+	Hidden []string
 }
 
-// Summary counts findings by severity.
 type Summary struct {
 	Errors   int `json:"errors"`
 	Warnings int `json:"warnings"`
@@ -151,7 +144,6 @@ func toolset(in Input, name string) (kept []Finding, n int) {
 		t := schema.Prepare(st.Tool, schema.Options{Fixed: in.Hidden})
 		l.tool = t
 
-		// L003: names after overrides.
 		lower := strings.ToLower(t.Name)
 		if other, dup := seen[lower]; dup {
 			l.add("L003", Error, "name %q clashes with %s (%q); names are compared ignoring case", t.Name, other.Key, other.Name)
@@ -161,14 +153,12 @@ func toolset(in Input, name string) (kept []Finding, n int) {
 		if len(t.Name) > naming.MaxNameLen {
 			l.add("L003", Error, "name %q is longer than %d characters with the prefix", t.Name, naming.MaxNameLen)
 		}
-		// L019: names that differ only by case or separators.
 		if other, dup := squashed[squash(t.Name)]; dup && !strings.EqualFold(other.Name, t.Name) {
 			l.add("L019", Warn, "name %q differs from %s (%q) only by case or separators; models mix such names up", t.Name, other.Key, other.Name)
 		} else if !dup {
 			squashed[squash(t.Name)] = t
 		}
 
-		// L001, L002: descriptions.
 		if t.Description == t.Method+" "+t.Path {
 			l.add("L001", Warn, "no description in the spec; add one with `plugit edit`")
 		}
@@ -176,7 +166,6 @@ func toolset(in Input, name string) (kept []Finding, n int) {
 			l.add("L002", Warn, "description override is %d characters; it is cut to %d", utf8.RuneCountInString(o.Description), maxDescription)
 		}
 
-		// L004-L007 on what the model sees.
 		var visible []model.Param
 		for _, p := range t.Params {
 			if !p.Hidden {
@@ -201,15 +190,12 @@ func toolset(in Input, name string) (kept []Finding, n int) {
 			}
 		}
 
-		// L008, L009: lifecycle and policy.
 		if t.Deprecated {
 			l.add("L008", Info, "the spec marks this operation deprecated")
 		}
 		if st.Override == policy.OverrideAllow && t.Safety == model.Destructive && mode != policy.Full {
 			l.add("L009", Error, "destructive tool set to allow has no effect under policy mode %s (it stays %s); remove the override or use mode full", mode, policy.Check(t.Safety, mode, policy.None).Decision)
 		}
-		// L015: safety comes from the HTTP method alone, so a GET that
-		// changes something runs unasked in every mode.
 		if w := writeLike(strings.TrimPrefix(t.Name, in.API.Prefix+"_"), t.Path); w != "" && t.Safety == model.ReadOnly && st.Override == policy.None {
 			l.add("L015", Warn, "%s is treated as read-only but looks like it changes something (%q); if it does, set its policy to confirm or deny", t.Method, w)
 		}
@@ -223,12 +209,10 @@ func toolset(in Input, name string) (kept []Finding, n int) {
 		}
 	}
 
-	// L010: the whole toolset.
 	if offered > BudgetTools || budget > BudgetTokens {
 		l.tool = model.Tool{}
 		l.add("L010", Warn, "%d tools, %s tokens offered (thresholds: %d tools, %s tokens); models pick tools less reliably from long lists", offered, tokens.Format(budget), BudgetTools, tokens.Format(BudgetTokens))
 	}
-	// L018: mode full runs destructive tools without asking.
 	if n := len(unconfirmed); n > 0 {
 		l.tool = model.Tool{}
 		shown := unconfirmed[:min(n, 3)]
@@ -251,8 +235,6 @@ func toolset(in Input, name string) (kept []Finding, n int) {
 // apiFindings are the API-wide rules.
 func apiFindings(a config.API) []Finding {
 	var out []Finding
-	// L011: credentials over plain http to a remote host (a warning when
-	// network.allow_insecure is on).
 	if u, err := url.Parse(a.BaseURL); err == nil && u.Scheme == "http" && !loopback(u.Hostname()) && sendsSecrets(a) {
 		f := Finding{Rule: "L011", Severity: Error,
 			Message: fmt.Sprintf("base_url %s is plain http to a remote host, and credentials are sent: use https", u.Redacted())}
@@ -307,7 +289,6 @@ func (l *linter) add(rule string, sev Severity, format string, a ...any) {
 func (l *linter) param(p model.Param) {
 	where := fmt.Sprintf("parameter %q", p.Name)
 	l.text(where+" description", p.Desc)
-	// L016, L017: what the parameter's name says about its value.
 	if p.In != model.InPath && credentialName.MatchString(strings.Join(words(p.UpstreamName), "_")) {
 		l.add("L016", Warn, "%s looks like a credential the model would have to supply; make it a fixed value so it stays hidden", where)
 	}
@@ -405,10 +386,7 @@ func valueStrings(v any, depth int, fn func(string)) {
 	}
 }
 
-// ---- L007: text aimed at the model ----
-
 var (
-	// Instructions to the model rather than documentation for a caller.
 	injection = regexp.MustCompile(`(?i)\b(` +
 		`(ignore|disregard|forget|override)\s+(all\s+|any\s+|the\s+|your\s+)*(previous|prior|above|earlier|preceding|system)\b` +
 		`|exfiltrat\w*` +
@@ -421,19 +399,15 @@ var (
 		`|developer\s+mode` +
 		`|</?\s*(system|instructions?|prompt)\s*>` +
 		`)`)
-	// Docs wording that is also how injected instructions read. Real specs
-	// use it ("you must be an admin"), so it is a warning (decided
-	// 2026-11-12 after measuring the GitHub spec).
 	weakInstruction = regexp.MustCompile(`(?i)\byou\s+must\b`)
 	link            = regexp.MustCompile(`(?i)\b(https?|ftp|file)://[^\s"'<>)\]]+`)
 
-	// Things that look like credentials. Matches are never echoed.
 	credentials = []*regexp.Regexp{
-		regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`),                             // AWS access key
-		regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]{30,}\b`),                   // GitHub token
-		regexp.MustCompile(`\b(sk|pk|rk)_(live|test)_[A-Za-z0-9]{16,}\b`),      // Stripe-style key
-		regexp.MustCompile(`\bxox[abprs]-[A-Za-z0-9-]{10,}\b`),                 // Slack token
-		regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.`), // JWT
+		regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`),
+		regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]{30,}\b`),
+		regexp.MustCompile(`\b(sk|pk|rk)_(live|test)_[A-Za-z0-9]{16,}\b`),
+		regexp.MustCompile(`\bxox[abprs]-[A-Za-z0-9-]{10,}\b`),
+		regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.`),
 		regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`),
 		regexp.MustCompile(`(?i)\b(api[_-]?key|access[_-]?token|secret|password|passwd)\s*[:=]\s*["']?[A-Za-z0-9_\-+/]{12,}`),
 	}

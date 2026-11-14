@@ -16,30 +16,24 @@ import (
 	"github.com/swayam5342/plugit/internal/policy"
 )
 
-// TryInput configures the Try it screen (SPEC §2.3).
 type TryInput struct {
 	API     string
-	Tool    model.Tool // prepared: hidden params are marked
+	Tool    model.Tool
 	Mode    policy.Mode
-	Confirm string // non-empty: why the call needs confirmation first
-	// Send makes the call with the non-empty fields (name → text as typed)
-	// and returns what to show. It is called off the UI goroutine.
-	Send func(ctx context.Context, args map[string]string) TryResult
+	Confirm string
+	Send    func(ctx context.Context, args map[string]string) TryResult
 }
 
-// TryResult is one call's outcome, already redacted.
 type TryResult struct {
-	Request  string // the outgoing request as printed by plugit try
+	Request  string
 	Status   int
-	Response string // the tool result text
+	Response string
 	IsError  bool
-	Err      string // the call wasn't made or failed before a result
+	Err      string
 }
 
 type tryResultMsg TryResult
 
-// TryIt is a form generated from a tool's parameters that makes one call
-// and shows the redacted request and the response.
 type TryIt struct {
 	in      TryInput
 	params  []model.Param
@@ -70,7 +64,7 @@ func NewTryIt(in TryInput) *TryIt {
 		f.Prompt = ""
 		f.Placeholder = paramType(p)
 		f.CharLimit = 4096
-		f.SetWidth(23) // the field box is 24 cells; the cursor takes one
+		f.SetWidth(23)
 		m.params = append(m.params, p)
 		m.fields = append(m.fields, f)
 	}
@@ -220,7 +214,6 @@ func (m *TryIt) View() tea.View {
 	lines := th.box(w, th.Border, spread(title, th.pill(m.in.Mode), w-4), sub)
 	lines = append(lines, "")
 
-	// The form.
 	if len(m.fields) == 0 {
 		lines = append(lines, th.Dim.Render("  No parameters. ctrl+s sends the call."))
 	} else {
@@ -251,7 +244,6 @@ func (m *TryIt) View() tea.View {
 	}
 	lines = append(lines, "")
 
-	// Status.
 	switch {
 	case m.asking:
 		lines = append(lines, fit("  "+th.Warn.Render(safe(m.in.Confirm)+". Send it? ")+th.Bold.Render("y")+th.Dim.Render("/N"), w))
@@ -263,7 +255,6 @@ func (m *TryIt) View() tea.View {
 		lines = append(lines, "")
 	}
 
-	// The call: request, then response, in what height is left.
 	footer := "  " + th.hints(w-2, "tab", "next field", "ctrl+s", "send", "pgup/pgdn", "scroll", "esc", "quit")
 	avail := m.height - len(lines) - 1
 	if r := m.result; r != nil && r.Err == "" && avail >= 6 {
@@ -312,7 +303,7 @@ func (m *TryIt) View() tea.View {
 // RunTryIt shows the Try it screen until the user quits.
 func RunTryIt(ctx context.Context, in TryInput, r io.Reader, w io.Writer) error {
 	m := NewTryIt(in)
-	defer m.cancel() // also when the program ends some other way
+	defer m.cancel()
 	_, err := tea.NewProgram(m, programOptions(ctx, r, w)...).Run()
 	return err
 }

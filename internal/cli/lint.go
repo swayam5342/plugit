@@ -19,7 +19,6 @@ import (
 	"github.com/swayam5342/plugit/internal/openapi"
 )
 
-// exitCodeError makes Main exit with code instead of 1.
 type exitCodeError struct {
 	code int
 	err  error
@@ -32,7 +31,7 @@ func (e exitCodeError) Unwrap() error { return e.err }
 func usageError(err error) error { return exitCodeError{code: 2, err: err} }
 
 type lintSettings struct {
-	toolset string // "" lints every toolset
+	toolset string
 	asJSON  bool
 	out     io.Writer
 	stderr  io.Writer

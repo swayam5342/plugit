@@ -13,10 +13,8 @@ import (
 	"github.com/swayam5342/plugit/internal/naming"
 )
 
-// converter turns libopenapi schemas into plain JSON Schema for one tool. It
-// shares a node budget across all of the tool's schemas.
 type converter struct {
-	is30     bool // OpenAPI 3.0 semantics (nullable, boolean exclusive bounds)
+	is30     bool
 	maxDesc  int
 	budget   int
 	issues   []model.Issue
@@ -149,7 +147,6 @@ func (c *converter) schema(s *base.Schema, depth int) map[string]any {
 	if s.Properties != nil && s.Properties.Len() > 0 {
 		props := map[string]any{}
 		for pair := s.Properties.First(); pair != nil; pair = pair.Next() {
-			// readOnly properties are set by the server; never ask the model for them.
 			if child := pair.Value().Schema(); child != nil && child.ReadOnly != nil && *child.ReadOnly {
 				continue
 			}

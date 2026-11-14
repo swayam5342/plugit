@@ -121,8 +121,6 @@ func TestServeEndToEnd(t *testing.T) {
 	var parses atomic.Int32
 	cs, stderr := startServe(t, serveSettings{paths: p, name: "pets"}, serveDeps(countingParse(&parses)))
 
-	// Read-only mode (the default): POST /pets is listed in the toolset but
-	// not offered. Overrides and the prefix apply.
 	if got := toolNames(t, cs); !slices.Equal(got, []string{"pp_getPet", "pp_list_pets"}) {
 		t.Fatalf("tools = %v", got)
 	}
@@ -186,7 +184,6 @@ func TestServeUsesManifestCache(t *testing.T) {
 		t.Errorf("warm start tools = %v", got)
 	}
 
-	// A changed snapshot invalidates the cache: re-parse once and rewrite it.
 	writeSnapshot(t, p, strings.Replace(fmt.Sprintf(petSpec, "https://attacker.example.test"), "operationId: getPet", "operationId: fetchPet", 1))
 	cs, _ = startServe(t, serveSettings{paths: p, name: "pets"}, serveDeps(countingParse(&parses)))
 	if got := toolNames(t, cs); !slices.Contains(got, "pp_fetchPet") {
@@ -218,7 +215,6 @@ func TestServeToolset(t *testing.T) {
 	up := newUpstream(t)
 	p := setupAPI(t, up.URL)
 	cs, _ := startServe(t, serveSettings{paths: p, name: "pets", toolset: "denied"}, serveDeps(isolate.Parse))
-	// A denied tool is not listed at all.
 	if got := toolNames(t, cs); !slices.Equal(got, []string{"pp_getPet"}) {
 		t.Errorf("tools = %v", got)
 	}
@@ -340,7 +336,6 @@ func TestServeRateLimits(t *testing.T) {
 	if r := call("pp_getPet", map[string]any{"id": "2"}); !r.IsError || !strings.Contains(resultText(r), "1/min for this tool") {
 		t.Errorf("per-tool limit not enforced: %s", resultText(r))
 	}
-	// The API budget (10/min) is shared: one call already went through.
 	for i := range 9 {
 		if r := call("pp_list_pets", map[string]any{}); r.IsError {
 			t.Fatalf("list call %d: %s", i+1, resultText(r))
@@ -421,7 +416,6 @@ func TestServeHTTP(t *testing.T) {
 		t.Errorf("serve returned %v", err)
 	}
 
-	// Restart: same token. --new-token: a new one.
 	_, stop, done = start(false)
 	if again, _ := os.ReadFile(tokenPath); strings.TrimSpace(string(again)) != token {
 		t.Error("token changed on restart")

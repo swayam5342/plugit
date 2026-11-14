@@ -29,15 +29,13 @@ import (
 	"github.com/swayam5342/plugit/internal/naming"
 )
 
-// Limits on untrusted specs.
 const (
-	MaxSchemaDepth = 12   // nesting levels kept when converting a schema
-	MaxSchemaNodes = 5000 // schema nodes converted per tool
-	MaxRefDepth    = 32   // $ref -> $ref hops
+	MaxSchemaDepth = 12
+	MaxSchemaNodes = 5000
+	MaxRefDepth    = 32
 	maxWarnings    = 25
 )
 
-// Sentinel errors callers can match with errors.Is.
 var (
 	ErrUnsupportedSpec = errors.New("unsupported spec: need OpenAPI 3.0, 3.1 or Swagger 2.0")
 	ErrRefTooDeep      = errors.New("$ref chain too deep")
@@ -46,18 +44,11 @@ var (
 	ErrInvalidSpec     = errors.New("invalid spec")
 )
 
-// Options configures Parse.
 type Options struct {
-	// Prefix is prepended to every tool name ("pets" -> "pets_listPets").
-	Prefix string
-	// MaxDescription caps descriptions in runes (naming.DefaultMaxDescription if 0).
-	MaxDescription int
-	// AllowUnsafePaths keeps paths with spaces, dot segments or backslashes
-	// (network.allow_insecure).
+	Prefix           string
+	MaxDescription   int
 	AllowUnsafePaths bool
-	// Logger receives libopenapi's diagnostics. nil discards them. Never
-	// pass a logger that writes to stdout.
-	Logger *slog.Logger
+	Logger           *slog.Logger
 }
 
 // Parse builds a Manifest from spec bytes (JSON or YAML).
@@ -79,7 +70,7 @@ func Parse(data []byte, opts Options) (m *model.Manifest, err error) {
 	}
 
 	cfg := datamodel.NewDocumentConfiguration()
-	cfg.Logger = logger // the default logs to stdout
+	cfg.Logger = logger
 	cfg.AllowFileReferences = false
 	cfg.AllowRemoteReferences = false
 	cfg.SkipExternalRefResolution = true

@@ -25,27 +25,18 @@ import (
 	"strings"
 )
 
-// Mask replaces every redacted value.
 const Mask = "***"
 
-// Options configures a Redactor.
 type Options struct {
-	// SecretHeaders are extra header names whose values are always masked,
-	// on top of the built-in auth/cookie/token heuristics.
-	SecretHeaders []string
-	// SecretQueryParams are extra query parameter names whose values are
-	// always masked.
+	SecretHeaders     []string
 	SecretQueryParams []string
-	// Secrets are resolved secret values to mask wherever they appear.
-	Secrets []string
+	Secrets           []string
 }
 
-// Redactor masks secrets. It is immutable after New and safe for concurrent
-// use.
 type Redactor struct {
 	opts     Options
-	headers  map[string]bool // normalized names
-	params   map[string]bool // normalized names
+	headers  map[string]bool
+	params   map[string]bool
 	replacer *strings.Replacer
 }
 
@@ -141,8 +132,6 @@ func (r *Redactor) URL(u *url.URL) string {
 		return ""
 	}
 	c := *u
-	// url.URL.String would percent-encode the '*' of Mask in userinfo, so use
-	// a plain placeholder and swap it afterwards.
 	const pwPlaceholder = "PLUGITREDACTEDPASSWORD"
 	if c.User != nil {
 		if _, ok := c.User.Password(); ok {
@@ -194,10 +183,8 @@ func normalizeName(name string) string {
 	}, name)
 }
 
-// exactSecretNames are short names that are secret only on an exact match.
 var exactSecretNames = map[string]bool{"key": true, "sig": true, "auth": true}
 
-// secretFragments mark a normalized name as secret when contained in it.
 var secretFragments = []string{
 	"authorization", "token", "secret", "password", "passwd", "apikey",
 	"session", "cookie", "signature", "credential", "privatekey", "accesskey",
@@ -276,8 +263,6 @@ type tokenPattern struct {
 	repl string
 }
 
-// tokenPatterns are the token-format backstop. Each is anchored on a
-// distinctive prefix to keep false positives low.
 var tokenPatterns = []tokenPattern{
 	{regexp.MustCompile(`-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----`), Mask},
 	{regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]{22,}`), Mask},

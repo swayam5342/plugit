@@ -12,14 +12,10 @@ import (
 	"github.com/swayam5342/plugit/internal/model"
 )
 
-// ErrInvalidArgs means tool-call arguments failed validation.
 var ErrInvalidArgs = errors.New("invalid arguments")
 
 const maxErrorLen = 600
 
-// Validator checks tool-call arguments against a tool's input schema
-// (SPEC §3.7 step 4). The input schema sets additionalProperties: false, so
-// unknown arguments (including attempts to set hidden fixed params) fail.
 type Validator struct {
 	schema   *jsonschema.Schema
 	degraded bool
@@ -35,8 +31,6 @@ func NewValidator(t model.Tool) *Validator {
 	}
 	s, err := compile(minimalSchema(t))
 	if err != nil {
-		// Unreachable: the minimal schema uses only basic keywords. Keep
-		// failing closed rather than accepting anything.
 		return &Validator{degraded: true}
 	}
 	return &Validator{schema: s, degraded: true}
@@ -87,7 +81,7 @@ func compile(schemaJSON []byte) (*jsonschema.Schema, error) {
 	}
 	c := jsonschema.NewCompiler()
 	c.DefaultDraft(jsonschema.Draft2020)
-	c.UseLoader(refuseLoader{}) // never read files or URLs
+	c.UseLoader(refuseLoader{})
 	const loc = "plugit:///tool.json"
 	if err := c.AddResource(loc, doc); err != nil {
 		return nil, err

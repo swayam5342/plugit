@@ -99,7 +99,6 @@ func (b *builder) newTool(method, path, summary, description string, tags []stri
 	}
 }
 
-// maxTagLen caps a tag in runes.
 const maxTagLen = 64
 
 // cleanTags cleans tags like every other spec string: they reach the user's
@@ -185,8 +184,6 @@ func riskyPathProblem(path, decoded string) string {
 	return ""
 }
 
-// ---- OpenAPI 3.x ----
-
 func (b *builder) fromV3(doc *v3.Document) {
 	if doc.Info != nil {
 		b.m.Title = naming.CleanText(doc.Info.Title, 200)
@@ -257,8 +254,6 @@ func (b *builder) v3Op(method, path string, item *v3.PathItem, op *v3.Operation)
 	}
 
 	if rb := op.RequestBody; rb != nil && rb.Content != nil && rb.Content.Len() > 0 {
-		// JSON first, then a URL-encoded form, then multipart (SPEC M6
-		// design note: form and multipart bodies).
 		var all []string
 		var jsonMT, formMT, multiMT *v3.MediaType
 		for pair := rb.Content.First(); pair != nil; pair = pair.Next() {
@@ -289,8 +284,6 @@ func (b *builder) v3Op(method, path string, item *v3.PathItem, op *v3.Operation)
 	t.Issues = c.issues
 	b.addOp(t, op.OperationId)
 }
-
-// ---- Swagger 2.0 ----
 
 func (b *builder) fromV2(doc *v2.Swagger) {
 	if doc.Info != nil {
@@ -384,15 +377,12 @@ func (b *builder) v2Op(method, path string, item *v2.PathItem, op *v2.Operation,
 		if len(formRequired) > 0 {
 			obj["required"] = formRequired
 		}
-		// Swagger 2.0 formData arrays default to collectionFormat csv; multi
-		// (repeated keys) is the OpenAPI 3 form default plugit sends.
 		t.Body = formBody(c, ct, mustJSON(obj), nil, formAnyRequired)
 	}
 	t.Issues = c.issues
 	b.addOp(t, op.OperationId)
 }
 
-// Form content types.
 const (
 	ctForm      = "application/x-www-form-urlencoded"
 	ctMultipart = "multipart/form-data"
@@ -422,8 +412,6 @@ func formBody(c *converter, ct string, raw json.RawMessage, enc map[string]model
 		c.issue(model.IssueUnsupported, "file field %q left out of the %s body (file content can't come from a model)", name, ct)
 	}
 	if len(props) == 0 {
-		// No declared fields: nothing a model could fill in (Stripe puts an
-		// empty form body on its GET and DELETE operations).
 		return nil
 	}
 	for k := range enc {
@@ -468,7 +456,7 @@ func v3Encodings(mt *v3.MediaType) map[string]model.Encoding {
 			style = "form"
 		}
 		if style != "form" && style != "deepObject" {
-			continue // spaceDelimited and friends: send with the default
+			continue
 		}
 		explode := style == "form"
 		if e.Explode != nil {
@@ -559,8 +547,6 @@ func setEnum(out map[string]any, nodes []*yaml.Node) {
 	out["enum"] = vals
 }
 
-// ---- shared ----
-
 // mergeParams applies operation-level parameters over path-level ones with
 // the same location and name, keeping first-seen order.
 func mergeParams[P any](pathLevel, opLevel []*P, id func(*P) (string, string)) []*P {
@@ -588,7 +574,6 @@ func mergeParams[P any](pathLevel, opLevel []*P, id func(*P) (string, string)) [
 	return out
 }
 
-// cookieNameRe is an RFC 6265 cookie-name (an RFC 7230 token).
 var cookieNameRe = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$")
 
 func (b *builder) addParam(t *model.Tool, c *converter, name, in string, required bool, desc string, schema json.RawMessage) {
@@ -599,14 +584,12 @@ func (b *builder) addParam(t *model.Tool, c *converter, name, in string, require
 	var loc model.Location
 	switch strings.ToLower(in) {
 	case "path":
-		loc, required = model.InPath, true // path params are always required
+		loc, required = model.InPath, true
 	case "query":
 		loc = model.InQuery
 	case "header":
 		loc = model.InHeader
 	case "cookie":
-		// The name goes into the Cookie header plugit builds: it must be
-		// an RFC 6265 token (SPEC M6 design note: cookie parameters).
 		if !cookieNameRe.MatchString(name) {
 			c.issue(model.IssueUnsupported, "%q isn't a valid cookie name; parameter dropped", name)
 			return

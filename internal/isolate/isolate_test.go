@@ -116,10 +116,6 @@ func TestParseKeepsSentinelErrors(t *testing.T) {
 	}
 }
 
-// libopenapi v0.42.5 panics on a goroutine it starts itself for this input
-// (pb33f/libopenapi#705). openapi's pre-check now rejects it before
-// libopenapi sees it; crashes nobody has found yet are covered by the
-// "crash" child in TestParseChildFailures.
 const libopenapiCrasher = `openapi: 3.0.3
 info: {title: t, version: "1"}
 paths:

@@ -187,7 +187,7 @@ paths:
 `
 	for _, tc := range []struct {
 		name, src string
-		off, on   int // tools without and with the switch
+		off, on   int
 	}{{"postman", postman, 1, 3}, {"openapi", oas, 1, 3}} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := parse(t, tc.src, Options{})

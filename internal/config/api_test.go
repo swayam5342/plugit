@@ -126,7 +126,7 @@ func TestParseAPIRejects(t *testing.T) {
 	base := minimalConfig
 	cases := map[string]struct {
 		yaml string
-		want string // substring of the error
+		want string
 		is   error
 	}{
 		"unknown top-level key": {base + "polcy: {mode: full}\n", "polcy", ErrInvalidConfig},

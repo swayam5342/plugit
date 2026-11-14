@@ -30,57 +30,43 @@ import (
 	"github.com/swayam5342/plugit/internal/schema"
 )
 
-// Sentinel errors callers can match with errors.Is.
 var (
-	// ErrBadArgument means an argument value can't be sent safely.
 	ErrBadArgument = errors.New("bad argument")
-	// ErrBuild means the tool or target can't produce a request.
-	ErrBuild = errors.New("cannot build request")
+	ErrBuild       = errors.New("cannot build request")
 )
 
-// AuthType is how the credential is attached.
 type AuthType string
 
-// Auth types (SPEC §3.6).
 const (
 	AuthNone   AuthType = "none"
-	AuthBearer AuthType = "bearer" // Authorization: Bearer <secret>
-	AuthHeader AuthType = "header" // <Header>: <secret>
-	AuthQuery  AuthType = "query"  // ?<Param>=<secret>
-	AuthBasic  AuthType = "basic"  // Authorization: Basic base64(<secret>), secret is "user:pass"
+	AuthBearer AuthType = "bearer"
+	AuthHeader AuthType = "header"
+	AuthQuery  AuthType = "query"
+	AuthBasic  AuthType = "basic"
 )
 
-// Auth is a resolved credential.
 type Auth struct {
-	Type   AuthType
-	Header string // AuthHeader
-	Param  string // AuthQuery
-	Secret string
-	// Token, when set, supplies the bearer token for each call (OAuth). Call
-	// fetches it, sets Secret and redacts it by value.
-	Token func(context.Context) (string, error)
-	// Unauthorized, when set, is told about a 401 so a cached token is
-	// dropped (no automatic retry: writes are never repeated).
+	Type         AuthType
+	Header       string
+	Param        string
+	Secret       string
+	Token        func(context.Context) (string, error)
 	Unauthorized func()
 }
 
-// Fixed is a resolved fixed parameter. If the tool declares a parameter with
-// this name, the spec's location wins; otherwise In is used (query when
-// unset).
 type Fixed struct {
 	Name   string
 	In     model.Location
 	Value  string
-	Secret bool // from env: or keyring:; redacted by value (SPEC T11)
+	Secret bool
 }
 
-// Target is everything about the upstream that isn't per call.
 type Target struct {
-	BaseURL   *url.URL // pinned; never from the spec at runtime or the model
+	BaseURL   *url.URL
 	Auth      Auth
 	Fixed     []Fixed
 	UserAgent string
-	Extra     []string // more values to redact (an OAuth client secret)
+	Extra     []string
 }
 
 // SecretValues lists every value that must be redacted wherever it appears
@@ -134,7 +120,7 @@ func Build(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*
 	for name := range args {
 		names = append(names, name)
 	}
-	slices.Sort(names) // deterministic errors and query order
+	slices.Sort(names)
 
 	path := t.Path
 	query := url.Values{}
@@ -165,8 +151,6 @@ func Build(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*
 				return nil, fmt.Errorf("%w: %q: %w", ErrBadArgument, name, err)
 			}
 		case model.InHeader:
-			// Auth and hop-by-hop headers are never tool parameters (schema
-			// drops them; refuse here too, in case a tool wasn't prepared).
 			if schema.IsForbiddenHeader(p.UpstreamName) {
 				return nil, fmt.Errorf("%w: %q: the %s header can't be set by a tool", ErrBadArgument, name, p.UpstreamName)
 			}
@@ -190,8 +174,6 @@ func Build(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*
 		}
 	}
 
-	// Fixed params: hidden from the model, injected where the spec declares
-	// them, else at the configured location.
 	for _, f := range tg.Fixed {
 		in := f.In
 		upstream := f.Name
@@ -245,7 +227,7 @@ func Build(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*
 
 	u := joinURL(tg.BaseURL, path)
 	if tg.Auth.Type == AuthQuery && tg.Auth.Param != "" {
-		query.Del(tg.Auth.Param) // the credential replaces anything with its name
+		query.Del(tg.Auth.Param)
 	}
 	u.RawQuery = query.Encode()
 
@@ -255,8 +237,6 @@ func Build(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*
 	}
 	maps.Copy(req.Header, header)
 	if len(cookies) > 0 {
-		// One header, built by plugit from named values (SPEC M6 design
-		// note: cookie parameters).
 		parts := make([]string, 0, len(cookies))
 		for _, k := range slices.Sorted(maps.Keys(cookies)) {
 			parts = append(parts, k+"="+cookies[k])
@@ -351,7 +331,6 @@ func addQuery(q url.Values, name string, v any) error {
 		}
 		return nil
 	case map[string]any:
-		// OpenAPI's default (style: form, explode: true): one pair per property.
 		keys := make([]string, 0, len(x))
 		for k := range x {
 			keys = append(keys, k)
@@ -428,8 +407,6 @@ func attachAuth(req *http.Request, tg Target) error {
 	if a.Type == "" || a.Type == AuthNone {
 		return nil
 	}
-	// Bound to the pinned origin (SPEC T8). Redirects are same-origin only
-	// in httpx, so this holds for the whole exchange.
 	if !httpx.SameOrigin(req.URL, tg.BaseURL) {
 		return fmt.Errorf("%w: request origin differs from the pinned base URL", ErrBuild)
 	}
@@ -463,7 +440,6 @@ func attachAuth(req *http.Request, tg Target) error {
 	return nil
 }
 
-// cookieNameRe is an RFC 6265 cookie-name (an RFC 7230 token).
 var cookieNameRe = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$")
 
 // cookieValue formats a scalar as a cookie value and refuses anything that

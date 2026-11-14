@@ -107,8 +107,6 @@ func TestRedirectCrossOriginBlocked(t *testing.T) {
 }
 
 func TestRedirectLimit(t *testing.T) {
-	// /r/N redirects to /r/N-1; /r/0 answers 200. Following N redirects
-	// starting from /r/N.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n, err := strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/r/"))
 		if err != nil {
@@ -174,7 +172,6 @@ func TestResponseCap(t *testing.T) {
 			if len(body) != tc.wantLen {
 				t.Errorf("len(body) = %d, want %d", len(body), tc.wantLen)
 			}
-			// The end state is sticky.
 			if n, err2 := resp.Body.Read(make([]byte, 8)); n != 0 || (err2 == nil) {
 				t.Errorf("Read after end = %d, %v; want 0 and an error", n, err2)
 			}
@@ -185,7 +182,7 @@ func TestResponseCap(t *testing.T) {
 func TestResponseCapAppliesAfterDecompression(t *testing.T) {
 	var gz bytes.Buffer
 	zw := gzip.NewWriter(&gz)
-	_, _ = zw.Write(make([]byte, 10<<20)) // 10 MiB of zeros, ~10 KiB compressed
+	_, _ = zw.Write(make([]byte, 10<<20))
 	_ = zw.Close()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -246,8 +243,6 @@ func TestDefaults(t *testing.T) {
 	if !ok {
 		t.Fatalf("base transport is %T, want *http.Transport", ct.base)
 	}
-	// Proxy env vars must be ignored: a proxy would be dialed instead of the
-	// target, bypassing the dial-time SSRF guard.
 	if tr.Proxy != nil {
 		t.Error("Transport.Proxy is set; proxy env vars must be ignored")
 	}

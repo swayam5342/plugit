@@ -16,20 +16,17 @@ import (
 	"github.com/swayam5342/plugit/internal/store"
 )
 
-// maxInspectorCalls caps how many calls the inspector keeps in memory.
 const maxInspectorCalls = 2000
 
 const maxDetailLines = 6
 
-// InspectorInput configures the call inspector (SPEC §2.3).
 type InspectorInput struct {
-	Title    string // the API name, or "all APIs"
-	AllAPIs  bool   // show the API column
+	Title    string
+	AllAPIs  bool
 	Source   func(ctx context.Context, afterID int64) ([]store.Call, error)
-	Interval time.Duration // how often to poll Source
+	Interval time.Duration
 }
 
-// CallsMsg delivers calls newer than the last ones seen (or a read error).
 type CallsMsg struct {
 	Calls []store.Call
 	Err   error
@@ -37,13 +34,12 @@ type CallsMsg struct {
 
 type pollMsg struct{}
 
-// Inspector is a live tail of the call log: a Bubble Tea model.
 type Inspector struct {
 	in       InspectorInput
 	calls    []store.Call
 	lastID   int64
 	cursor   int
-	follow   bool // cursor stays on the newest call
+	follow   bool
 	expanded bool
 	err      error
 	offset   int
@@ -140,7 +136,6 @@ func (m *Inspector) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// Layout: header box (3) + blank, list, detail panel, status bar.
 const inspectorChrome = 6
 
 func (m *Inspector) detailLines() []string {

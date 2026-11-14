@@ -67,15 +67,12 @@ func TestTryPrintsRequestAndResponse(t *testing.T) {
 func TestTryArgumentTypes(t *testing.T) {
 	up := newUpstream(t)
 	p := setupTryAPI(t, up.URL, "")
-	// limit is an integer in the spec, so "2" is sent as a number.
 	if _, err := runTry(t, p, "", "pp_list_pets", tryFlags{args: []string{"limit=2"}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if up.lastURL.Load() != "/pets?limit=2" {
 		t.Errorf("url = %v", up.lastURL.Load())
 	}
-	// The operation key works as well as the tool name. id is a string, so
-	// "007" stays "007".
 	if _, err := runTry(t, p, "", "GET /pets/{id}", tryFlags{args: []string{"id=007"}}, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -163,8 +160,6 @@ func TestTryUnknownTool(t *testing.T) {
 func TestTryUpstreamError(t *testing.T) {
 	up := newUpstream(t)
 	p := setupTryAPI(t, up.URL, "")
-	// The fake upstream answers 200 for everything; a traversal attempt is
-	// refused before any request is made.
 	out, err := runTry(t, p, "", "pp_getPet", tryFlags{args: []string{"id=.."}}, nil)
 	if err == nil || !strings.Contains(out, "pp_getPet") {
 		t.Errorf("out = %q err = %v", out, err)

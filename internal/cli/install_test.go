@@ -70,7 +70,6 @@ func TestInstallClaudeDesktop(t *testing.T) {
 			t.Errorf("config missing %s:\n%s", want, s)
 		}
 	}
-	// No secrets or secret references ever go into client configs.
 	if strings.Contains(s, "PETS_KEY") || strings.Contains(s, "env") {
 		t.Errorf("client config mentions credentials:\n%s", s)
 	}
@@ -78,7 +77,6 @@ func TestInstallClaudeDesktop(t *testing.T) {
 		t.Errorf("output should show the diff, the backup and a restart hint:\n%s", out)
 	}
 
-	// Installing again changes nothing and says so.
 	out.Reset()
 	if err := installAPI(t.Context(), installSettings{name: "pets", client: "claude-desktop"}, d); err != nil {
 		t.Fatal(err)
@@ -87,7 +85,6 @@ func TestInstallClaudeDesktop(t *testing.T) {
 		t.Errorf("second install output: %s", out)
 	}
 
-	// Uninstall removes only our entry.
 	if err := uninstallAPI(t.Context(), installSettings{name: "pets", client: "claude-desktop"}, d); err != nil {
 		t.Fatal(err)
 	}

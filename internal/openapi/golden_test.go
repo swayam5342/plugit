@@ -51,7 +51,6 @@ func loadSpec(t *testing.T, file string) []byte {
 	return raw
 }
 
-// prepared is a manifest after schema.Prepare, as the server would see it.
 type prepared struct {
 	model.Manifest
 	InputSchemas map[string]json.RawMessage `json:"inputSchemas"`
@@ -155,9 +154,6 @@ func TestGoldenLargeSpecs(t *testing.T) {
 			if len(m.Tools) < tc.minTools {
 				t.Errorf("only %d tools, want at least %d", len(m.Tools), tc.minTools)
 			}
-			// SPEC §7 M1 exit: the GitHub spec parses in under 2 s. The race
-			// detector slows everything down several times, so only assert
-			// without it.
 			if !raceEnabled && tc.file == "github.json.gz" && elapsed > 2*time.Second {
 				t.Errorf("parse took %v, want < 2s", elapsed)
 			}
@@ -165,7 +161,6 @@ func TestGoldenLargeSpecs(t *testing.T) {
 			p := prepare(m)
 			checkGolden(t, tc.golden, compact(p))
 
-			// Determinism: a second parse gives byte-identical output.
 			full1, _ := json.Marshal(p)
 			m2, err := Parse(data, Options{})
 			if err != nil {

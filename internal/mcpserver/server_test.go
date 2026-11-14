@@ -237,7 +237,6 @@ func TestToolMetadataAndAnnotations(t *testing.T) {
 			t.Errorf("%s hints = %+v, want %+v", name, got, want)
 		}
 	}
-	// Non-destructive tools must say so explicitly: MCP defaults destructiveHint to true.
 	if a := l["createPet"].Annotations; a.DestructiveHint == nil {
 		t.Error("createPet must set destructiveHint explicitly to false")
 	}
@@ -323,7 +322,6 @@ func TestPanicIsRecoveredAsToolError(t *testing.T) {
 	if strings.Contains(text(res), secret) || strings.Contains(r.logs.String(), secret) {
 		t.Error("panic value leaked the secret")
 	}
-	// The server keeps working.
 	res, err = r.call(t, "listPets", map[string]any{})
 	if err != nil || res.IsError {
 		t.Errorf("second call: err=%v isError=%v text=%s", err, res != nil && res.IsError, text(res))

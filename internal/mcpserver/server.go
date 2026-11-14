@@ -37,37 +37,32 @@ import (
 	"github.com/swayam5342/plugit/internal/store"
 )
 
-// Tool is one tool to serve: a prepared model.Tool (see schema.Prepare) and
-// its per-tool policy.
 type Tool struct {
 	Tool     model.Tool
 	Override policy.Override
-	Limit    *policy.Limiter  // per-tool rate limit; nil for none
-	Fields   *jsonpick.Picker // response_fields; nil keeps the whole response
+	Limit    *policy.Limiter
+	Fields   *jsonpick.Picker
 }
 
-// Config configures a server.
 type Config struct {
-	Name     string // implementation name reported to clients
+	Name     string
 	Version  string
 	Tools    []Tool
 	Mode     policy.Mode
 	Target   proxy.Target
 	Doer     httpx.Doer
 	Redactor *redact.Redactor
-	Logger   *slog.Logger    // must not write to stdout
-	Log      *CallLog        // nil: calls aren't recorded
-	Limit    *policy.Limiter // policy.rate_limit, shared by every tool; nil for none
+	Logger   *slog.Logger
+	Log      *CallLog
+	Limit    *policy.Limiter
 }
 
-// CallLog sends one redacted record per call to the call log (SPEC §3.7
-// step 9).
 type CallLog struct {
-	Record  func(store.Call) // must not block (see store.Recorder)
+	Record  func(store.Call)
 	API     string
 	Toolset string
-	Args    config.LogArgs // none, redacted or full (secrets are masked either way)
-	Preview bool           // keep a redacted response preview
+	Args    config.LogArgs
+	Preview bool
 }
 
 // New builds the MCP server. Tools the mode can never run, and tools set to
@@ -84,7 +79,7 @@ func New(cfg Config) *mcp.Server {
 		&mcp.ServerOptions{Logger: cfg.Logger},
 	)
 	key := make([]byte, 32)
-	_, _ = rand.Read(key) // crypto/rand.Read never fails (Go 1.24+)
+	_, _ = rand.Read(key)
 	for _, st := range cfg.Tools {
 		if !policy.Lists(st.Tool.Safety, cfg.Mode) || st.Override == policy.OverrideDeny {
 			continue
@@ -109,7 +104,7 @@ func annotations(t model.Tool) *mcp.ToolAnnotations {
 	f, tr := false, true
 	a := &mcp.ToolAnnotations{
 		ReadOnlyHint:    t.Safety == model.ReadOnly,
-		DestructiveHint: &f, // MCP defaults this to true, so always set it
+		DestructiveHint: &f,
 		OpenWorldHint:   &tr,
 	}
 	if t.Safety == model.Destructive {
@@ -125,13 +120,13 @@ func annotations(t model.Tool) *mcp.ToolAnnotations {
 type handler struct {
 	cfg  *Config
 	tool Tool
-	key  []byte // signs confirmation state (see confirmState)
+	key  []byte
 
 	once      sync.Once
 	validator *schema.Validator
 
 	mu   sync.Mutex
-	used map[string]time.Time // accepted confirmation states and their issue time
+	used map[string]time.Time
 }
 
 func (h *handler) handle(ctx context.Context, req *mcp.CallToolRequest) (res *mcp.CallToolResult, _ error) {
@@ -141,7 +136,6 @@ func (h *handler) handle(ctx context.Context, req *mcp.CallToolRequest) (res *mc
 	if req != nil && req.Params != nil {
 		raw = req.Params.Arguments
 	}
-	// Recorded last, after the panic recovery below has set res.
 	rec := store.Call{Outcome: store.OK}
 	defer func() { h.record(start, raw, &rec, res) }()
 	defer func() {
@@ -160,9 +154,6 @@ func (h *handler) handle(ctx context.Context, req *mcp.CallToolRequest) (res *mc
 		rec.Outcome = store.Denied
 		return errorResult(name + ": denied by policy: " + decision.Reason), nil
 	}
-	// The retry that carries a confirmation answer is the same call: it
-	// doesn't spend the budget again (and only a call that passed here got
-	// a signed state to retry with).
 	if retry := decision.Decision == policy.Confirm && req != nil && req.Params != nil && req.Params.InputResponses != nil; !retry {
 		if why := h.limited(); why != "" {
 			h.log(name, start, 0, true, "rate limited")
@@ -189,12 +180,10 @@ func (h *handler) handle(ctx context.Context, req *mcp.CallToolRequest) (res *mc
 		return errorResult(name + ": " + err.Error()), nil
 	}
 
-	// Confirmation comes after validation, so the user is only asked about
-	// calls that would really be made.
 	if decision.Decision == policy.Confirm {
 		ask, ok, why := h.confirm(req, args, decision.Reason)
 		if ask != nil {
-			rec.Outcome = "" // not a call yet: the retry with the answer is recorded
+			rec.Outcome = ""
 			return ask, nil
 		}
 		if !ok {
@@ -231,20 +220,14 @@ func (h *handler) limited() string {
 	return ""
 }
 
-// confirmSchema is the elicitation form: one pre-ticked checkbox. It isn't
-// required, so a client that only offers accept/decline still works.
 var confirmSchema = json.RawMessage(`{"type":"object","properties":{"confirm":{"type":"boolean","title":"Make this call","default":true}}}`)
 
-// ConfirmTimeout is how long an answer to a confirmation stays valid.
 const ConfirmTimeout = 5 * time.Minute
 
-// maxShownArgs caps the arguments shown in a confirmation.
 const maxShownArgs = 2000
 
-// confirmID names plugit's input request.
 const confirmID = "plugit_confirm"
 
-// now is the clock for confirmation state (tests replace it).
 var now = time.Now
 
 // confirm asks the user, through the MCP client, whether to make this call
@@ -310,13 +293,13 @@ func (h *handler) confirm(req *mcp.CallToolRequest, args map[string]any, reason 
 // "<unix time>.<nonce>.<mac>".
 func (h *handler) state(at time.Time, args map[string]any) string {
 	nonce := make([]byte, 12)
-	_, _ = rand.Read(nonce) // crypto/rand.Read never fails (Go 1.24+)
+	_, _ = rand.Read(nonce)
 	stamp := strconv.FormatInt(at.Unix(), 10) + "." + base64.RawURLEncoding.EncodeToString(nonce)
 	return stamp + "." + base64.RawURLEncoding.EncodeToString(h.mac(stamp, args))
 }
 
 func (h *handler) mac(stamp string, args map[string]any) []byte {
-	canon, _ := json.Marshal(args) // maps encode with sorted keys
+	canon, _ := json.Marshal(args)
 	m := hmac.New(sha256.New, h.key)
 	m.Write([]byte(h.tool.Tool.Name + "\x00" + stamp + "\x00"))
 	m.Write(canon)

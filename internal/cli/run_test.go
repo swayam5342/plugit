@@ -41,7 +41,6 @@ func TestRunSettingsPrecedence(t *testing.T) {
 		t.Errorf("env settings = %+v", s)
 	}
 
-	// Explicitly set flags beat env vars.
 	f := runFlags{spec: "flag.json", baseURL: "https://flag.example.test", mode: "read-only", maxTools: 3, tags: []string{"c"}}
 	s, err = resolveRunSettings(f, map[string]bool{"base-url": true, "mode": true, "max-tools": true, "tags": true}, e)
 	if err != nil {
@@ -127,8 +126,6 @@ func TestChooseBaseURL(t *testing.T) {
 		{"", []string{"https://api.example.test/v1"}, false, "https://api.example.test/v1"},
 		{"https://pinned.example.test", []string{"https://api.example.test"}, true, "https://pinned.example.test"},
 		{"https://pinned.example.test/", nil, false, "https://pinned.example.test/"},
-		// Same origin apart from the scheme (Swagger 2.0 schemes: [https, http]):
-		// https is adopted, whatever the order.
 		{"", []string{"http://petstore.example.test/v2", "https://petstore.example.test/v2"}, false, "https://petstore.example.test/v2"},
 		{"", []string{"https://petstore.example.test/v2", "http://petstore.example.test/v2"}, false, "https://petstore.example.test/v2"},
 		{"", []string{"https://a.example.test", "https://a.example.test"}, false, "https://a.example.test"},
@@ -144,15 +141,15 @@ func TestChooseBaseURL(t *testing.T) {
 		servers     []string
 		credentials bool
 	}{
-		{"", nil, false},                                                    // no server
-		{"", []string{"/api/v3"}, false},                                    // relative
-		{"", []string{"https://a.test", "https://b.test"}, false},           // several: never guess
-		{"", []string{"http://a.test/v1", "https://a.test/v2"}, false},      // scheme and path differ
-		{"", []string{"http://a.test:8080/v1", "https://a.test/v1"}, false}, // port differs
-		{"", []string{"http://a.test/v1", "http://a.test/v1/"}, false},      // no https among them
-		{"", []string{"http://a.test", "https://a.test"}, true},             // credentials still need --base-url
+		{"", nil, false},
+		{"", []string{"/api/v3"}, false},
+		{"", []string{"https://a.test", "https://b.test"}, false},
+		{"", []string{"http://a.test/v1", "https://a.test/v2"}, false},
+		{"", []string{"http://a.test:8080/v1", "https://a.test/v1"}, false},
+		{"", []string{"http://a.test/v1", "http://a.test/v1/"}, false},
+		{"", []string{"http://a.test", "https://a.test"}, true},
 		{"", []string{"https://a.test/v1", "https://a.test/v1", "https://b.test"}, false},
-		{"", []string{"https://api.example.test"}, true}, // credentials need an explicit --base-url (T3)
+		{"", []string{"https://api.example.test"}, true},
 		{"ftp://x.test", nil, false},
 		{"https://user:pw@x.test", nil, false},
 		{"https://x.test/?a=1", nil, false},

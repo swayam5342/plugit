@@ -32,7 +32,7 @@ func checkRefs(root *yaml.Node) (external int, err error) {
 	rc := &refChecker{root: root, ok: map[string]bool{}, index: map[*yaml.Node]map[string]*yaml.Node{}}
 	type item struct {
 		n     *yaml.Node
-		names bool // keys are user-chosen names, not keywords
+		names bool
 	}
 	stack := []item{{n: root}}
 	for len(stack) > 0 {
@@ -75,15 +75,11 @@ func checkRefs(root *yaml.Node) (external int, err error) {
 				stack = append(stack, item{n: v, names: namesKeys[k.Value] && v.Kind == yaml.MappingNode})
 			}
 		case yaml.AliasNode:
-			// Not followed: libopenapi bounds alias expansion, and walking
-			// aliases here would re-create the expansion it guards against.
 		}
 	}
 	return external, nil
 }
 
-// namesKeys are keywords whose mapping value is keyed by user-chosen names
-// (paths, status codes, media types, component and property names).
 var namesKeys = map[string]bool{
 	"paths": true, "webhooks": true, "properties": true, "patternProperties": true,
 	"$defs": true, "definitions": true, "dependentSchemas": true, "schemas": true,
@@ -93,8 +89,6 @@ var namesKeys = map[string]bool{
 	"securityDefinitions": true, "mapping": true,
 }
 
-// objectMapKeys are names maps whose entries are reference-able objects other
-// than schemas and media types (responses, headers, links, examples, ...).
 var objectMapKeys = map[string]bool{
 	"responses": true, "parameters": true, "requestBodies": true, "headers": true,
 	"examples": true, "links": true, "callbacks": true, "securitySchemes": true,
@@ -133,8 +127,6 @@ func checkMediaTypes(content *yaml.Node) error {
 		if v.Kind != yaml.MappingNode && v.Kind != yaml.AliasNode {
 			return fmt.Errorf("%w: media type %q (line %d) must be an object", ErrInvalidSpec, truncateRef(k.Value), k.Line)
 		}
-		// Media Type Objects are not referenceable in OpenAPI 3.0/3.1, and
-		// libopenapi v0.42.5 panics on them (pb33f/libopenapi#705).
 		if _, isRef := pureRef(v); isRef {
 			return fmt.Errorf("%w: media type %q (line %d) cannot be a $ref", ErrInvalidSpec, truncateRef(k.Value), k.Line)
 		}
@@ -144,7 +136,7 @@ func checkMediaTypes(content *yaml.Node) error {
 
 type refChecker struct {
 	root  *yaml.Node
-	ok    map[string]bool // refs already proven within limits
+	ok    map[string]bool
 	index map[*yaml.Node]map[string]*yaml.Node
 }
 

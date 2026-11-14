@@ -18,9 +18,6 @@ import (
 	"github.com/swayam5342/plugit/internal/tui"
 )
 
-// petSpecV2 is petSpec after an upstream change: POST /pets is gone,
-// GET /pets/{id} has a new description and parameter, GET /owners is new,
-// and the declared server moved.
 const petSpecV2 = `openapi: 3.0.3
 info: {title: Pets, version: '2'}
 servers:
@@ -48,8 +45,6 @@ paths:
       responses: {'200': {description: ok}}
 `
 
-// richYAML has every kind of override, in two toolsets, including one for
-// an operation the new spec drops.
 const richYAML = `version: 2
 name: pets
 source: {url: https://example.test/openapi.yaml}
@@ -109,8 +104,6 @@ func TestSyncKeepsEveryOverride(t *testing.T) {
 		t.Errorf("toolsets changed:\nbefore %+v\nafter  %+v", before, after)
 	}
 
-	// The new spec is adopted: source, snapshot and a fresh manifest cache
-	// (serve won't re-parse), but never the spec's new server (T3).
 	cfg, _ := config.LoadAPI(p, "pets")
 	if cfg.BaseURL != up.URL || !strings.HasSuffix(cfg.Source.URL, "spec.yaml") || cfg.Source.SHA256 == "" {
 		t.Errorf("config after sync: base=%s source=%s sha=%s", cfg.BaseURL, cfg.Source.URL, cfg.Source.SHA256)

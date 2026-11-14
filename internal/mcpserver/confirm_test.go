@@ -17,14 +17,11 @@ import (
 	"github.com/swayam5342/plugit/internal/store"
 )
 
-// createPetBody takes a name and a secret-looking field, to check what the
-// confirmation shows.
 var createPetBody = tool("POST /pets", "createPet",
 	model.Param{Name: "name", UpstreamName: "name", In: model.InBody, Schema: json.RawMessage(`{"type":"string"}`)},
 	model.Param{Name: "api_token", UpstreamName: "api_token", In: model.InBody, Schema: json.RawMessage(`{"type":"string"}`)},
 )
 
-// elicitor answers elicitation requests like a user would.
 type elicitor struct {
 	asked   atomic.Int32
 	message atomic.Value
@@ -82,7 +79,7 @@ func TestConfirmViaElicitation(t *testing.T) {
 	}
 }
 
-// A clients that drops the field (accept, no content) counts as yes.
+// A client that drops the field (accept, no content) counts as yes.
 func TestConfirmAcceptWithoutContent(t *testing.T) {
 	e := &elicitor{answer: accept(nil)}
 	r := confirmRig(t, e, nil)
@@ -110,7 +107,7 @@ func TestConfirmRefusals(t *testing.T) {
 			if r.hits.Load() != 0 {
 				t.Fatalf("the API was called (hits=%d)", r.hits.Load())
 			}
-			if tc.want == "" { // the client failed to answer: a protocol error
+			if tc.want == "" {
 				if err == nil && !res.IsError {
 					t.Errorf("call succeeded: %s", text(res))
 				}

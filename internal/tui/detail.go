@@ -16,9 +16,8 @@ import (
 	"github.com/swayam5342/plugit/internal/tokens"
 )
 
-// detailState is the open Tool detail screen (SPEC §2.3).
 type detailState struct {
-	tool     int // index into Picker.tools
+	tool     int
 	offset   int
 	findings []lint.Finding
 }
@@ -59,7 +58,7 @@ func (p *Picker) updateDetail(msg tea.KeyPressMsg) tea.Cmd {
 	case "home", "g":
 		d.offset = 0
 	case "end", "G":
-		d.offset = 1 << 30 // clamped when drawn
+		d.offset = 1 << 30
 	}
 	return nil
 }

@@ -90,7 +90,6 @@ func newUpstream(t *testing.T) *upstream {
 		u.lastURL.Store(r.URL.String())
 		u.lastKey.Store(r.Header.Get("X-Api-Key"))
 		w.Header().Set("Content-Type", "application/json")
-		// Echo the credential back, as a misbehaving API might.
 		_, _ = fmt.Fprintf(w, `{"path":%q,"echo":%q}`, r.URL.Path, r.Header.Get("X-Api-Key"))
 	}))
 	t.Cleanup(u.Close)
@@ -190,11 +189,9 @@ func TestRunEndToEnd(t *testing.T) {
 		s.headers = []string{"X-Api-Key=env:PETS_KEY"}
 	}), map[string]string{"PETS_KEY": runSecret})
 
-	// Read-only mode: write tools aren't offered.
 	if got := toolNames(t, cs); !slices.Equal(got, []string{"getPet", "listPets"}) {
 		t.Fatalf("tools = %v, want [getPet listPets]", got)
 	}
-	// The credential header is hidden from the model's schema.
 	res, _ := cs.ListTools(t.Context(), nil)
 	for _, tl := range res.Tools {
 		if s := fmt.Sprint(tl.InputSchema); strings.Contains(s, "X-Api-Key") {
@@ -219,7 +216,6 @@ func TestRunEndToEnd(t *testing.T) {
 		t.Errorf("echoed credential not redacted: %s", resultText(r))
 	}
 
-	// The model can't supply the credential header itself.
 	r, err = cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "listPets", Arguments: map[string]any{"X-Api-Key": "attacker"}})
 	if err != nil || !r.IsError {
 		t.Errorf("model-supplied credential header accepted: err=%v", err)

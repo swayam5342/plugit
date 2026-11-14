@@ -16,10 +16,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// HTTPPath is where the Streamable HTTP endpoint lives.
 const HTTPPath = "/mcp"
 
-// Limits for the HTTP transport.
 const (
 	maxHTTPBody       = 4 << 20
 	httpSessionIdle   = 30 * time.Minute
@@ -27,7 +25,6 @@ const (
 	httpIdleTimeout   = 2 * time.Minute
 )
 
-// ErrNotLoopback means an HTTP listen address isn't on this machine only.
 var ErrNotLoopback = errors.New("the HTTP transport only listens on loopback (127.0.0.1 or ::1)")
 
 // ListenAddr normalizes an HTTP listen address and refuses anything but
@@ -141,7 +138,6 @@ func ServeHTTP(ctx context.Context, cfg Config, addr, token string, ready func(e
 	}
 	go func() {
 		<-ctx.Done()
-		// ctx is done by now: shut down gracefully on a fresh deadline.
 		shutdown, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		_ = server.Shutdown(shutdown)

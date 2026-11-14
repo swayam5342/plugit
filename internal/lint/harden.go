@@ -9,12 +9,7 @@ import (
 	"unicode/utf8"
 )
 
-// ---- L007: more phrasings ----
-
 var (
-	// Instructions to the model that the base injection pattern doesn't
-	// cover: other verbs, role changes, prompt extraction, tool shadowing,
-	// secrecy, skipping confirmation, and a few other languages.
 	injectionMore = regexp.MustCompile(`(?i)\b(` + strings.Join([]string{
 		`(ignore|disregard|forget|override|bypass|skip|discard|drop|neglect|overlook)\s+(all|any|every|your|these|those|previous|prior|earlier|above|system|safety)\s+(\w+\s+){0,2}(instructions?|rules|prompts?|guidelines|guardrails|constraints|restrictions|polic(y|ies))`,
 		`from\s+now\s+on,?\s+you\b`,
@@ -34,19 +29,13 @@ var (
 		`ignorier(e|en)\s+(sie\s+)?(alle\s+)?(vorherigen|bisherigen|obigen)\s+anweisungen`,
 	}, "|") + `)`)
 
-	// Chat-template control tokens have no place in API documentation.
 	chatTokens = regexp.MustCompile(`(?i)<\|(im_start|im_end|system|user|assistant|endoftext)\|>|\[/?INST\]|<<SYS>>|###\s*(system|assistant)\b`)
 
-	// The patterns tried on de-obfuscated text. Role prefixes ("system:")
-	// are left out: folding separators would invent them ("file-system:").
 	foldedInjection = regexp.MustCompile(`\b((ignore|disregard|forget|override)\s+(all\s+|any\s+|the\s+|your\s+)*(previous|prior|above|earlier|preceding|system)\b|exfiltrat\w*|new\s+instructions?\b)`)
 
-	// Text spelled out one letter at a time, with the spaces removed.
 	spelledOut      = regexp.MustCompile(`(?:\b[a-z0-9] ){5,}[a-z0-9]\b`)
 	spelledInjecton = regexp.MustCompile(`(ignore|disregard|forget|override)(all|any|the|your)*(previous|prior|above|earlier|preceding|system|instructions)`)
 
-	// Reading local secrets: worth a look, but real docs mention these
-	// files too (an SSH public key), so it is a warning.
 	localSecrets = regexp.MustCompile(`(?i)\b(read|cat|open|include|send|upload|attach|print|copy)\b[^.]{0,40}?(~/\.ssh|\bid_(rsa|ed25519|ecdsa)\b|\.env\b|/etc/(passwd|shadow)|\.aws/credentials|\.git-credentials|\.netrc)`)
 
 	base64Run = regexp.MustCompile(`[A-Za-z0-9+/_-]{24,}={0,2}`)
@@ -75,7 +64,6 @@ func instruction(s string) (match, how string) {
 	return "", ""
 }
 
-// Letters of other alphabets that look like Latin ones.
 var lookalikes = map[rune]rune{
 	0x0430: 'a', 0x0435: 'e', 0x043e: 'o', 0x0440: 'p', 0x0441: 'c', 0x0445: 'x', 0x0443: 'y',
 	0x0456: 'i', 0x0455: 's', 0x0458: 'j', 0x04bb: 'h', 0x0501: 'd', 0x043a: 'k', 0x043c: 'm',
@@ -84,7 +72,6 @@ var lookalikes = map[rune]rune{
 	0x03c4: 't', 0x03c5: 'u', 0x03c7: 'x',
 }
 
-// Digits and symbols that stand in for letters.
 var leet = map[rune]rune{'0': 'o', '1': 'i', '3': 'e', '4': 'a', '5': 's', '7': 't', '@': 'a', '$': 's'}
 
 // fold undoes common ways of disguising words: it lowercases, maps
@@ -95,7 +82,7 @@ func fold(s string) string {
 	rs := []rune(strings.ToLower(s))
 	for i, r := range rs {
 		switch {
-		case r >= 0xff01 && r <= 0xff5e: // full-width forms
+		case r >= 0xff01 && r <= 0xff5e:
 			rs[i] = unicode.ToLower(r - 0xfee0)
 		case lookalikes[r] != 0:
 			rs[i] = lookalikes[r]
@@ -174,8 +161,6 @@ func readable(b []byte) bool {
 	return spaces >= 2
 }
 
-// ---- names (L015-L017, L019) ----
-
 // words splits an identifier into lowercase words: camelCase, snake_case,
 // kebab-case and dotted names all work.
 func words(name string) []string {
@@ -217,7 +202,6 @@ var (
 	commandWords = wordSet(`command cmd exec shell script sql eval`)
 	urlWords     = wordSet(`url uri webhook callback redirect endpoint host hostname`)
 
-	// The credential word must end the name: "secret_name" names a secret.
 	credentialName = regexp.MustCompile(`(^|_)(api_?key|access_?token|auth_?token|id_?token|refresh_?token|bearer(_token)?|` +
 		`password|passwd|pwd|secret|client_?secret|private_?key|authorization|session_?(id|token)|credentials?)$`)
 )

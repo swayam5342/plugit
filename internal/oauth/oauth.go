@@ -25,16 +25,13 @@ import (
 	"github.com/swayam5342/plugit/internal/naming"
 )
 
-// Flow is an OAuth grant plugit supports.
 type Flow string
 
-// Flows.
 const (
 	ClientCredentials Flow = "client_credentials"
 	DeviceCode        Flow = "device_code"
 )
 
-// Limits and timing.
 const (
 	maxResponse   = 1 << 20
 	refreshEarly  = 60 * time.Second
@@ -42,14 +39,12 @@ const (
 	grantDevice   = "urn:ietf:params:oauth:grant-type:device_code"
 )
 
-// ErrNoRefreshToken means the device flow hasn't been run for this API.
 var ErrNoRefreshToken = errors.New("no OAuth refresh token stored: run `plugit auth` for this API to sign in")
 
-// Error is an error response from the authorization server.
 type Error struct {
 	Status      int
-	Code        string // the OAuth "error" field
-	Description string // cleaned and capped
+	Code        string
+	Description string
 }
 
 func (e *Error) Error() string {
@@ -65,31 +60,26 @@ func (e *Error) Error() string {
 	return msg
 }
 
-// Config is an API's OAuth settings, with the client secret resolved.
 type Config struct {
 	Flow         Flow
 	TokenURL     string
-	DeviceURL    string // device flow only
+	DeviceURL    string
 	ClientID     string
-	ClientSecret string // may be empty for a public device-flow client
+	ClientSecret string
 	Scopes       []string
 }
 
-// Store keeps the device flow's refresh token.
 type Store interface {
-	Load() (string, error) // ErrNoRefreshToken when there is none
+	Load() (string, error)
 	Save(token string) error
 }
 
-// Token is an authorization server's answer.
 type Token struct {
 	Access  string
 	Refresh string
-	Expiry  time.Time // zero when the server gave no expires_in
+	Expiry  time.Time
 }
 
-// Source hands out a valid access token, fetching a new one when the
-// cached one is about to expire. It is safe for concurrent use.
 type Source struct {
 	cfg   Config
 	doer  httpx.Doer
@@ -99,7 +89,7 @@ type Source struct {
 	mu      sync.Mutex
 	access  string
 	expiry  time.Time
-	refresh string // last refresh token seen, for redaction
+	refresh string
 }
 
 // NewSource builds a Source. store is used by the device flow; now is the
@@ -176,7 +166,6 @@ func (s *Source) secrets() []string {
 	return []string{s.cfg.ClientSecret, s.refresh}
 }
 
-// Device is a started device authorization (RFC 8628 §3.2).
 type Device struct {
 	UserCode                string
 	VerificationURI         string
@@ -196,7 +185,7 @@ func StartDevice(ctx context.Context, cfg Config, doer httpx.Doer) (*Device, err
 		DeviceCode              string `json:"device_code"`
 		UserCode                string `json:"user_code"`
 		VerificationURI         string `json:"verification_uri"`
-		VerificationURL         string `json:"verification_url"` // used by some servers
+		VerificationURL         string `json:"verification_url"`
 		VerificationURIComplete string `json:"verification_uri_complete"`
 		ExpiresIn               int    `json:"expires_in"`
 		Interval                int    `json:"interval"`
@@ -289,7 +278,7 @@ func request(ctx context.Context, cfg Config, doer httpx.Doer, endpoint string, 
 	}
 	tok := &Token{Access: out.AccessToken, Refresh: out.RefreshToken}
 	if out.ExpiresIn > 0 {
-		tok.Expiry = time.Time{}.Add(time.Duration(out.ExpiresIn) * time.Second) // a duration from now
+		tok.Expiry = time.Time{}.Add(time.Duration(out.ExpiresIn) * time.Second)
 	}
 	return tok, nil
 }

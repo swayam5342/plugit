@@ -20,13 +20,11 @@ import (
 	"github.com/swayam5342/plugit/internal/httpx"
 )
 
-// Limits applied when the corresponding Options field is zero.
 const (
-	DefaultMaxBytes = 20 << 20 // 20 MiB
+	DefaultMaxBytes = 20 << 20
 	DefaultTimeout  = 15 * time.Second
 )
 
-// Sentinel errors callers can match with errors.Is.
 var (
 	ErrTooLarge          = errors.New("spec exceeds size limit")
 	ErrEmpty             = errors.New("spec is empty")
@@ -35,10 +33,8 @@ var (
 	ErrHTTPStatus        = errors.New("unexpected HTTP status fetching spec")
 )
 
-// Format is the serialization of a spec document.
 type Format int
 
-// Spec formats.
 const (
 	JSON Format = iota + 1
 	YAML
@@ -54,23 +50,19 @@ func (f Format) String() string {
 	return "unknown"
 }
 
-// Spec is a loaded spec document.
 type Spec struct {
-	Bytes  []byte // document bytes, UTF-8 BOM removed
-	SHA256 string // hex sha256 of the raw bytes as loaded
+	Bytes  []byte
+	SHA256 string
 	Format Format
-	Source string // the location it was loaded from
+	Source string
 }
 
-// Options configures a Loader. The zero value is the secure default.
 type Options struct {
-	// AllowPrivate lets URL fetches reach loopback and private networks.
 	AllowPrivate bool
 	MaxBytes     int64
 	Timeout      time.Duration
 }
 
-// Loader loads specs. Create it with New.
 type Loader struct {
 	client   httpx.Doer
 	maxBytes int64
@@ -87,9 +79,8 @@ func New(opts Options) *Loader {
 	}
 	return &Loader{
 		client: httpx.NewClient(httpx.Options{
-			AllowPrivate: opts.AllowPrivate,
-			Timeout:      opts.Timeout,
-			// One extra byte so "too large" is distinguishable from "exactly at the limit".
+			AllowPrivate:     opts.AllowPrivate,
+			Timeout:          opts.Timeout,
 			MaxResponseBytes: opts.MaxBytes + 1,
 		}),
 		maxBytes: opts.MaxBytes,
@@ -142,8 +133,6 @@ func (l *Loader) readFile(path string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("loading spec %s: %w", path, err)
 	}
-	// Refuse directories, FIFOs and devices: a FIFO can block forever and a
-	// device such as /dev/zero never ends.
 	if !fi.Mode().IsRegular() {
 		return nil, fmt.Errorf("loading spec %s: %w", path, ErrNotRegular)
 	}

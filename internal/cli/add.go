@@ -27,37 +27,32 @@ import (
 )
 
 type addSettings struct {
-	name, spec    string
-	baseURL       string
-	prefix        string
-	mode          policy.Mode
-	allowPrivate  bool
-	allowInsecure bool
-	timeout       time.Duration
-	headers       []string // Name=env:VAR|keyring:svc/key
-	fixed         []string // name=literal:V|env:VAR|keyring:svc/key
-	// fromRun selects tools the way `plugit run` does (mode + filters),
-	// without the picker.
+	name, spec           string
+	baseURL              string
+	prefix               string
+	mode                 policy.Mode
+	allowPrivate         bool
+	allowInsecure        bool
+	timeout              time.Duration
+	headers              []string
+	fixed                []string
 	fromRun              bool
 	tags, methods, paths []string
 	maxTools             int
-	yes                  bool // accept the spec's server as the base URL
+	yes                  bool
 }
 
-// pickResult is what the picker hands back: the toolset, and the API's
-// policy mode as set there with m (empty keeps the mode it started with).
 type pickResult struct {
 	toolset config.Toolset
 	mode    policy.Mode
 }
 
-// pickInput is what the picker works on.
 type pickInput struct {
 	api      string
-	tools    []model.Tool // named with the prefix, fixed params hidden
+	tools    []model.Tool
 	prefix   string
 	mode     policy.Mode
-	selected config.Toolset // initial selection
+	selected config.Toolset
 	lint     func(config.Toolset) []lint.Finding
 }
 
@@ -65,11 +60,10 @@ type addDeps struct {
 	paths   config.Paths
 	out     io.Writer
 	stderr  io.Writer
-	confirm func(string) (bool, error) // nil: no terminal
+	confirm func(string) (bool, error)
 	parse   func(context.Context, []byte, openapi.Options) (*model.Manifest, error)
-	// pick runs the interactive picker; nil means there's no terminal.
-	pick func(context.Context, pickInput) (pickResult, error)
-	info BuildInfo
+	pick    func(context.Context, pickInput) (pickResult, error)
+	info    BuildInfo
 }
 
 func newAddCmd(g *globalFlags, info BuildInfo) *cobra.Command {
@@ -200,7 +194,7 @@ func addAPI(ctx context.Context, s addSettings, d addDeps) error {
 			source = abs
 		}
 	} else {
-		source = safeLocation(source) // never store a query (it may hold a key)
+		source = safeLocation(source)
 	}
 	cfg := &config.API{
 		Version:  config.CurrentVersion,

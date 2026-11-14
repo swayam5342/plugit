@@ -29,22 +29,18 @@ import (
 	"github.com/swayam5342/plugit/internal/tui"
 )
 
-// maxShownBody caps how much of a request body try prints.
 const maxShownBody = 4 << 10
 
 type tryFlags struct {
-	args []string // k=v
-	yes  bool     // confirm tools whose policy is confirm
+	args []string
+	yes  bool
 }
 
 type tryDeps struct {
 	runDeps
-	out io.Writer
-	// confirm asks the user a yes/no question. nil means no terminal.
+	out     io.Writer
 	confirm func(question string) (bool, error)
-	// form opens the Try it screen when no --arg is given; nil means no
-	// terminal (the call is made straight away).
-	form func(ctx context.Context, in tui.TryInput) error
+	form    func(ctx context.Context, in tui.TryInput) error
 }
 
 func newTryCmd(g *globalFlags, info BuildInfo) *cobra.Command {
@@ -262,7 +258,6 @@ func isStringParam(t model.Tool, name string) bool {
 	return false
 }
 
-// printingDoer prints each outgoing request, redacted, before sending it.
 type printingDoer struct {
 	next    httpx.Doer
 	out     io.Writer

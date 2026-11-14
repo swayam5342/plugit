@@ -17,10 +17,8 @@ import (
 	"github.com/swayam5342/plugit/internal/model"
 )
 
-// MaxNameLen is the longest MCP tool name PlugIt produces.
 const MaxNameLen = 64
 
-// DefaultMaxDescription caps tool descriptions, in runes.
 const DefaultMaxDescription = 1024
 
 // ToolID returns the first 8 hex characters of sha256(key).
@@ -65,7 +63,6 @@ func BaseName(operationID, method, path string) string {
 	return Sanitize(strings.ToLower(method) + "_" + p)
 }
 
-// Candidate is one operation to name.
 type Candidate struct {
 	Key         model.OpKey
 	OperationID string
@@ -181,7 +178,7 @@ func cleanText(s string) string {
 		switch {
 		case r == '\n' || r == '\r' || r == '\t':
 			return ' '
-		case unicode.IsControl(r), unicode.Is(unicode.Cf, r): // Cf: bidi overrides, zero-width, tag chars
+		case unicode.IsControl(r), unicode.Is(unicode.Cf, r):
 			return -1
 		}
 		return r

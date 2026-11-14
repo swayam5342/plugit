@@ -125,7 +125,7 @@ func TestBuildPathValuesAreEncodedNotInterpreted(t *testing.T) {
 		"x#frag":    "/v1/pets/x%23frag",
 		"100%":      "/v1/pets/100%25",
 		"é":         "/v1/pets/%C3%A9",
-		"a;b=c":     "/v1/pets/a%3Bb=c", // ';' is encoded: some servers treat it as a path-parameter separator
+		"a;b=c":     "/v1/pets/a%3Bb=c",
 	} {
 		raw, _ := json.Marshal(map[string]any{"petId": v})
 		req := mustBuild(t, getPet, string(raw), Target{})
@@ -171,7 +171,6 @@ func TestBuildUnresolvedPlaceholder(t *testing.T) {
 	if _, err := build(t, tl, `{"petId": "1"}`, Target{}); !errors.Is(err, ErrBuild) {
 		t.Errorf("err = %v, want ErrBuild", err)
 	}
-	// A declared but missing path argument is also unresolved.
 	if _, err := build(t, getPet, `{}`, Target{}); !errors.Is(err, ErrBuild) {
 		t.Errorf("missing path arg: err = %v, want ErrBuild", err)
 	}
@@ -215,7 +214,6 @@ func TestBuildFlattenedAndRootBodies(t *testing.T) {
 	}}
 	assertBody(t, mustBuild(t, root, `{"body": [1, "two", {"three": 3}]}`, Target{}), `[1, "two", {"three": 3}]`)
 
-	// A body tool called without any body arguments sends no body.
 	req = mustBuild(t, flat, `{"id": "p1"}`, Target{})
 	if req.ContentLength != 0 {
 		t.Errorf("no body args: ContentLength = %d", req.ContentLength)
@@ -246,11 +244,11 @@ func TestBuildFixedParams(t *testing.T) {
 		{Name: "name", UpstreamName: "name", In: model.InBody, Schema: json.RawMessage(`{}`)},
 	}}
 	req := mustBuild(t, tl, `{"name": "n"}`, Target{Fixed: []Fixed{
-		{Name: "api_key", In: model.InHeader, Value: "test-token-123"}, // declared in query: the spec wins
-		{Name: "x-api-version", Value: "2022-11-28"},                   // header names match case-insensitively
+		{Name: "api_key", In: model.InHeader, Value: "test-token-123"},
+		{Name: "x-api-version", Value: "2022-11-28"},
 		{Name: "tenant", Value: "t-9"},
-		{Name: "region", In: model.InHeader, Value: "eu"}, // undeclared: configured location
-		{Name: "trace", Value: "on"},                      // undeclared, no location: query
+		{Name: "region", In: model.InHeader, Value: "eu"},
+		{Name: "trace", Value: "on"},
 	}})
 	if req.URL.Query().Get("api_key") != "test-token-123" || req.Header.Get("api_key") != "" {
 		t.Errorf("declared fixed param must go where the spec says: url=%s", req.URL)
@@ -305,8 +303,6 @@ func TestBuildAuth(t *testing.T) {
 }
 
 func TestBuildAuthOverridesModelSuppliedHeaders(t *testing.T) {
-	// Even if a spec smuggled an auth-named header past schema.Prepare, the
-	// configured credential replaces whatever the model sent.
 	tl := model.Tool{Method: "GET", Path: "/me", Params: []model.Param{param("X-Api-Key", model.InHeader, false)}}
 	req := mustBuild(t, tl, `{"X-Api-Key": "attacker"}`, Target{Auth: Auth{Type: AuthHeader, Header: "X-Api-Key", Secret: "test-token-123"}})
 	if got := req.Header.Values("X-Api-Key"); !reflect.DeepEqual(got, []string{"test-token-123"}) {

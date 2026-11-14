@@ -61,7 +61,6 @@ func TestWriteFileAtomicTargetIsDirectoryFailsCleanly(t *testing.T) {
 	if err := os.Mkdir(target, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	// Put a file inside so the directory is non-empty and cannot be replaced.
 	if err := os.WriteFile(filepath.Join(target, "keep"), []byte("k"), 0o600); err != nil {
 		t.Fatal(err)
 	}

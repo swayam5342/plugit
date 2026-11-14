@@ -22,52 +22,46 @@ import (
 	"time"
 	"unicode/utf8"
 
-	_ "modernc.org/sqlite" // registers the "sqlite" driver
+	_ "modernc.org/sqlite"
 
 	"github.com/swayam5342/plugit/internal/config"
 )
 
-// SchemaVersion is the call log's schema version (PRAGMA user_version).
 const SchemaVersion = 1
 
-// Caps on stored text, so one huge call can't bloat the log.
 const (
 	MaxArgsBytes    = 16 << 10
 	MaxPreviewBytes = 2 << 10
 	MaxErrorBytes   = 1 << 10
 )
 
-// Outcome is how a call ended.
 type Outcome string
 
-// Outcomes.
 const (
-	OK          Outcome = "ok"           // 2xx/3xx response
-	HTTPError   Outcome = "http_error"   // the API answered with status >= 400
-	Denied      Outcome = "denied"       // policy refused it (deny or confirm)
-	Invalid     Outcome = "invalid"      // arguments failed validation
-	RateLimited Outcome = "rate_limited" // over policy.rate_limit or a tool's rate_limit
-	Failed      Outcome = "error"        // build, network, timeout or internal error
+	OK          Outcome = "ok"
+	HTTPError   Outcome = "http_error"
+	Denied      Outcome = "denied"
+	Invalid     Outcome = "invalid"
+	RateLimited Outcome = "rate_limited"
+	Failed      Outcome = "error"
 )
 
-// Call is one logged tool call. Every text field is already redacted.
 type Call struct {
 	ID       int64           `json:"id"`
 	Time     time.Time       `json:"time"`
 	API      string          `json:"api"`
 	Toolset  string          `json:"toolset"`
-	Tool     string          `json:"tool"` // the MCP tool name
-	Op       string          `json:"op"`   // "METHOD /path"
+	Tool     string          `json:"tool"`
+	Op       string          `json:"op"`
 	Outcome  Outcome         `json:"outcome"`
-	Status   int             `json:"status,omitempty"` // HTTP status, 0 if none
+	Status   int             `json:"status,omitempty"`
 	Duration time.Duration   `json:"duration_ns"`
-	Bytes    int             `json:"bytes,omitempty"`   // response body bytes
-	Args     json.RawMessage `json:"args,omitempty"`    // nil when log.args is none
-	Preview  string          `json:"preview,omitempty"` // only with log.response_preview
-	Error    string          `json:"error,omitempty"`   // short reason when not OK
+	Bytes    int             `json:"bytes,omitempty"`
+	Args     json.RawMessage `json:"args,omitempty"`
+	Preview  string          `json:"preview,omitempty"`
+	Error    string          `json:"error,omitempty"`
 }
 
-// DB is an open call log.
 type DB struct {
 	sql *sql.DB
 }
@@ -186,17 +180,14 @@ func (db *DB) Prune(ctx context.Context, api string, before time.Time) (int64, e
 	return res.RowsAffected()
 }
 
-// Filter selects calls.
 type Filter struct {
-	API     string    // "" for every API
-	AfterID int64     // only calls with a larger id (for following)
-	Since   time.Time // only calls at or after this time
-	Limit   int       // at most this many (default 1000)
-	Newest  bool      // take the newest Limit calls instead of the oldest
+	API     string
+	AfterID int64
+	Since   time.Time
+	Limit   int
+	Newest  bool
 }
 
-// Fixed queries: the filter only ever supplies bound parameters. An empty
-// API or a zero Since matches everything.
 const (
 	filterSQL = ` WHERE id > ?1 AND (?2 = '' OR api = ?2) AND ts >= ?3`
 	listCols  = `SELECT id, ts, api, toolset, tool, op, outcome, status, duration_us, bytes,
@@ -249,12 +240,11 @@ func (db *DB) List(ctx context.Context, f Filter) ([]Call, error) {
 	return out, nil
 }
 
-// ToolStats summarizes one tool's calls.
 type ToolStats struct {
 	API      string        `json:"api"`
 	Tool     string        `json:"tool"`
 	Calls    int           `json:"calls"`
-	Errors   int           `json:"errors"` // every outcome but ok
+	Errors   int           `json:"errors"`
 	P50      time.Duration `json:"p50_ns"`
 	P95      time.Duration `json:"p95_ns"`
 	Bytes    int64         `json:"bytes"`
@@ -318,19 +308,16 @@ func percentile(sorted []time.Duration, p int) time.Duration {
 	if len(sorted) == 0 {
 		return 0
 	}
-	rank := (p*len(sorted) + 99) / 100 // ceil(p/100 * n)
+	rank := (p*len(sorted) + 99) / 100
 	return sorted[max(rank, 1)-1]
 }
 
-// Recorder writes calls in the background so recording never blocks or
-// fails a tool call (SPEC §3.7 step 9). When its buffer is full, calls are
-// dropped and counted.
 type Recorder struct {
 	db      *DB
 	ch      chan Call
 	onErr   func(error)
 	dropped atomic.Int64
-	mu      sync.RWMutex // guards closed against Record racing Close
+	mu      sync.RWMutex
 	closed  bool
 	done    chan struct{}
 }
@@ -385,7 +372,6 @@ func (r *Recorder) Close() {
 	<-r.done
 }
 
-// ErrNoLog means there is no call log yet (nothing has been served).
 var ErrNoLog = errors.New("no calls recorded yet")
 
 // OpenExisting opens the log for reading, or returns ErrNoLog if it

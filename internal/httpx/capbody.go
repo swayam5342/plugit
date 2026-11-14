@@ -5,8 +5,6 @@ import (
 	"net/http"
 )
 
-// capTransport wraps every response body in a cappedBody. It sits above
-// http.Transport, so the cap applies to decompressed bytes.
 type capTransport struct {
 	base http.RoundTripper
 	max  int64
@@ -21,14 +19,10 @@ func (c *capTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
-// cappedBody returns at most its cap. At the cap it probes for one more byte:
-// if there is one it returns ErrResponseTruncated, otherwise io.EOF. The
-// signal is an error (not a flag on the body) because http.Client wraps
-// resp.Body, hiding this type from callers, but passes errors through.
 type cappedBody struct {
 	rc        io.ReadCloser
 	remaining int64
-	end       error // sticky result once the cap is reached
+	end       error
 }
 
 func (c *cappedBody) Read(p []byte) (int, error) {

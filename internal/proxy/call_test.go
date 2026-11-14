@@ -29,7 +29,7 @@ func server(t *testing.T, h http.HandlerFunc) *httptest.Server {
 
 func call(t *testing.T, srvURL string, tl model.Tool, rawArgs string, tg Target, opts httpx.Options) Result {
 	t.Helper()
-	opts.AllowPrivate = true // httptest listens on loopback
+	opts.AllowPrivate = true
 	if tg.BaseURL == nil {
 		tg.BaseURL = base(t, srvURL)
 	}
@@ -42,7 +42,7 @@ func TestSecretValues(t *testing.T) {
 		Auth: Auth{Type: AuthBasic, Secret: "alice:" + testSecret},
 		Fixed: []Fixed{
 			{Name: "tenant", Value: "t-secret-9", Secret: true},
-			{Name: "version", Value: "v2"}, // literal: not a secret (SPEC T11)
+			{Name: "version", Value: "v2"},
 		},
 	}
 	got := map[string]bool{}

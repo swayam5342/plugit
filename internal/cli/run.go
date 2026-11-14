@@ -38,7 +38,6 @@ var errTooManyTools = errors.New("too many tools selected")
 
 const defaultMaxTools = 40
 
-// runFlags are the raw `plugit run` flags.
 type runFlags struct {
 	spec, baseURL, prefix, mode string
 	headers, fixed              []string
@@ -48,8 +47,6 @@ type runFlags struct {
 	allowPrivate, allowInsecure bool
 }
 
-// runSettings are the effective settings: flags, then PLUGIT_* env vars,
-// then defaults (SPEC §2.4).
 type runSettings struct {
 	spec, baseURL, prefix string
 	headers, fixed        []string
@@ -173,8 +170,6 @@ func splitList(v string) []string {
 	return out
 }
 
-// credFlag is a parsed --header or --fixed entry. Its value is a reference,
-// never a resolved secret.
 type credFlag struct {
 	name string
 	ref  secrets.Ref
@@ -227,7 +222,7 @@ func safeName(s string) string {
 
 // chooseBaseURL picks the pinned base URL. --base-url always wins. Otherwise
 // the spec must declare exactly one absolute server, and no credentials may
-// be configured: a spec's servers[] is untrusted, so credentials only ever
+// be configured: a spec's servers[ ] is untrusted, so credentials only ever
 // go to a URL the user typed (SPEC T3).
 func chooseBaseURL(flag string, servers []string, credentials bool) (*url.URL, error) {
 	if flag != "" {
@@ -371,13 +366,11 @@ func checkToolCount(tools []model.Tool, maxTools int) error {
 		errTooManyTools, len(tools), maxTools, tagHint)
 }
 
-// ---- the command ----
-
 type runDeps struct {
 	transport mcp.Transport
 	stderr    io.Writer
 	resolver  *secrets.Resolver
-	keyring   keyringSetter // stores a rotated OAuth refresh token; nil: not stored
+	keyring   keyringSetter
 	parse     func(ctx context.Context, data []byte, opts openapi.Options) (*model.Manifest, error)
 	info      BuildInfo
 }
@@ -472,7 +465,6 @@ func runServe(ctx context.Context, s runSettings, d runDeps) error {
 		return err
 	}
 
-	// Resolve credentials only once everything else checks out.
 	var fixed []proxy.Fixed
 	var hidden []string
 	for _, h := range headers {
@@ -505,7 +497,7 @@ func runServe(ctx context.Context, s runSettings, d runDeps) error {
 	})
 	logger := slog.New(slog.NewTextHandler(d.stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	logger.Info("plugit run serving",
-		"tools", len(tools), "mode", string(s.mode), "base_url", baseURL.String(), // validated: no userinfo or query
+		"tools", len(tools), "mode", string(s.mode), "base_url", baseURL.String(),
 		"spec", red.String(safeLocation(s.spec)), "warnings", len(m.Warnings))
 
 	return mcpserver.Serve(ctx, mcpserver.Config{
