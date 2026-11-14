@@ -103,18 +103,41 @@ func Summarize(fs []Finding) Summary {
 // HasErrors reports whether any finding is an error.
 func HasErrors(fs []Finding) bool { return Summarize(fs).Errors > 0 }
 
-// Run lints the API and every toolset, most severe findings first.
+// Run lints the API and every toolset, most severe findings first. Ignored
+// findings are left out (see RunCounting).
 func Run(in Input) []Finding {
-	fs := apiFindings(in.API)
+	fs, _ := RunCounting(in)
+	return fs
+}
+
+// RunCounting is Run, and also says how many findings the config ignores.
+func RunCounting(in Input) (fs []Finding, ignored int) {
+	fs = apiFindings(in.API)
 	for _, name := range slices.Sorted(maps.Keys(in.API.Toolsets)) {
-		fs = append(fs, Toolset(in, name)...)
+		kept, n := toolset(in, name)
+		fs, ignored = append(fs, kept...), ignored+n
 	}
 	sortFindings(fs)
-	return fs
+	return fs, ignored
 }
 
 // Toolset lints one toolset.
 func Toolset(in Input, name string) []Finding {
+	fs, _ := toolset(in, name)
+	return fs
+}
+
+// ignored reports whether the config accepts f: lint.ignore hides a rule's
+// warnings and infos everywhere, a tool's lint_ignore hides the rule for
+// that tool, errors included.
+func ignored(a config.API, ts config.Toolset, f Finding) bool {
+	if f.Severity < Error && slices.Contains(a.Lint.Ignore, f.Rule) {
+		return true
+	}
+	return f.Tool != "" && slices.Contains(ts.Tools[string(f.Tool)].LintIgnore, f.Rule)
+}
+
+func toolset(in Input, name string) (kept []Finding, n int) {
 	ts := in.API.Toolsets[name]
 	sel := curate.Select(in.Tools, ts, in.API.Prefix)
 	mode := in.API.PolicyMode()
@@ -215,7 +238,14 @@ func Toolset(in Input, name string) []Finding {
 		}
 		l.add("L018", Warn, "%d destructive tool(s) run without confirmation under policy mode full (%s%s); set their policy to confirm", n, strings.Join(shown, ", "), more)
 	}
-	return l.out
+	for _, f := range l.out {
+		if ignored(in.API, ts, f) {
+			n++
+			continue
+		}
+		kept = append(kept, f)
+	}
+	return kept, n
 }
 
 // apiFindings are the API-wide rules.

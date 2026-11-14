@@ -75,6 +75,7 @@ type lintReport struct {
 	API      string         `json:"api"`
 	Findings []lint.Finding `json:"findings"`
 	Summary  lint.Summary   `json:"summary"`
+	Ignored  int            `json:"ignored"`
 }
 
 func lintAPI(ctx context.Context, p config.Paths, name string, s lintSettings) error {
@@ -93,7 +94,7 @@ func lintAPI(ctx context.Context, p config.Paths, name string, s lintSettings) e
 	if err != nil {
 		return err
 	}
-	fs := lint.Run(lint.Input{API: *cfg, Tools: m.Tools, Hidden: hiddenParams(cfg.Auth, cfg.Fixed)})
+	fs, ignored := lint.RunCounting(lint.Input{API: *cfg, Tools: m.Tools, Hidden: hiddenParams(cfg.Auth, cfg.Fixed)})
 	if s.toolset != "" {
 		fs = slices.DeleteFunc(fs, func(f lint.Finding) bool { return f.Toolset != "" && f.Toolset != s.toolset })
 	}
@@ -105,10 +106,10 @@ func lintAPI(ctx context.Context, p config.Paths, name string, s lintSettings) e
 		if fs == nil {
 			fs = []lint.Finding{}
 		}
-		if err := enc.Encode(lintReport{API: name, Findings: fs, Summary: sum}); err != nil {
+		if err := enc.Encode(lintReport{API: name, Findings: fs, Summary: sum, Ignored: ignored}); err != nil {
 			return err
 		}
-	} else if err := printFindings(s.out, name, fs, sum); err != nil {
+	} else if err := printFindings(s.out, name, fs, sum, ignored); err != nil {
 		return err
 	}
 	if sum.Errors > 0 {
@@ -117,7 +118,7 @@ func lintAPI(ctx context.Context, p config.Paths, name string, s lintSettings) e
 	return nil
 }
 
-func printFindings(w io.Writer, name string, fs []lint.Finding, sum lint.Summary) error {
+func printFindings(w io.Writer, name string, fs []lint.Finding, sum lint.Summary, ignored int) error {
 	marks := map[lint.Severity]string{lint.Error: "✗", lint.Warn: "!", lint.Info: "·"}
 	for _, f := range fs {
 		where := ""
@@ -136,7 +137,11 @@ func printFindings(w io.Writer, name string, fs []lint.Finding, sum lint.Summary
 			return err
 		}
 	}
-	_, err := fmt.Fprintf(w, "%s: %s, %s, %d info\n", name, plural(sum.Errors, "error"), plural(sum.Warnings, "warning"), sum.Infos)
+	note := ""
+	if ignored > 0 {
+		note = fmt.Sprintf(" (%d ignored by lint.ignore or lint_ignore)", ignored)
+	}
+	_, err := fmt.Fprintf(w, "%s: %s, %s, %d info%s\n", name, plural(sum.Errors, "error"), plural(sum.Warnings, "warning"), sum.Infos, note)
 	return err
 }
 

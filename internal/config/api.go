@@ -35,7 +35,9 @@ import (
 //   - 4: adds auth.type oauth2 with auth.flow, token_url, device_url,
 //     client_id and scopes (M6). Nothing to rewrite.
 //   - 5: adds network.allow_insecure. Nothing to rewrite.
-const CurrentVersion = 5
+//   - 6: adds lint.ignore and toolsets.<name>.tools.<key>.lint_ignore.
+//     Nothing to rewrite.
+const CurrentVersion = 6
 
 // MaxConfigBytes caps plugit.yaml. A real config is a few kilobytes.
 const MaxConfigBytes = 1 << 20
@@ -98,6 +100,7 @@ type API struct {
 	Auth     Auth               `yaml:"auth"`
 	Policy   Policy             `yaml:"policy"`
 	Log      Log                `yaml:"log"`
+	Lint     Lint               `yaml:"lint,omitempty"`
 	Toolsets map[string]Toolset `yaml:"toolsets"`
 }
 
@@ -169,12 +172,26 @@ type ToolOverride struct {
 	// ResponseFields keeps only these parts of a JSON success response
 	// (version 3; see package jsonpick for the path syntax).
 	ResponseFields []string `yaml:"response_fields,omitempty"`
+	// LintIgnore lists lint rules accepted for this tool, errors included
+	// (version 6).
+	LintIgnore []string `yaml:"lint_ignore,omitempty"`
 }
 
 // IsZero reports whether the override changes nothing.
 func (o ToolOverride) IsZero() bool {
-	return o.Name == "" && o.Description == "" && o.Policy == "" && o.RateLimit == "" && len(o.ResponseFields) == 0
+	return o.Name == "" && o.Description == "" && o.Policy == "" && o.RateLimit == "" && len(o.ResponseFields) == 0 && len(o.LintIgnore) == 0
 }
+
+// Lint holds lint settings (version 6).
+type Lint struct {
+	// Ignore lists rules whose warnings and infos are hidden for the whole
+	// API. Errors are never hidden here: accept one per tool with
+	// lint_ignore.
+	Ignore []string `yaml:"ignore,omitempty"`
+}
+
+// IsZero lets an empty lint block be left out of the file.
+func (l Lint) IsZero() bool { return len(l.Ignore) == 0 }
 
 // PolicyMode is the validated policy mode.
 func (c *API) PolicyMode() policy.Mode { return policy.Mode(c.Policy.Mode) }
@@ -262,9 +279,9 @@ func ParseAPI(data []byte) (*API, error) {
 
 // migrate brings a validated older config up to CurrentVersion.
 func (c *API) migrate() {
-	if c.Version < 5 {
+	if c.Version < 6 {
 		// Every step so far only added optional fields: nothing to rewrite.
-		c.Version = 5
+		c.Version = 6
 	}
 }
 
@@ -311,6 +328,7 @@ var (
 	headerNameRe = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,256}$")
 	sha256Re     = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	retentionRe  = regexp.MustCompile(`^([0-9]{1,5})d$`)
+	lintRuleRe   = regexp.MustCompile(`^L[0-9]{3}$`)
 )
 
 // toolMethods are the methods an operation key may use (TRACE is never a
@@ -400,6 +418,14 @@ func (c *API) Validate() error {
 	if c.Log.Retention != "" && !validRetention(c.Log.Retention) {
 		bad("log.retention", "%q: use days (30d) or a duration (72h)", naming.CleanText(c.Log.Retention, 40))
 	}
+	if msg := checkLintRules(c.Lint.Ignore); msg != "" {
+		bad("lint.ignore", "%s", msg)
+	}
+	for _, r := range c.Lint.Ignore {
+		if alwaysErrorRules[r] {
+			bad("lint.ignore", "%s is always an error and can't be ignored for the whole API", r)
+		}
+	}
 
 	if len(c.Toolsets) == 0 {
 		bad("toolsets", "define at least one toolset (usually \"default\")")
@@ -487,6 +513,9 @@ func (c *API) validateToolset(name string, ts Toolset, bad func(string, string, 
 		}
 		if _, err := jsonpick.Parse(o.ResponseFields); err != nil {
 			wrap(kf+".response_fields", err)
+		}
+		if msg := checkLintRules(o.LintIgnore); msg != "" {
+			bad(kf+".lint_ignore", "%s", msg)
 		}
 	}
 	for _, m := range ts.Methods {
@@ -608,6 +637,25 @@ func CheckCredentialTransport(baseURL string, allowInsecure bool) error {
 	}
 	return errors.New("must be https when a credential is configured: plain http would send it unencrypted " +
 		"(without a switch, http is only allowed to localhost)")
+}
+
+// alwaysErrorRules are lint rules that only ever report errors (clashing
+// names, a pointless allow, credentials over plain http).
+var alwaysErrorRules = map[string]bool{"L003": true, "L009": true, "L011": true}
+
+// checkLintRules says what is wrong with a list of lint rule IDs, or "".
+func checkLintRules(rules []string) string {
+	seen := map[string]bool{}
+	for _, r := range rules {
+		switch {
+		case !lintRuleRe.MatchString(r):
+			return fmt.Sprintf("%q is not a lint rule: use IDs like L017", naming.CleanText(r, 20))
+		case seen[r]:
+			return r + " is listed twice"
+		}
+		seen[r] = true
+	}
+	return ""
 }
 
 func validRetention(s string) bool {

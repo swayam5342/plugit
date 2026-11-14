@@ -136,7 +136,7 @@ func TestParseAPIRejects(t *testing.T) {
 		"empty file":            {"", "no documents", ErrInvalidConfig},
 		"not a mapping":         {"- 1\n", "", ErrInvalidConfig},
 		"missing version":       {strings.Replace(base, "version: 1\n", "", 1), "version", ErrInvalidConfig},
-		"future version":        {strings.Replace(base, "version: 1", "version: 6", 1), "newer", ErrUnsupportedVersion},
+		"future version":        {strings.Replace(base, "version: 1", "version: 7", 1), "newer", ErrUnsupportedVersion},
 		"bad name":              {strings.Replace(base, "name: pets", "name: ../etc", 1), "name", ErrInvalidConfig},
 		"missing base_url":      {strings.Replace(base, "base_url: https://pets.example.test/v1\n", "", 1), "base_url", ErrInvalidConfig},
 		"relative base_url":     {strings.Replace(base, "https://pets.example.test/v1", "/v1", 1), "base_url", ErrInvalidConfig},
@@ -356,7 +356,7 @@ func TestRetentionPeriod(t *testing.T) {
 // Version 2 adds per-tool rate_limit. Version 1 files load unchanged and
 // come out as version 2 (the migration has nothing to rewrite).
 func TestVersionMigration(t *testing.T) {
-	if CurrentVersion != 5 {
+	if CurrentVersion != 6 {
 		t.Fatalf("CurrentVersion = %d", CurrentVersion)
 	}
 	c, err := ParseAPI([]byte(minimalConfig))
@@ -367,7 +367,7 @@ func TestVersionMigration(t *testing.T) {
 		t.Errorf("v1 config loaded as version %d, want %d", c.Version, CurrentVersion)
 	}
 	out, err := MarshalAPI(c)
-	if err != nil || !strings.Contains(string(out), "version: 5") {
+	if err != nil || !strings.Contains(string(out), "version: 6") {
 		t.Errorf("marshal = %s, %v", out, err)
 	}
 	v2 := strings.Replace(minimalConfig, "version: 1", "version: 2", 1)
@@ -525,4 +525,53 @@ func TestAllowInsecure(t *testing.T) {
 	if out, err := MarshalAPI(c); err != nil || !strings.Contains(string(out), "allow_insecure: true") {
 		t.Errorf("marshal = %s, %v", out, err)
 	}
+}
+
+func TestLintIgnore(t *testing.T) {
+	src := strings.Replace(minimalConfig, `"GET /pets": {}`, `"GET /pets": {lint_ignore: [L016, L007]}`, 1) + "lint: {ignore: [L017, L019]}\n"
+	c, err := ParseAPI([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Lint.Ignore; len(got) != 2 || got[0] != "L017" || got[1] != "L019" {
+		t.Errorf("lint.ignore = %v", got)
+	}
+	o := c.Toolsets["default"].Tools["GET /pets"]
+	if len(o.LintIgnore) != 2 || o.IsZero() {
+		t.Errorf("lint_ignore = %v, IsZero = %v", o.LintIgnore, o.IsZero())
+	}
+	out, err := MarshalAPI(c)
+	if err != nil || !strings.Contains(string(out), "L017") || !strings.Contains(string(out), "lint_ignore") {
+		t.Errorf("marshal = %s, %v", out, err)
+	}
+	if out, _ := MarshalAPI(mustParse(t, minimalConfig)); strings.Contains(string(out), "lint") {
+		t.Errorf("an empty lint block is written out: %s", out)
+	}
+
+	for name, bad := range map[string]string{
+		"lowercase":     minimalConfig + "lint: {ignore: [l017]}\n",
+		"not a rule":    minimalConfig + "lint: {ignore: [everything]}\n",
+		"short":         minimalConfig + "lint: {ignore: [L7]}\n",
+		"listed twice":  minimalConfig + "lint: {ignore: [L017, L017]}\n",
+		"per tool":      strings.Replace(minimalConfig, `"GET /pets": {}`, `"GET /pets": {lint_ignore: [all]}`, 1),
+		"unknown key":   minimalConfig + "lint: {ignored: [L017]}\n",
+		"api-wide L011": minimalConfig + "lint: {ignore: [L011]}\n",
+		"api-wide L003": minimalConfig + "lint: {ignore: [L003]}\n",
+		"api-wide L009": minimalConfig + "lint: {ignore: [L009]}\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseAPI([]byte(bad)); !errors.Is(err, ErrInvalidConfig) {
+				t.Errorf("err = %v, want ErrInvalidConfig", err)
+			}
+		})
+	}
+}
+
+func mustParse(t *testing.T, src string) *API {
+	t.Helper()
+	c, err := ParseAPI([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
 }
