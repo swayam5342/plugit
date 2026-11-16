@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/swayam5342/plugit)](https://github.com/swayam5342/plugit/releases/latest)
 [![Go Reference](https://pkg.go.dev/badge/github.com/swayam5342/plugit.svg)](https://pkg.go.dev/github.com/swayam5342/plugit)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
-[![M8ven Score](https://m8ven.ai/badge/mcp/swayam5342-plugit-1nub27?v=7ab657b2466d42943155d84c74678cfa)](https://m8ven.ai/mcp/swayam5342-plugit-1nub27?s=readme)
+[![M8ven Score](https://m8ven.ai/badge/mcp/swayam5342-plugit-1nub27?v=7c3bc90e57c17bc093d69f928a622bb5)](https://m8ven.ai/mcp/swayam5342-plugit-1nub27?s=readme)
 
 **Website and live demo:** [plugit.swayam.li](https://plugit.swayam.li/)
 
