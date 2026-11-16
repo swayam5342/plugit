@@ -37,7 +37,7 @@ const ChildArg = "__parse"
 const (
 	DefaultTimeout   = 30 * time.Second
 	DefaultMaxOutput = 256 << 20
-	maxRequest       = 64 << 20 // a 20 MiB spec, base64-encoded, plus options
+	maxRequest       = 64 << 20
 )
 
 // Sentinel errors callers can match with errors.Is.
@@ -50,6 +50,7 @@ type request struct {
 	Spec           []byte `json:"spec"`
 	Prefix         string `json:"prefix,omitempty"`
 	MaxDescription int    `json:"maxDescription,omitempty"`
+	UnsafePaths    bool   `json:"unsafePaths,omitempty"`
 }
 
 type response struct {
@@ -58,7 +59,6 @@ type response struct {
 	Kind     string          `json:"kind,omitempty"`
 }
 
-// errorKinds carries openapi's sentinel errors across the process boundary.
 var errorKinds = []struct {
 	kind string
 	err  error
@@ -72,9 +72,9 @@ var errorKinds = []struct {
 
 // Runner starts parse children.
 type Runner struct {
-	Exe       string   // binary to run
-	Args      []string // arguments, normally just ChildArg
-	Env       []string // extra environment for the child (tests only)
+	Exe       string
+	Args      []string
+	Env       []string
 	Timeout   time.Duration
 	MaxOutput int64
 }
@@ -106,7 +106,7 @@ func (r *Runner) Parse(ctx context.Context, data []byte, opts openapi.Options) (
 	if maxOut <= 0 {
 		maxOut = DefaultMaxOutput
 	}
-	req, err := json.Marshal(request{Spec: data, Prefix: opts.Prefix, MaxDescription: opts.MaxDescription})
+	req, err := json.Marshal(request{Spec: data, Prefix: opts.Prefix, MaxDescription: opts.MaxDescription, UnsafePaths: opts.AllowUnsafePaths})
 	if err != nil {
 		return nil, fmt.Errorf("encoding parse request: %w", err)
 	}
@@ -160,7 +160,7 @@ func ChildMain(stdin io.Reader, stdout io.Writer) int {
 		return 2
 	}
 
-	m, err := openapi.Parse(req.Spec, openapi.Options{Prefix: req.Prefix, MaxDescription: req.MaxDescription})
+	m, err := openapi.Parse(req.Spec, openapi.Options{Prefix: req.Prefix, MaxDescription: req.MaxDescription, AllowUnsafePaths: req.UnsafePaths})
 	if err != nil {
 		resp := response{Err: err.Error()}
 		for _, k := range errorKinds {
@@ -184,8 +184,6 @@ func writeResponse(w io.Writer, r response) {
 	_, _ = w.Write(b)
 }
 
-// childError is an error reported by the child. It unwraps to the matching
-// openapi sentinel, so errors.Is works as it would in-process.
 type childError struct {
 	msg, kind string
 }
@@ -221,8 +219,6 @@ func firstLine(s string) string {
 	return " (" + naming.CleanText(line, 200) + ")"
 }
 
-// cappedBuffer keeps at most max bytes; on overflow it records the fact and
-// calls onOverflow (which kills the child).
 type cappedBuffer struct {
 	mu         sync.Mutex
 	buf        bytes.Buffer

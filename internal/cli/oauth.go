@@ -13,7 +13,6 @@ import (
 	"github.com/swayam5342/plugit/internal/secrets"
 )
 
-// oauthKeyringService is where plugit keeps OAuth refresh tokens.
 const oauthKeyringService = "plugit"
 
 func refreshTokenKey(api string) string { return "oauth-refresh-" + api }
@@ -23,7 +22,6 @@ func refreshTokenRef(api string) string {
 	return "keyring:" + oauthKeyringService + "/" + refreshTokenKey(api)
 }
 
-// keyringStore keeps an API's refresh token in the OS keyring.
 type keyringStore struct {
 	get secrets.KeyringGetter
 	set keyringSetter
@@ -49,7 +47,6 @@ func (k keyringStore) Save(v string) error {
 		return errors.New("no keyring to store the refresh token in")
 	}
 	if err := k.set.Set(oauthKeyringService, refreshTokenKey(k.api), v); err != nil {
-		// Backend messages are not wrapped: they could quote the value.
 		return fmt.Errorf("%w: could not store %s", secrets.ErrKeyring, refreshTokenRef(k.api))
 	}
 	return nil

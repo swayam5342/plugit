@@ -48,8 +48,6 @@ toolsets:
       "GET /pets": {}
 `
 
-// oauthWorld is a fake authorization server and an API that only accepts
-// the access token it issues.
 type oauthWorld struct {
 	auth, api *httptest.Server
 	tokens    atomic.Int32
@@ -194,7 +192,6 @@ func TestAuthClientCredentialsVerifies(t *testing.T) {
 		t.Errorf("err=%v items=%v out=%s", err, kr.items, out.String())
 	}
 
-	// A wrong secret is stored (it's what the user typed) but reported.
 	kr = &fakeKeyring{}
 	err = authAPI(t.Context(), p, "pets", authDeps{in: strings.NewReader("wrong-secret\n"), out: &bytes.Buffer{}, errOut: &bytes.Buffer{}, keyring: kr,
 		resolver: &secrets.Resolver{Keyring: kr}})

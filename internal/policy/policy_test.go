@@ -11,7 +11,6 @@ import (
 
 func TestCheckMatrix(t *testing.T) {
 	const A, C, D = Allow, Confirm, Deny
-	// want[mode][safety] for overrides: none, allow, confirm, deny.
 	want := map[Mode]map[model.Safety][4]Decision{
 		ReadOnly: {
 			model.ReadOnly:    {A, A, C, D},
@@ -20,7 +19,7 @@ func TestCheckMatrix(t *testing.T) {
 		},
 		ConfirmWrites: {
 			model.ReadOnly:    {A, A, C, D},
-			model.Write:       {C, C, C, D}, // allow can't lift a write above the mode's ceiling
+			model.Write:       {C, C, C, D},
 			model.Destructive: {C, C, C, D},
 		},
 		Full: {
@@ -87,7 +86,6 @@ func TestParse(t *testing.T) {
 }
 
 func TestAllowsListing(t *testing.T) {
-	// plugit run lists only what the mode could ever allow or confirm.
 	if Lists(model.Write, ReadOnly) || Lists(model.Destructive, ReadOnly) {
 		t.Error("read-only mode must not list write tools")
 	}

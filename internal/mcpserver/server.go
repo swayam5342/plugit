@@ -42,32 +42,32 @@ import (
 type Tool struct {
 	Tool     model.Tool
 	Override policy.Override
-	Limit    *policy.Limiter  // per-tool rate limit; nil for none
-	Fields   *jsonpick.Picker // response_fields; nil keeps the whole response
+	Limit    *policy.Limiter
+	Fields   *jsonpick.Picker
 }
 
 // Config configures a server.
 type Config struct {
-	Name     string // implementation name reported to clients
+	Name     string
 	Version  string
 	Tools    []Tool
 	Mode     policy.Mode
 	Target   proxy.Target
 	Doer     httpx.Doer
 	Redactor *redact.Redactor
-	Logger   *slog.Logger    // must not write to stdout
-	Log      *CallLog        // nil: calls aren't recorded
-	Limit    *policy.Limiter // policy.rate_limit, shared by every tool; nil for none
+	Logger   *slog.Logger
+	Log      *CallLog
+	Limit    *policy.Limiter
 }
 
 // CallLog sends one redacted record per call to the call log (SPEC §3.7
 // step 9).
 type CallLog struct {
-	Record  func(store.Call) // must not block (see store.Recorder)
+	Record  func(store.Call)
 	API     string
 	Toolset string
-	Args    config.LogArgs // none, redacted or full (secrets are masked either way)
-	Preview bool           // keep a redacted response preview
+	Args    config.LogArgs
+	Preview bool
 }
 
 // New builds the MCP server. Tools the mode can never run, and tools set to
@@ -84,7 +84,7 @@ func New(cfg Config) *mcp.Server {
 		&mcp.ServerOptions{Logger: cfg.Logger},
 	)
 	key := make([]byte, 32)
-	_, _ = rand.Read(key) // crypto/rand.Read never fails (Go 1.24+)
+	_, _ = rand.Read(key)
 	for _, st := range cfg.Tools {
 		if !policy.Lists(st.Tool.Safety, cfg.Mode) || st.Override == policy.OverrideDeny {
 			continue
@@ -109,7 +109,7 @@ func annotations(t model.Tool) *mcp.ToolAnnotations {
 	f, tr := false, true
 	a := &mcp.ToolAnnotations{
 		ReadOnlyHint:    t.Safety == model.ReadOnly,
-		DestructiveHint: &f, // MCP defaults this to true, so always set it
+		DestructiveHint: &f,
 		OpenWorldHint:   &tr,
 	}
 	if t.Safety == model.Destructive {
@@ -125,10 +125,13 @@ func annotations(t model.Tool) *mcp.ToolAnnotations {
 type handler struct {
 	cfg  *Config
 	tool Tool
-	key  []byte // signs confirmation state (see confirmState)
+	key  []byte
 
 	once      sync.Once
 	validator *schema.Validator
+
+	mu   sync.Mutex
+	used map[string]time.Time
 }
 
 func (h *handler) handle(ctx context.Context, req *mcp.CallToolRequest) (res *mcp.CallToolResult, _ error) {
@@ -138,7 +141,6 @@ func (h *handler) handle(ctx context.Context, req *mcp.CallToolRequest) (res *mc
 	if req != nil && req.Params != nil {
 		raw = req.Params.Arguments
 	}
-	// Recorded last, after the panic recovery below has set res.
 	rec := store.Call{Outcome: store.OK}
 	defer func() { h.record(start, raw, &rec, res) }()
 	defer func() {
@@ -157,9 +159,6 @@ func (h *handler) handle(ctx context.Context, req *mcp.CallToolRequest) (res *mc
 		rec.Outcome = store.Denied
 		return errorResult(name + ": denied by policy: " + decision.Reason), nil
 	}
-	// The retry that carries a confirmation answer is the same call: it
-	// doesn't spend the budget again (and only a call that passed here got
-	// a signed state to retry with).
 	if retry := decision.Decision == policy.Confirm && req != nil && req.Params != nil && req.Params.InputResponses != nil; !retry {
 		if why := h.limited(); why != "" {
 			h.log(name, start, 0, true, "rate limited")
@@ -186,12 +185,10 @@ func (h *handler) handle(ctx context.Context, req *mcp.CallToolRequest) (res *mc
 		return errorResult(name + ": " + err.Error()), nil
 	}
 
-	// Confirmation comes after validation, so the user is only asked about
-	// calls that would really be made.
 	if decision.Decision == policy.Confirm {
 		ask, ok, why := h.confirm(req, args, decision.Reason)
 		if ask != nil {
-			rec.Outcome = "" // not a call yet: the retry with the answer is recorded
+			rec.Outcome = ""
 			return ask, nil
 		}
 		if !ok {
@@ -228,20 +225,15 @@ func (h *handler) limited() string {
 	return ""
 }
 
-// confirmSchema is the elicitation form: one pre-ticked checkbox. It isn't
-// required, so a client that only offers accept/decline still works.
 var confirmSchema = json.RawMessage(`{"type":"object","properties":{"confirm":{"type":"boolean","title":"Make this call","default":true}}}`)
 
 // ConfirmTimeout is how long an answer to a confirmation stays valid.
 const ConfirmTimeout = 5 * time.Minute
 
-// maxShownArgs caps the arguments shown in a confirmation.
 const maxShownArgs = 2000
 
-// confirmID names plugit's input request.
 const confirmID = "plugit_confirm"
 
-// now is the clock for confirmation state (tests replace it).
 var now = time.Now
 
 // confirm asks the user, through the MCP client, whether to make this call
@@ -252,9 +244,9 @@ var now = time.Now
 // elicitation/create request for clients on older protocol versions.
 //
 // The answer is bound to the exact arguments: requestState is an HMAC of
-// the tool, the arguments and the time, so a retry with different
-// arguments or a stale answer is refused. Without elicitation support, the
-// answer is no (§10 Q3).
+// the tool, the arguments, the time and a nonce, so a retry with different
+// arguments or a stale answer is refused, and each state is accepted once.
+// Without elicitation support, the answer is no (§10 Q3).
 func (h *handler) confirm(req *mcp.CallToolRequest, args map[string]any, reason string) (ask *mcp.CallToolResult, ok bool, why string) {
 	var params *mcp.CallToolParamsRaw
 	var ss *mcp.ServerSession
@@ -303,31 +295,56 @@ func (h *handler) confirm(req *mcp.CallToolRequest, args map[string]any, reason 
 	}, false, ""
 }
 
-// state signs the tool, the arguments and the time.
+// state signs the tool, the arguments, the time and a fresh nonce:
+// "<unix time>.<nonce>.<mac>".
 func (h *handler) state(at time.Time, args map[string]any) string {
-	ts := strconv.FormatInt(at.Unix(), 10)
-	return ts + "." + base64.RawURLEncoding.EncodeToString(h.mac(ts, args))
+	nonce := make([]byte, 12)
+	_, _ = rand.Read(nonce)
+	stamp := strconv.FormatInt(at.Unix(), 10) + "." + base64.RawURLEncoding.EncodeToString(nonce)
+	return stamp + "." + base64.RawURLEncoding.EncodeToString(h.mac(stamp, args))
 }
 
-func (h *handler) mac(ts string, args map[string]any) []byte {
-	canon, _ := json.Marshal(args) // maps encode with sorted keys
+func (h *handler) mac(stamp string, args map[string]any) []byte {
+	canon, _ := json.Marshal(args)
 	m := hmac.New(sha256.New, h.key)
-	m.Write([]byte(h.tool.Tool.Name + "\x00" + ts + "\x00"))
+	m.Write([]byte(h.tool.Tool.Name + "\x00" + stamp + "\x00"))
 	m.Write(canon)
 	return m.Sum(nil)
 }
 
-// checkState verifies requestState against the arguments of this call.
+// checkState verifies requestState against the arguments of this call and
+// spends it: a state is accepted once.
 func (h *handler) checkState(state string, args map[string]any) error {
-	ts, sig, found := strings.Cut(state, ".")
-	got, err := base64.RawURLEncoding.DecodeString(sig)
-	if !found || err != nil || !hmac.Equal(got, h.mac(ts, args)) {
+	cut := strings.LastIndexByte(state, '.')
+	if cut < 0 {
 		return errors.New("the confirmation doesn't match these arguments")
 	}
+	stamp, sig := state[:cut], state[cut+1:]
+	got, err := base64.RawURLEncoding.DecodeString(sig)
+	if err != nil || !hmac.Equal(got, h.mac(stamp, args)) {
+		return errors.New("the confirmation doesn't match these arguments")
+	}
+	ts, _, _ := strings.Cut(stamp, ".")
 	sec, err := strconv.ParseInt(ts, 10, 64)
-	if err != nil || now().Sub(time.Unix(sec, 0)) > ConfirmTimeout {
+	issued := time.Unix(sec, 0)
+	if err != nil || now().Sub(issued) > ConfirmTimeout {
 		return errors.New("the confirmation expired")
 	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if _, spent := h.used[state]; spent {
+		return errors.New("the confirmation was already used")
+	}
+	for st, at := range h.used {
+		if now().Sub(at) > ConfirmTimeout {
+			delete(h.used, st)
+		}
+	}
+	if h.used == nil {
+		h.used = map[string]time.Time{}
+	}
+	h.used[state] = issued
 	return nil
 }
 

@@ -35,9 +35,9 @@ type Safety int
 
 // Safety levels, from least to most dangerous.
 const (
-	ReadOnly    Safety = iota // GET, HEAD, OPTIONS
-	Write                     // POST, PUT, PATCH
-	Destructive               // DELETE, and any method PlugIt doesn't recognize
+	ReadOnly Safety = iota
+	Write
+	Destructive
 )
 
 // SafetyForMethod classifies an HTTP method. Unknown methods are treated as
@@ -85,12 +85,12 @@ type Location int
 
 // Argument locations.
 const (
-	InPath     Location = iota // substituted into the path template
-	InQuery                    // query string
-	InHeader                   // request header
-	InCookie                   // cookie (unsupported until M6)
-	InBody                     // one field of a flattened JSON object body
-	InBodyRoot                 // the whole request body
+	InPath Location = iota
+	InQuery
+	InHeader
+	InCookie
+	InBody
+	InBodyRoot
 )
 
 var locationNames = [...]string{
@@ -134,43 +134,43 @@ func ParseLocation(s string) (Location, bool) {
 // Tool is one API operation exposed (or exposable) as an MCP tool.
 type Tool struct {
 	Key         OpKey    `json:"key"`
-	ID          string   `json:"id"`   // first 8 hex chars of sha256(Key)
-	Name        string   `json:"name"` // MCP tool name, ^[a-zA-Z0-9_-]{1,64}$
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
 	Description string   `json:"description"`
 	Method      string   `json:"method"`
-	Path        string   `json:"path"` // template, e.g. /repos/{owner}/{repo}
+	Path        string   `json:"path"`
 	Params      []Param  `json:"params,omitempty"`
-	Body        *Body    `json:"body,omitempty"` // nil if no request body
+	Body        *Body    `json:"body,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
 	Deprecated  bool     `json:"deprecated,omitempty"`
 	Safety      Safety   `json:"safety"`
-	Issues      []Issue  `json:"issues,omitempty"` // problems found while ingesting
+	Issues      []Issue  `json:"issues,omitempty"`
 }
 
 // Param is one argument of a tool.
 type Param struct {
-	Name         string          `json:"name"`         // name the model sees
-	UpstreamName string          `json:"upstreamName"` // name sent to the API
+	Name         string          `json:"name"`
+	UpstreamName string          `json:"upstreamName"`
 	In           Location        `json:"in"`
 	Required     bool            `json:"required,omitempty"`
-	Schema       json.RawMessage `json:"schema"` // JSON Schema, refs resolved, depth-limited
+	Schema       json.RawMessage `json:"schema"`
 	Desc         string          `json:"desc,omitempty"`
-	Hidden       bool            `json:"hidden,omitempty"` // fixed param: not in the input schema
+	Hidden       bool            `json:"hidden,omitempty"`
 }
 
 // Body is a tool's request body.
 type Body struct {
-	ContentType string              `json:"contentType"` // application/json, application/x-www-form-urlencoded or multipart/form-data
+	ContentType string              `json:"contentType"`
 	Schema      json.RawMessage     `json:"schema"`
 	Required    bool                `json:"required,omitempty"`
-	Encoding    map[string]Encoding `json:"encoding,omitempty"` // form fields with an explicit OpenAPI encoding
+	Encoding    map[string]Encoding `json:"encoding,omitempty"`
 }
 
 // Encoding is how one form field is serialized (an OpenAPI encoding
 // object, with explode resolved). Fields without one use style form,
 // explode true.
 type Encoding struct {
-	Style   string `json:"style,omitempty"` // "form" or "deepObject"
+	Style   string `json:"style,omitempty"`
 	Explode bool   `json:"explode"`
 }
 
@@ -179,10 +179,10 @@ type IssueKind string
 
 // Ingest issue kinds.
 const (
-	IssueSchemaDegraded IssueKind = "schema-degraded" // unsupported/too-deep schema became {} (L012)
-	IssueBodyNested     IssueKind = "body-nested"     // flattening collided; body nested under "body" (L012)
-	IssueUnsupported    IssueKind = "unsupported"     // cookie params, form or multipart bodies (L013)
-	IssueHiddenText     IssueKind = "hidden-text"     // cleaning removed invisible text from a description (L007)
+	IssueSchemaDegraded IssueKind = "schema-degraded"
+	IssueBodyNested     IssueKind = "body-nested"
+	IssueUnsupported    IssueKind = "unsupported"
+	IssueHiddenText     IssueKind = "hidden-text"
 )
 
 // Issue is a problem found while ingesting one tool.
@@ -194,9 +194,9 @@ type Issue struct {
 // Manifest is the result of ingesting one spec.
 type Manifest struct {
 	Title       string   `json:"title"`
-	Version     string   `json:"version"`     // the API's info.version
-	SpecVersion string   `json:"specVersion"` // e.g. "3.1.0", "2.0"
+	Version     string   `json:"version"`
+	SpecVersion string   `json:"specVersion"`
 	Servers     []string `json:"servers,omitempty"`
 	Tools       []Tool   `json:"tools"`
-	Warnings    []string `json:"warnings,omitempty"` // spec-level notes (skipped operations, ...)
+	Warnings    []string `json:"warnings,omitempty"`
 }

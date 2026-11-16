@@ -34,7 +34,6 @@ const (
 	DeviceCode        Flow = "device_code"
 )
 
-// Limits and timing.
 const (
 	maxResponse   = 1 << 20
 	refreshEarly  = 60 * time.Second
@@ -48,8 +47,8 @@ var ErrNoRefreshToken = errors.New("no OAuth refresh token stored: run `plugit a
 // Error is an error response from the authorization server.
 type Error struct {
 	Status      int
-	Code        string // the OAuth "error" field
-	Description string // cleaned and capped
+	Code        string
+	Description string
 }
 
 func (e *Error) Error() string {
@@ -69,15 +68,15 @@ func (e *Error) Error() string {
 type Config struct {
 	Flow         Flow
 	TokenURL     string
-	DeviceURL    string // device flow only
+	DeviceURL    string
 	ClientID     string
-	ClientSecret string // may be empty for a public device-flow client
+	ClientSecret string
 	Scopes       []string
 }
 
 // Store keeps the device flow's refresh token.
 type Store interface {
-	Load() (string, error) // ErrNoRefreshToken when there is none
+	Load() (string, error)
 	Save(token string) error
 }
 
@@ -85,7 +84,7 @@ type Store interface {
 type Token struct {
 	Access  string
 	Refresh string
-	Expiry  time.Time // zero when the server gave no expires_in
+	Expiry  time.Time
 }
 
 // Source hands out a valid access token, fetching a new one when the
@@ -99,7 +98,7 @@ type Source struct {
 	mu      sync.Mutex
 	access  string
 	expiry  time.Time
-	refresh string // last refresh token seen, for redaction
+	refresh string
 }
 
 // NewSource builds a Source. store is used by the device flow; now is the
@@ -196,7 +195,7 @@ func StartDevice(ctx context.Context, cfg Config, doer httpx.Doer) (*Device, err
 		DeviceCode              string `json:"device_code"`
 		UserCode                string `json:"user_code"`
 		VerificationURI         string `json:"verification_uri"`
-		VerificationURL         string `json:"verification_url"` // used by some servers
+		VerificationURL         string `json:"verification_url"`
 		VerificationURIComplete string `json:"verification_uri_complete"`
 		ExpiresIn               int    `json:"expires_in"`
 		Interval                int    `json:"interval"`
@@ -289,7 +288,7 @@ func request(ctx context.Context, cfg Config, doer httpx.Doer, endpoint string, 
 	}
 	tok := &Token{Access: out.AccessToken, Refresh: out.RefreshToken}
 	if out.ExpiresIn > 0 {
-		tok.Expiry = time.Time{}.Add(time.Duration(out.ExpiresIn) * time.Second) // a duration from now
+		tok.Expiry = time.Time{}.Add(time.Duration(out.ExpiresIn) * time.Second)
 	}
 	return tok, nil
 }

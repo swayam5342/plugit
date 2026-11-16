@@ -49,8 +49,6 @@ func TestInstallPreservesEverythingElse(t *testing.T) {
 		t.Errorf("top-level order = %v", got)
 	}
 	s := string(out)
-	// Values we don't own are kept verbatim, including numbers Go can't
-	// represent and other servers' env blocks.
 	for _, want := range []string{`1e400`, `"OTHER_TOKEN": "test-token-123"`, `"sidebarMode": "epitaxy"`, `"C:\\Users\\me\\Claude"`, `"25165159": false`} {
 		if !strings.Contains(s, want) {
 			t.Errorf("lost %s:\n%s", want, s)
@@ -73,8 +71,6 @@ func TestInstallPreservesEverythingElse(t *testing.T) {
 	if _, ok := parsed.MCPServers["other"]; !ok {
 		t.Error("other server removed")
 	}
-	// Our entry goes after the existing servers, and paths aren't
-	// HTML-escaped (& stays &).
 	if strings.Index(s, `"other"`) > strings.Index(s, `"pets"`) || !strings.Contains(s, `Tools & More`) {
 		t.Errorf("entry placement or escaping:\n%s", s)
 	}
@@ -155,7 +151,6 @@ func TestUninstall(t *testing.T) {
 	if _, removed, err := UninstallJSON(out, MCPServers, "pets"); err != nil || removed {
 		t.Errorf("second uninstall: removed=%v err=%v", removed, err)
 	}
-	// Someone else's entry of the same name is left alone.
 	if _, _, err := UninstallJSON([]byte(`{"mcpServers": {"pets": {"command": "npx"}}}`), MCPServers, "pets"); !errors.Is(err, ErrNotOurs) {
 		t.Errorf("foreign uninstall: err = %v", err)
 	}
@@ -216,7 +211,6 @@ func TestVSCodeFormat(t *testing.T) {
 	if got, err := PlugitEntries(out, VSCodeServers); err != nil || got["pets"].API != "pets" {
 		t.Errorf("entries = %v, %v", got, err)
 	}
-	// The same file read as mcpServers has no plugit entries.
 	if got, _ := PlugitEntries(out, MCPServers); len(got) != 0 {
 		t.Errorf("found entries under the wrong key: %v", got)
 	}

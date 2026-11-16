@@ -12,14 +12,12 @@ import (
 	"testing"
 
 	"github.com/swayam5342/plugit/internal/config"
+	"github.com/swayam5342/plugit/internal/curate"
 	"github.com/swayam5342/plugit/internal/isolate"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/tui"
 )
 
-// petSpecV2 is petSpec after an upstream change: POST /pets is gone,
-// GET /pets/{id} has a new description and parameter, GET /owners is new,
-// and the declared server moved.
 const petSpecV2 = `openapi: 3.0.3
 info: {title: Pets, version: '2'}
 servers:
@@ -47,8 +45,6 @@ paths:
       responses: {'200': {description: ok}}
 `
 
-// richYAML has every kind of override, in two toolsets, including one for
-// an operation the new spec drops.
 const richYAML = `version: 2
 name: pets
 source: {url: https://example.test/openapi.yaml}
@@ -108,8 +104,6 @@ func TestSyncKeepsEveryOverride(t *testing.T) {
 		t.Errorf("toolsets changed:\nbefore %+v\nafter  %+v", before, after)
 	}
 
-	// The new spec is adopted: source, snapshot and a fresh manifest cache
-	// (serve won't re-parse), but never the spec's new server (T3).
 	cfg, _ := config.LoadAPI(p, "pets")
 	if cfg.BaseURL != up.URL || !strings.HasSuffix(cfg.Source.URL, "spec.yaml") || cfg.Source.SHA256 == "" {
 		t.Errorf("config after sync: base=%s source=%s sha=%s", cfg.BaseURL, cfg.Source.URL, cfg.Source.SHA256)
@@ -254,5 +248,44 @@ func TestSyncFailures(t *testing.T) {
 	s.spec = writeSpec(t, petSpecV2)
 	if err := syncAPI(t.Context(), p, "nope", s); err == nil || !errors.Is(err, config.ErrAPINotFound) {
 		t.Errorf("unknown API: %v", err)
+	}
+}
+
+func TestSyncDiffFlagsAutoServedOperations(t *testing.T) {
+	added := model.Tool{Key: "POST /pets/{id}/photos", Name: "addPhoto", Method: "POST", Path: "/pets/{id}/photos"}
+	quiet := model.Tool{Key: "GET /owners", Name: "listOwners", Method: "GET", Path: "/owners"}
+	d := curate.SyncDiff{Added: []curate.OpChange{
+		{Key: added.Key, New: &added, AutoSelected: []string{"by-tag", "posts"}},
+		{Key: quiet.Key, New: &quiet},
+	}}
+	var out bytes.Buffer
+	if err := printSyncDiff(&out, "https://api.example.test", d, "", nil); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(out.String(), "\n")
+	if !strings.Contains(lines[0], "served at once by by-tag, posts") {
+		t.Errorf("auto-served operation not flagged: %q", lines[0])
+	}
+	if strings.Contains(lines[1], "served") {
+		t.Errorf("unselected operation flagged: %q", lines[1])
+	}
+}
+
+func TestSyncDiffSanitizesKeys(t *testing.T) {
+	evil := model.Tool{Key: "GET /pets\x1b]0;owned\a", Name: "listPets", Method: "GET", Path: "/pets"}
+	d := curate.SyncDiff{
+		Added:   []curate.OpChange{{Key: evil.Key, New: &evil}},
+		Changed: []curate.OpChange{{Key: evil.Key, Old: &evil, New: &evil, What: []string{"description"}}},
+		Removed: []curate.OpChange{{Key: evil.Key, Old: &evil}},
+	}
+	var out bytes.Buffer
+	if err := printSyncDiff(&out, "https://api.example.test", d, "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if strings.ContainsAny(out.String(), "\x1b\a") {
+		t.Errorf("the diff carries control characters: %q", out.String())
+	}
+	if got := strings.Count(out.String(), "GET /pets]0;owned"); got != 3 {
+		t.Errorf("keys shown %d times, want 3: %q", got, out.String())
 	}
 }

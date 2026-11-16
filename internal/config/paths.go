@@ -17,13 +17,8 @@ import (
 // directory name.
 var ErrInvalidAPIName = errors.New("invalid API name")
 
-// apiNameRe keeps API names portable and free of path syntax: lowercase
-// letters, digits, '-' and '_', starting with a letter or digit, at most 64
-// characters.
 var apiNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
-// windowsReserved are device names Windows refuses as file or directory
-// names, regardless of extension.
 var windowsReserved = map[string]bool{
 	"con": true, "prn": true, "aux": true, "nul": true,
 	"com1": true, "com2": true, "com3": true, "com4": true, "com5": true,
@@ -132,5 +127,5 @@ func (p Paths) APINames() ([]string, error) {
 			names = append(names, e.Name())
 		}
 	}
-	return names, nil // ReadDir sorts by name
+	return names, nil
 }

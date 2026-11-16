@@ -15,16 +15,12 @@ func TestTextBasics(t *testing.T) {
 	if n := Text("hello"); n != 1 {
 		t.Errorf("one short word = %d, want 1", n)
 	}
-	// Spaces before words merge into them, so a sentence is about one token
-	// per word.
 	if n := Text("List all the pets in the store"); n < 6 || n > 9 {
 		t.Errorf("7-word sentence = %d", n)
 	}
-	// Long identifiers split.
 	if Text("getRepositoryCollaboratorPermissionLevel") <= Text("getRepo") {
 		t.Error("a long identifier should cost more than a short one")
 	}
-	// Non-ASCII text costs at least a token per character.
 	if n := Text("日本語のテキスト"); n < 8 {
 		t.Errorf("CJK text = %d", n)
 	}
@@ -50,8 +46,6 @@ func TestTextPlausibleRange(t *testing.T) {
 			t.Errorf("Text(%d bytes) = %d, outside [%d, %d]: %.60q", len(s), n, len(s)/6, len(s)/2, s)
 		}
 	}
-	// Dense punctuation costs more per byte than prose, as it does in real
-	// tokenizers, but never more than a token per byte.
 	dense := `{"a":1,"b":2,"c":[1,2,3],"d":{"e":"f"}}`
 	prose := samples[1]
 	if float64(Text(dense))/float64(len(dense)) <= float64(Text(prose))/float64(len(prose)) {
@@ -78,7 +72,6 @@ func TestToolAndTotal(t *testing.T) {
 	if Total([]model.Tool{a, b}) != Tool(a)+Tool(b) {
 		t.Error("Total is not the sum of Tool")
 	}
-	// Hidden params aren't sent to the model, so they cost nothing.
 	h := a
 	h.Params = append([]model.Param(nil), a.Params...)
 	h.Params[0].Hidden = true

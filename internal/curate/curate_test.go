@@ -43,7 +43,6 @@ func TestApplySelectsListedKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Manifest order, not map order.
 	if got := names(r); !slices.Equal(got, []string{"gh_listPets", "gh_deletePet"}) {
 		t.Errorf("tools = %v", got)
 	}
@@ -63,11 +62,9 @@ func TestApplyOverrides(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := r.Tools[0].Tool
-	// The prefix also applies to user-chosen names (SPEC §9 item 7).
 	if got.Name != "gh_list_pets" {
 		t.Errorf("name = %q", got.Name)
 	}
-	// Override descriptions are cleaned like spec text.
 	if strings.ContainsRune(got.Description, '\u202e') || strings.Contains(got.Description, "<b>") {
 		t.Errorf("description not cleaned: %q", got.Description)
 	}
@@ -84,7 +81,6 @@ func TestApplyOverrides(t *testing.T) {
 }
 
 func TestApplyFilters(t *testing.T) {
-	// Filters alone select from the whole manifest.
 	r, err := Apply(manifestTools, config.Toolset{IncludeTags: []string{"PETS"}, Methods: []string{"get"}}, "")
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +88,6 @@ func TestApplyFilters(t *testing.T) {
 	if got := names(r); !slices.Equal(got, []string{"gh_listPets", "gh_getPet"}) {
 		t.Errorf("tools = %v", got)
 	}
-	// With listed keys, filters narrow them.
 	r, _ = Apply(manifestTools, config.Toolset{
 		Tools:   map[string]config.ToolOverride{"GET /pets": {}, "POST /pets": {}, "GET /store/inventory": {}},
 		Methods: []string{"GET"}, IncludeTags: []string{"pets"},
@@ -100,7 +95,6 @@ func TestApplyFilters(t *testing.T) {
 	if got := names(r); !slices.Equal(got, []string{"gh_listPets"}) {
 		t.Errorf("narrowed tools = %v", got)
 	}
-	// Neither keys nor filters: nothing is selected.
 	r, _ = Apply(manifestTools, config.Toolset{}, "")
 	if len(r.Tools) != 0 {
 		t.Errorf("empty toolset selected %v", names(r))

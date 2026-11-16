@@ -25,17 +25,15 @@ import (
 )
 
 type syncSettings struct {
-	spec    string // new spec location; "" re-fetches source.url
-	toolset string // where new operations go (default: default)
-	yes     bool   // apply without the review screen
-	addNew  bool   // with --yes: add every new operation to the toolset
+	spec    string
+	toolset string
+	yes     bool
+	addNew  bool
 	out     io.Writer
 	stderr  io.Writer
 	parse   func(context.Context, []byte, openapi.Options) (*model.Manifest, error)
 	info    BuildInfo
-	// review shows the Sync diff screen and returns the new operations to
-	// add; nil means no terminal.
-	review func(ctx context.Context, in tui.SyncInput) ([]model.OpKey, error)
+	review  func(ctx context.Context, in tui.SyncInput) ([]model.OpKey, error)
 }
 
 func newSyncCmd(g *globalFlags, info BuildInfo) *cobra.Command {
@@ -105,14 +103,12 @@ func syncAPI(ctx context.Context, p config.Paths, name string, s syncSettings) e
 		_, err := fmt.Fprintf(s.out, "%s is up to date: the spec hasn't changed.\n", name)
 		return err
 	}
-	updated, err := s.parse(ctx, sp.Bytes, openapi.Options{Prefix: cfg.Prefix})
+	updated, err := s.parse(ctx, sp.Bytes, openapi.Options{Prefix: cfg.Prefix, AllowUnsafePaths: cfg.Network.AllowInsecure})
 	if err != nil {
 		return err
 	}
 	diff := curate.DiffManifests(old, updated, *cfg)
 
-	// Lint the new spec against the current toolsets: an update is where
-	// poisoned descriptions would arrive (T4).
 	findings := lint.Run(lint.Input{API: *cfg, Tools: updated.Tools, Hidden: hiddenParams(cfg.Auth, cfg.Fixed)})
 	lintNote := ""
 	if n := lint.Summarize(findings).Errors; n > 0 {
@@ -122,7 +118,6 @@ func syncAPI(ctx context.Context, p config.Paths, name string, s syncSettings) e
 	var add []model.OpKey
 	switch {
 	case diff.Empty():
-		// Nothing to review: just record the new snapshot.
 	case s.review != nil:
 		add, err = s.review(ctx, tui.SyncInput{API: name, Diff: diff, BaseURL: cfg.BaseURL, Toolset: tsName, LintNote: lintNote})
 		if errors.Is(err, tui.ErrCancelled) {
@@ -194,10 +189,14 @@ func printSyncDiff(w io.Writer, baseURL string, d curate.SyncDiff, lintNote stri
 		return "  (in " + strings.Join(c.Listed, ", ") + ")"
 	}
 	for _, a := range d.Added {
-		fmt.Fprintf(&b, "+ %s  %s\n", a.Key, tui.Safe(a.New.Name))
+		note := ""
+		if len(a.AutoSelected) > 0 {
+			note = "  ! served at once by " + strings.Join(a.AutoSelected, ", ") + " (selected by tags or methods)"
+		}
+		fmt.Fprintf(&b, "+ %s  %s%s\n", tui.Safe(string(a.Key)), tui.Safe(a.New.Name), note)
 	}
 	for _, c := range d.Changed {
-		fmt.Fprintf(&b, "~ %s  %s%s\n", c.Key, strings.Join(c.What, ", "), served(c))
+		fmt.Fprintf(&b, "~ %s  %s%s\n", tui.Safe(string(c.Key)), strings.Join(c.What, ", "), served(c))
 		if len(c.Listed) > 0 && c.New != nil {
 			for _, what := range c.What {
 				if what == "description" {
@@ -211,7 +210,7 @@ func printSyncDiff(w io.Writer, baseURL string, d curate.SyncDiff, lintNote stri
 		if len(r.Listed) > 0 {
 			note = "  (listed in " + strings.Join(r.Listed, ", ") + "; overrides kept)"
 		}
-		fmt.Fprintf(&b, "- %s%s\n", r.Key, note)
+		fmt.Fprintf(&b, "- %s%s\n", tui.Safe(string(r.Key)), note)
 	}
 	if lintNote != "" {
 		fmt.Fprintf(&b, "\n✗ %s\n", lintNote)

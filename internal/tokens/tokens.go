@@ -21,13 +21,12 @@ import (
 	"github.com/swayam5342/plugit/internal/schema"
 )
 
-// Calibration constants. Adjust them against measured counts, not by feel.
 const (
-	wordLen       = 7 // letters a single token usually covers
-	longWordChunk = 5 // letters per token beyond that
+	wordLen       = 7
+	longWordChunk = 5
 	digitChunk    = 3
 	punctChunk    = 2
-	toolOverhead  = 8 // per-tool framing the client adds around name/description/schema
+	toolOverhead  = 8
 )
 
 // Text estimates the tokens in s.
@@ -39,10 +38,9 @@ func Text(s string) int {
 		case r >= utf8.RuneSelf:
 			n++
 			i += size
-		case isLetter(s[i]): // r is ASCII here, so s[i] is r
+		case isLetter(s[i]):
 			j := i
 			for j < len(s) && isLetter(s[j]) {
-				// Split camelCase: a lowercase letter followed by an uppercase one.
 				if j > i && isUpper(s[j]) && isLower(s[j-1]) {
 					break
 				}
@@ -58,7 +56,6 @@ func Text(s string) int {
 			n += ceilDiv(j-i, digitChunk)
 			i = j
 		case r == ' ':
-			// A single space joins the next word; extra spaces cost.
 			j := i
 			for j < len(s) && s[j] == ' ' {
 				j++

@@ -7,9 +7,7 @@ import (
 	"github.com/swayam5342/plugit/internal/cli"
 )
 
-// Set at build time, e.g.
-//
-//	go build -ldflags "-X main.version=v0.1.0 -X main.commit=abc1234 -X main.date=2026-11-12T00:00:00Z"
+// go build -ldflags "-X main.version=v0.1.0 -X main.commit=abc1234 -X main.date=2026-11-12T00:00:00Z"
 var (
 	version = ""
 	commit  = ""

@@ -52,7 +52,6 @@ func currentUserSID() (*windows.SID, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading process token user: %w", err)
 	}
-	// Copy: the SID points into tu's buffer.
 	sid, err := tu.User.Sid.Copy()
 	if err != nil {
 		return nil, fmt.Errorf("copying user SID: %w", err)

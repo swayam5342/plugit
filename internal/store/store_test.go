@@ -139,7 +139,7 @@ func TestStats(t *testing.T) {
 	if err != nil || len(st) != 2 {
 		t.Fatalf("Stats = %+v, %v", st, err)
 	}
-	lp := st[0] // most calls first
+	lp := st[0]
 	if lp.Tool != "list_pets" || lp.Calls != 20 || lp.Errors != 4 || lp.Bytes != 2000 {
 		t.Errorf("list_pets = %+v", lp)
 	}
@@ -210,7 +210,7 @@ func TestRecorder(t *testing.T) {
 		t.Errorf("Record blocked for %v", d)
 	}
 	rec.Close()
-	rec.Record(call("pets", "late", t0, 1, OK)) // after Close: ignored, no panic
+	rec.Record(call("pets", "late", t0, 1, OK))
 	got, _ := db.List(t.Context(), Filter{Limit: 5000})
 	if int64(len(got))+rec.Dropped() != 2000 {
 		t.Errorf("stored %d + dropped %d != 2000", len(got), rec.Dropped())

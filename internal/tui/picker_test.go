@@ -131,7 +131,7 @@ func TestPickerToggleAndSave(t *testing.T) {
 		t.Errorf("footer after toggle:\n%s", view(p))
 	}
 	moveTo(t, p, "pp_listPets")
-	press(p, "space") // deselect
+	press(p, "space")
 	cmd := press(p, "s")
 	if !isQuit(cmd) {
 		t.Fatal("s should save and quit")
@@ -154,7 +154,6 @@ func TestPickerGroupToggle(t *testing.T) {
 	if ts, _ := p.Result(); len(ts.Tools) != 0 {
 		t.Errorf("second group toggle left %v", selectedKeys(ts))
 	}
-	// Collapsing hides the group's tools.
 	press(p, "enter")
 	if strings.Contains(view(p), "pp_listPets") {
 		t.Errorf("collapsed group still shows its tools:\n%s", view(p))
@@ -168,12 +167,11 @@ func TestPickerFilter(t *testing.T) {
 	if !strings.Contains(v, "pp_getInventory") || strings.Contains(v, "pp_listPets") {
 		t.Errorf("filtered view:\n%s", v)
 	}
-	// "a" selects everything the filter shows, and only that.
 	press(p, "a")
 	if ts, _ := p.Result(); !slices.Equal(selectedKeys(ts), []string{"GET /store/inventory"}) {
 		t.Errorf("select visible = %v", selectedKeys(ts))
 	}
-	press(p, "esc") // clears the filter
+	press(p, "esc")
 	if !strings.Contains(view(p), "pp_listPets") {
 		t.Errorf("filter not cleared:\n%s", view(p))
 	}
@@ -193,7 +191,6 @@ func TestPickerRenameAndDescribe(t *testing.T) {
 		t.Errorf("override = %+v", o)
 	}
 
-	// Invalid names are refused and the editor stays open.
 	press(p, "r", "ctrl+u", "bad name", "enter")
 	if ts, _ := p.Result(); ts.Tools["GET /pets"].Name != "list_pets" {
 		t.Errorf("invalid name accepted: %+v", ts.Tools["GET /pets"])
@@ -203,7 +200,6 @@ func TestPickerRenameAndDescribe(t *testing.T) {
 	}
 	press(p, "esc")
 
-	// An empty name resets to the generated one.
 	press(p, "r", "ctrl+u", "enter")
 	if ts, _ := p.Result(); ts.Tools["GET /pets"].Name != "" {
 		t.Errorf("reset failed: %+v", ts.Tools["GET /pets"])
@@ -229,7 +225,7 @@ func TestPickerPolicyCycle(t *testing.T) {
 	if ts, _ := p.Result(); ts.Tools["POST /pets"].Policy != "confirm" {
 		t.Errorf("policy = %q", ts.Tools["POST /pets"].Policy)
 	}
-	press(p, "p", "p", "p") // deny, allow, back to none
+	press(p, "p", "p", "p")
 	if ts, _ := p.Result(); ts.Tools["POST /pets"].Policy != "" {
 		t.Errorf("policy after full cycle = %q", ts.Tools["POST /pets"].Policy)
 	}

@@ -91,7 +91,7 @@ func TestStatsEmptyAndInteractive(t *testing.T) {
 func TestStatsBudget(t *testing.T) {
 	up := newUpstream(t)
 	p := setupAPI(t, up.URL)
-	if err := lintAPI(t.Context(), p, "pets", lintDeps(&bytes.Buffer{})); err != nil { // builds the manifest cache
+	if err := lintAPI(t.Context(), p, "pets", lintDeps(&bytes.Buffer{})); err != nil {
 		t.Fatal(err)
 	}
 	b := apiBudget(p, "pets", BuildInfo{})

@@ -22,7 +22,6 @@ func TestParseClient(t *testing.T) {
 			t.Errorf("ParseClient(%q) = %q, %v; want %q", s, c, err, want)
 		}
 	}
-	// ChatGPT only connects to remote MCP servers; point at Codex instead.
 	if _, err := ParseClient("chatgpt"); err == nil || !strings.Contains(err.Error(), "codex") {
 		t.Errorf("chatgpt: %v", err)
 	}
@@ -107,19 +106,15 @@ func TestWriteWithBackup(t *testing.T) {
 		t.Errorf("config = %q", b)
 	}
 
-	// A second write in the same second keeps both backups.
 	backup2, err := WriteWithBackup(path, []byte("newer\n"), now)
 	if err != nil || backup2 == backup {
 		t.Errorf("second backup = %q, %v", backup2, err)
 	}
 
-	// No existing file: nothing to back up, the file is created.
 	fresh := filepath.Join(dir, "mcp.json")
 	if b, err := WriteWithBackup(fresh, []byte("{}\n"), now); err != nil || b != "" {
 		t.Errorf("fresh: backup=%q err=%v", b, err)
 	}
-	// The client's directory must exist: plugit doesn't create config dirs
-	// for clients that aren't installed.
 	if _, err := WriteWithBackup(filepath.Join(dir, "absent", "x.json"), []byte("{}"), now); !errors.Is(err, ErrClientNotFound) {
 		t.Errorf("missing dir: err = %v", err)
 	}

@@ -24,8 +24,8 @@ import (
 type Result struct {
 	Text      string
 	IsError   bool
-	Status    int // HTTP status, 0 if no response
-	Bytes     int // response body bytes read
+	Status    int
+	Bytes     int
 	Truncated bool
 }
 
@@ -43,7 +43,7 @@ func Call(ctx context.Context, doer httpx.Doer, t model.Tool, args map[string]an
 			return failure(t, red, "couldn't get an access token: "+err.Error())
 		}
 		tg.Auth.Secret = tok
-		red = red.With(tok) // fetched while serving: unknown when red was built
+		red = red.With(tok)
 	}
 	req, err := Build(ctx, t, args, tg)
 	if err != nil {
@@ -66,7 +66,7 @@ func Call(ctx context.Context, doer httpx.Doer, t model.Tool, args map[string]an
 		tg.Auth.Unauthorized()
 	}
 	if res.IsError || truncated {
-		pick = nil // errors and cut-off bodies are shown whole
+		pick = nil
 	}
 	text := shape(resp, body, truncated, pick)
 	if res.IsError {
@@ -160,7 +160,7 @@ func filterJSON(ct string, body []byte, pick *jsonpick.Picker) ([]byte, bool) {
 		return nil, false
 	}
 	dec := json.NewDecoder(bytes.NewReader(body))
-	dec.UseNumber() // keep numbers exactly as sent
+	dec.UseNumber()
 	var v any
 	if dec.Decode(&v) != nil || dec.More() {
 		return nil, false

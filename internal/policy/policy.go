@@ -20,11 +20,11 @@ var ErrInvalid = errors.New("invalid policy value")
 // Mode is an API-wide policy.
 type Mode string
 
-// Policy modes.
+// Policy modes. ReadOnly is the default.
 const (
-	ReadOnly      Mode = "read-only"      // only read-only tools run (the default)
-	ConfirmWrites Mode = "confirm-writes" // write and destructive tools need confirmation
-	Full          Mode = "full"           // everything runs unless overridden
+	ReadOnly      Mode = "read-only"
+	ConfirmWrites Mode = "confirm-writes"
+	Full          Mode = "full"
 )
 
 // Override is a per-tool policy.
@@ -93,7 +93,6 @@ func Check(safety model.Safety, mode Mode, override Override) Result {
 	}
 	switch override {
 	case None, OverrideAllow:
-		// "allow" can't exceed the ceiling, so it changes nothing here.
 	case OverrideConfirm:
 		if ceiling < Confirm {
 			ceiling, reason = Confirm, "this tool is set to require confirmation"

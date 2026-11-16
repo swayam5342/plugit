@@ -20,8 +20,6 @@ import (
 	"github.com/swayam5342/plugit/internal/secrets"
 )
 
-// ---- list ----
-
 func newListCmd(g *globalFlags) *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
@@ -44,7 +42,7 @@ type apiSummary struct {
 	Name     string         `json:"name"`
 	BaseURL  string         `json:"base_url,omitempty"`
 	Mode     string         `json:"mode,omitempty"`
-	Toolsets map[string]int `json:"toolsets,omitempty"` // toolset -> listed keys
+	Toolsets map[string]int `json:"toolsets,omitempty"`
 	Error    string         `json:"error,omitempty"`
 }
 
@@ -92,8 +90,6 @@ func firstLine(s string) string {
 	l, _, _ := strings.Cut(s, "\n")
 	return l
 }
-
-// ---- remove ----
 
 func newRemoveCmd(g *globalFlags) *cobra.Command {
 	var yesFlag bool
@@ -165,14 +161,12 @@ func clientEntries(info clients.Info, env clients.Env) map[string]clients.Plugit
 	return entries
 }
 
-// ---- doctor ----
-
 type doctorDeps struct {
 	paths     config.Paths
 	out       io.Writer
 	env       clients.Env
 	lookupEnv func(string) (string, bool)
-	keyring   secrets.KeyringGetter // nil: keyring items aren't checked
+	keyring   secrets.KeyringGetter
 	exe       func() (string, error)
 	lookPath  func(string) (string, error)
 	stat      func(string) error
@@ -288,14 +282,13 @@ func doctorAPI(d doctorDeps, r *report, name string) {
 		r.fail("spec snapshot: %v", err)
 	} else {
 		cache, _ := d.paths.Manifest(name)
-		if _, err := config.ReadManifest(cache, config.CacheKey{SpecSHA256: sum, Prefix: cfg.Prefix, Parser: parserID(d.info)}); err != nil {
+		if _, err := config.ReadManifest(cache, config.CacheKey{SpecSHA256: sum, Prefix: cfg.Prefix, Parser: parserID(d.info), UnsafePaths: cfg.Network.AllowInsecure}); err != nil {
 			r.warn("manifest cache missing or stale: the next serve parses the spec once (slower start)")
 		} else {
 			r.ok("manifest cache fresh")
 		}
 	}
 
-	// Relaxed security defaults (SPEC §5.4).
 	if cfg.Network.AllowPrivate {
 		r.warn("network.allow_private is true: loopback and private-network addresses are reachable")
 	}

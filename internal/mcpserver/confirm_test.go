@@ -17,14 +17,11 @@ import (
 	"github.com/swayam5342/plugit/internal/store"
 )
 
-// createPetBody takes a name and a secret-looking field, to check what the
-// confirmation shows.
 var createPetBody = tool("POST /pets", "createPet",
 	model.Param{Name: "name", UpstreamName: "name", In: model.InBody, Schema: json.RawMessage(`{"type":"string"}`)},
 	model.Param{Name: "api_token", UpstreamName: "api_token", In: model.InBody, Schema: json.RawMessage(`{"type":"string"}`)},
 )
 
-// elicitor answers elicitation requests like a user would.
 type elicitor struct {
 	asked   atomic.Int32
 	message atomic.Value
@@ -82,7 +79,7 @@ func TestConfirmViaElicitation(t *testing.T) {
 	}
 }
 
-// A clients that drops the field (accept, no content) counts as yes.
+// A client that drops the field (accept, no content) counts as yes.
 func TestConfirmAcceptWithoutContent(t *testing.T) {
 	e := &elicitor{answer: accept(nil)}
 	r := confirmRig(t, e, nil)
@@ -110,7 +107,7 @@ func TestConfirmRefusals(t *testing.T) {
 			if r.hits.Load() != 0 {
 				t.Fatalf("the API was called (hits=%d)", r.hits.Load())
 			}
-			if tc.want == "" { // the client failed to answer: a protocol error
+			if tc.want == "" {
 				if err == nil && !res.IsError {
 					t.Errorf("call succeeded: %s", text(res))
 				}
@@ -183,5 +180,31 @@ func TestConfirmOlderProtocol(t *testing.T) {
 	res, err := r.call(t, "createPet", map[string]any{"name": "rex"})
 	if err != nil || res.IsError || r.hits.Load() != 1 || e.asked.Load() != 1 {
 		t.Fatalf("err=%v isError=%v hits=%d asked=%d text=%s", err, res != nil && res.IsError, r.hits.Load(), e.asked.Load(), text(res))
+	}
+}
+
+func TestConfirmStateSingleUse(t *testing.T) {
+	h := &handler{tool: Tool{Tool: createPetBody}, key: []byte("0123456789abcdef0123456789abcdef")}
+	args := map[string]any{"name": "rex"}
+	at := now()
+	first, second := h.state(at, args), h.state(at, args)
+	if first == second {
+		t.Fatal("two confirmations for the same arguments share a state")
+	}
+	if err := h.checkState(first, args); err != nil {
+		t.Fatalf("valid state refused: %v", err)
+	}
+	if err := h.checkState(first, args); err == nil || !strings.Contains(err.Error(), "already used") {
+		t.Errorf("replayed state: err = %v, want already used", err)
+	}
+	if err := h.checkState(second, args); err != nil {
+		t.Errorf("the other confirmation was refused: %v", err)
+	}
+	third := h.state(at, args)
+	if err := h.checkState(third, map[string]any{"name": "other"}); err == nil {
+		t.Fatal("state accepted for different arguments")
+	}
+	if err := h.checkState(third, args); err != nil {
+		t.Errorf("state spent by a failed check: %v", err)
 	}
 }

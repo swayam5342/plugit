@@ -34,7 +34,7 @@ func FuzzEncodeBody(f *testing.F) {
 			}
 		}
 		for _, ct := range []string{ctForm, ctMultipart} {
-			body, gotCT, err := encodeBody(&model.Body{ContentType: ct, Encoding: enc}, args, nil, false)
+			body, gotCT, err := encodeBody(&model.Body{ContentType: ct, Encoding: enc}, args, nil, false, nil)
 			if err != nil {
 				continue
 			}

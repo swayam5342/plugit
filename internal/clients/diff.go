@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-// maxDiffCells bounds the line-diff table; past it, Diff summarizes.
 const maxDiffCells = 4_000_000
 
 // Diff returns a line diff of before and after: "- " for removed lines and
@@ -20,7 +19,6 @@ func Diff(before, after []byte) string {
 	if len(a)*len(b) > maxDiffCells {
 		return fmt.Sprintf("(file changed: %d lines before, %d after)\n", len(a), len(b))
 	}
-	// lcs[i][j] = length of the LCS of a[i:] and b[j:].
 	lcs := make([][]int, len(a)+1)
 	for i := range lcs {
 		lcs[i] = make([]int, len(b)+1)
@@ -35,7 +33,7 @@ func Diff(before, after []byte) string {
 		}
 	}
 	type op struct {
-		kind byte // ' ', '-', '+'
+		kind byte
 		text string
 	}
 	var ops []op

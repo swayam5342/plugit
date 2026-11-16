@@ -42,10 +42,10 @@ const defaultToolset = "default"
 type serveSettings struct {
 	paths    config.Paths
 	name     string
-	toolset  string       // "" means default
-	http     string       // listen address for the HTTP transport; "" serves stdio
-	newToken bool         // with http: replace the stored token
-	ready    func(string) // with http: called with the endpoint URL once listening
+	toolset  string
+	http     string
+	newToken bool
+	ready    func(string)
 }
 
 func newServeCmd(g *globalFlags, info BuildInfo) *cobra.Command {
@@ -92,7 +92,7 @@ replaces it. Browser requests from non-loopback origins are refused.`,
 func serveAPI(ctx context.Context, s serveSettings, d runDeps) error {
 	if s.http != "" {
 		if _, err := mcpserver.ListenAddr(s.http); err != nil {
-			return err // before anything is loaded or opened
+			return err
 		}
 	}
 	logger := slog.New(slog.NewTextHandler(d.stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -106,11 +106,9 @@ func serveAPI(ctx context.Context, s serveSettings, d runDeps) error {
 			listed++
 		}
 	}
-	// "selected" counts the toolset; "listed" is what the mode lets clients see.
 	logger.Info("plugit serve serving",
 		"api", a.cfg.Name, "toolset", a.toolset, "selected", len(a.tools), "listed", listed, "mode", a.cfg.Policy.Mode,
-		"base_url", a.target.BaseURL.String()) // validated: no userinfo or query
-	// Rate limits are per serve process: each MCP client has its own budget.
+		"base_url", a.target.BaseURL.String())
 	var apiLimit *policy.Limiter
 	if r, err := policy.ParseRate(a.cfg.Policy.RateLimit); err == nil {
 		apiLimit = policy.NewLimiter(r, nil)
@@ -142,7 +140,6 @@ func serveAPI(ctx context.Context, s serveSettings, d runDeps) error {
 		return err
 	}
 	return mcpserver.ServeHTTP(ctx, cfg, addr, token, func(endpoint string) {
-		// The token itself is never logged: only where to find it.
 		logger.Info("plugit serve listening (Streamable HTTP)", "url", endpoint, "token_file", tokenPath,
 			"header", "Authorization: Bearer <contents of token_file>")
 		if s.ready != nil {
@@ -207,8 +204,6 @@ func openCallLog(ctx context.Context, p config.Paths, a *active, logger *slog.Lo
 	}
 }
 
-// active is a loaded API, ready to call: its active toolset with resolved
-// credentials.
 type active struct {
 	cfg     *config.API
 	toolset string
@@ -251,7 +246,7 @@ func loadActive(ctx context.Context, s serveSettings, d runDeps, logger *slog.Lo
 		return nil, fmt.Errorf("toolset %q selects no tools: add operations with `plugit edit %s`", tsName, cfg.Name)
 	}
 
-	baseURL, err := url.Parse(cfg.BaseURL) // validated by config.LoadAPI
+	baseURL, err := url.Parse(cfg.BaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("base_url: %w", err)
 	}
@@ -266,7 +261,7 @@ func loadActive(ctx context.Context, s serveSettings, d runDeps, logger *slog.Lo
 			mt.Limit = policy.NewLimiter(r, nil)
 		}
 		if p, err := jsonpick.Parse(ts.Tools[string(st.Tool.Key)].ResponseFields); err == nil {
-			mt.Fields = p // validated with the config
+			mt.Fields = p
 		}
 		tools = append(tools, mt)
 	}
@@ -307,7 +302,7 @@ func loadManifest(ctx context.Context, p config.Paths, cfg *config.API, d runDep
 	if err != nil {
 		return nil, err
 	}
-	key := config.CacheKey{SpecSHA256: sum, Prefix: cfg.Prefix, Parser: parserID(d.info)}
+	key := config.CacheKey{SpecSHA256: sum, Prefix: cfg.Prefix, Parser: parserID(d.info), UnsafePaths: cfg.Network.AllowInsecure}
 	m, err := config.ReadManifest(cachePath, key)
 	if err == nil {
 		return m, nil
@@ -315,7 +310,7 @@ func loadManifest(ctx context.Context, p config.Paths, cfg *config.API, d runDep
 	if !errors.Is(err, os.ErrNotExist) {
 		logger.Info("re-parsing the spec snapshot", "reason", err.Error())
 	}
-	m, err = d.parse(ctx, data, openapi.Options{Prefix: cfg.Prefix})
+	m, err = d.parse(ctx, data, openapi.Options{Prefix: cfg.Prefix, AllowUnsafePaths: cfg.Network.AllowInsecure})
 	if err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", snapPath, err)
 	}
@@ -350,8 +345,6 @@ func buildTarget(cfg *config.API, baseURL *url.URL, d runDeps, userAgent string)
 	switch a.Type {
 	case config.AuthNone:
 	case config.AuthOAuth2:
-		// Access tokens are fetched per call (and cached in memory), only
-		// ever sent to the pinned base_url origin (SPEC M6 design note).
 		oc, err := oauthConfig(cfg, res)
 		if err != nil {
 			return tg, nil, err

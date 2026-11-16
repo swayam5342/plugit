@@ -10,8 +10,6 @@ import (
 	"testing"
 )
 
-// Fake tokens are assembled at runtime so secret scanners don't flag the
-// test source. None of these are real credentials.
 var (
 	fakeGitHub    = "ghp_" + strings.Repeat("A1b2", 9)
 	fakeGitHubPAT = "github_pat_" + strings.Repeat("Ab3_", 10)
@@ -257,8 +255,6 @@ func FuzzStringNeverLeaksSecret(f *testing.F) {
 	f.Add("a", "aaaa", "a")
 	f.Add("s3cr+t/=x y", "?k=", "&x=1")
 	f.Fuzz(func(t *testing.T, secret, before, after string) {
-		// The mask itself contains '*', so a secret made of '*' would always
-		// "appear" in the output. Skip those.
 		if secret == "" || strings.Contains(secret, "*") {
 			t.Skip()
 		}
@@ -300,7 +296,6 @@ func TestArgs(t *testing.T) {
 		t.Error("Args changed its input")
 	}
 
-	// Values only masks resolved secrets and token formats (log.args: full).
 	full := r.Values(in)
 	if full["api_key"] != "abc" || full["note"] != "contains ***" {
 		t.Errorf("Values = %#v", full)

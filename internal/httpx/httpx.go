@@ -30,20 +30,15 @@ import (
 // Defaults applied when the corresponding Options field is zero.
 const (
 	DefaultTimeout          = 30 * time.Second
-	DefaultMaxResponseBytes = 1 << 20 // 1 MiB
+	DefaultMaxResponseBytes = 1 << 20
 	DefaultMaxRedirects     = 5
 )
 
 // Sentinel errors callers can match with errors.Is.
 var (
-	// ErrBlockedAddress means the dial target is not allowed by the SSRF guard.
-	ErrBlockedAddress = errors.New("blocked address")
-	// ErrRedirectBlocked means a redirect pointed at a different origin.
-	ErrRedirectBlocked = errors.New("cross-origin redirect blocked")
-	// ErrTooManyRedirects means the redirect limit was exceeded.
-	ErrTooManyRedirects = errors.New("too many redirects")
-	// ErrResponseTruncated is returned by a response body's Read, after the
-	// first MaxResponseBytes bytes, when the upstream sent more.
+	ErrBlockedAddress    = errors.New("blocked address")
+	ErrRedirectBlocked   = errors.New("cross-origin redirect blocked")
+	ErrTooManyRedirects  = errors.New("too many redirects")
 	ErrResponseTruncated = errors.New("response truncated at size cap")
 )
 
@@ -59,18 +54,11 @@ type Resolver interface {
 
 // Options configures NewClient. The zero value is the secure default.
 type Options struct {
-	// AllowPrivate permits loopback, RFC1918, CGNAT, ULA and IPv6
-	// link-local targets. Metadata and other always-blocked ranges stay
-	// blocked.
-	AllowPrivate bool
-	// Timeout bounds the whole request, including reading the body.
-	Timeout time.Duration
-	// MaxResponseBytes caps how much of a response body can be read.
+	AllowPrivate     bool
+	Timeout          time.Duration
 	MaxResponseBytes int64
-	// MaxRedirects caps same-origin redirects.
-	MaxRedirects int
-	// Resolver resolves hostnames; nil means net.DefaultResolver.
-	Resolver Resolver
+	MaxRedirects     int
+	Resolver         Resolver
 }
 
 // NewClient returns a hardened *http.Client configured by opts.
@@ -98,7 +86,7 @@ func NewClient(opts Options) *http.Client {
 		},
 	}
 	tr := &http.Transport{
-		Proxy:                  nil, // never honor HTTP(S)_PROXY; see package doc
+		Proxy:                  nil,
 		DialContext:            d.DialContext,
 		ForceAttemptHTTP2:      true,
 		TLSClientConfig:        &tls.Config{MinVersion: tls.VersionTLS12},
@@ -130,9 +118,6 @@ func checkRedirect(maxRedirects int) func(*http.Request, []*http.Request) error 
 	}
 }
 
-// guardedDialer resolves hostnames itself and dials each resolved address
-// through a net.Dialer whose Control hook enforces the SSRF policy on the
-// exact address being connected.
 type guardedDialer struct {
 	resolver     Resolver
 	dialer       *net.Dialer

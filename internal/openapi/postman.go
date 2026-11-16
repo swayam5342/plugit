@@ -12,15 +12,13 @@ import (
 	"github.com/swayam5342/plugit/internal/naming"
 )
 
-// Limits on a Postman collection (SPEC M6 design note: Postman import).
 const (
-	maxPostmanDepth  = 16   // folder nesting
-	maxPostmanItems  = 2000 // requests imported
-	maxInferDepth    = 12   // schema inferred from an example body
+	maxPostmanDepth  = 16
+	maxPostmanItems  = 2000
+	maxInferDepth    = 12
 	postmanSchemaURL = "schema.getpostman.com/json/collection/v2"
 )
 
-// pmText is Postman's description: a string or {"content": "..."}.
 type pmText string
 
 func (t *pmText) UnmarshalJSON(b []byte) error {
@@ -46,7 +44,6 @@ type pmKV struct {
 	Type        string `json:"type"`
 }
 
-// pmURL is a request URL: a string (v2.0) or an object (v2.1).
 type pmURL struct {
 	Raw      string `json:"raw"`
 	Query    []pmKV `json:"query"`
@@ -119,7 +116,6 @@ func isPostman(data []byte) bool {
 	return json.Unmarshal(data, &head) == nil && strings.Contains(head.Info.Schema, postmanSchemaURL)
 }
 
-// postmanMethods are the methods plugit serves.
 var postmanMethods = []string{"GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE"}
 
 // parsePostman converts a Postman v2.0/v2.1 collection into a manifest.
@@ -142,7 +138,6 @@ func parsePostman(data []byte, opts Options) (*model.Manifest, error) {
 	}
 	b.m.Title = naming.CleanText(col.Info.Name, 200)
 
-	// Variables that hold an absolute URL are base URLs.
 	vars := map[string]string{}
 	for _, v := range col.Variable {
 		if u, err := url.Parse(v.Value); err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" {
@@ -199,7 +194,7 @@ func (p *pmWalk) walk(items []pmItem, tag string, depth int) {
 		case it.Item != nil:
 			t := tag
 			if t == "" {
-				t = it.Name // the top-level folder groups everything inside it
+				t = it.Name
 			}
 			p.walk(it.Item, t, depth+1)
 		}
@@ -227,6 +222,9 @@ func (p *pmWalk) request(it pmItem, tag string) {
 		b.warn(fmt.Sprintf("request %q has no usable URL; skipped", naming.CleanText(it.Name, 80)))
 		return
 	}
+	if !b.validPath(path) {
+		return
+	}
 	var tags []string
 	if tag != "" {
 		tags = []string{tag}
@@ -235,7 +233,6 @@ func (p *pmWalk) request(it pmItem, tag string) {
 	if desc == "" {
 		desc = string(it.Description)
 	}
-	// In Postman the description is the useful text; the name is a label.
 	summary := ""
 	if strings.TrimSpace(desc) == "" {
 		summary = it.Name
@@ -269,7 +266,7 @@ func (p *pmWalk) request(it pmItem, tag string) {
 	for _, h := range r.Header {
 		switch strings.ToLower(h.Key) {
 		case "", "accept", "content-type", "user-agent", "content-length":
-			continue // plugit sets these itself
+			continue
 		}
 		if h.Disabled {
 			continue
@@ -315,7 +312,6 @@ func (p *pmWalk) splitURL(raw string) (path string, query []pmKV, pathVars []str
 			resolved = unescaped
 		}
 	case strings.HasPrefix(resolved, "{{"):
-		// An unknown host variable: drop it, keep the path.
 		if i := strings.Index(resolved, "}}"); i >= 0 {
 			resolved = resolved[i+2:]
 		}

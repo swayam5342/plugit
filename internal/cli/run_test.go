@@ -21,7 +21,7 @@ func TestRunSettingsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.mode != policy.ReadOnly || s.maxTools != 40 || s.timeout != 30*time.Second || s.allowPrivate {
+	if s.mode != policy.ReadOnly || s.maxTools != 40 || s.timeout != 30*time.Second || s.allowPrivate || s.allowInsecure {
 		t.Errorf("defaults = %+v", s)
 	}
 }
@@ -30,18 +30,17 @@ func TestRunSettingsPrecedence(t *testing.T) {
 	e := env(map[string]string{
 		"PLUGIT_SPEC": "from-env.json", "PLUGIT_BASE_URL": "https://env.example.test",
 		"PLUGIT_PREFIX": "envp", "PLUGIT_MODE": "full", "PLUGIT_MAX_TOOLS": "7",
-		"PLUGIT_TIMEOUT": "5s", "PLUGIT_ALLOW_PRIVATE": "true", "PLUGIT_TAGS": "a,b",
+		"PLUGIT_TIMEOUT": "5s", "PLUGIT_ALLOW_PRIVATE": "true", "PLUGIT_ALLOW_INSECURE": "true", "PLUGIT_TAGS": "a,b",
 	})
 	s, err := resolveRunSettings(runFlags{}, nil, e)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if s.spec != "from-env.json" || s.baseURL != "https://env.example.test" || s.prefix != "envp" ||
-		s.mode != policy.Full || s.maxTools != 7 || s.timeout != 5*time.Second || !s.allowPrivate || !slices.Equal(s.tags, []string{"a", "b"}) {
+		s.mode != policy.Full || s.maxTools != 7 || s.timeout != 5*time.Second || !s.allowPrivate || !s.allowInsecure || !slices.Equal(s.tags, []string{"a", "b"}) {
 		t.Errorf("env settings = %+v", s)
 	}
 
-	// Explicitly set flags beat env vars.
 	f := runFlags{spec: "flag.json", baseURL: "https://flag.example.test", mode: "read-only", maxTools: 3, tags: []string{"c"}}
 	s, err = resolveRunSettings(f, map[string]bool{"base-url": true, "mode": true, "max-tools": true, "tags": true}, e)
 	if err != nil {
@@ -127,8 +126,6 @@ func TestChooseBaseURL(t *testing.T) {
 		{"", []string{"https://api.example.test/v1"}, false, "https://api.example.test/v1"},
 		{"https://pinned.example.test", []string{"https://api.example.test"}, true, "https://pinned.example.test"},
 		{"https://pinned.example.test/", nil, false, "https://pinned.example.test/"},
-		// Same origin apart from the scheme (Swagger 2.0 schemes: [https, http]):
-		// https is adopted, whatever the order.
 		{"", []string{"http://petstore.example.test/v2", "https://petstore.example.test/v2"}, false, "https://petstore.example.test/v2"},
 		{"", []string{"https://petstore.example.test/v2", "http://petstore.example.test/v2"}, false, "https://petstore.example.test/v2"},
 		{"", []string{"https://a.example.test", "https://a.example.test"}, false, "https://a.example.test"},
@@ -144,15 +141,15 @@ func TestChooseBaseURL(t *testing.T) {
 		servers     []string
 		credentials bool
 	}{
-		{"", nil, false},                                                    // no server
-		{"", []string{"/api/v3"}, false},                                    // relative
-		{"", []string{"https://a.test", "https://b.test"}, false},           // several: never guess
-		{"", []string{"http://a.test/v1", "https://a.test/v2"}, false},      // scheme and path differ
-		{"", []string{"http://a.test:8080/v1", "https://a.test/v1"}, false}, // port differs
-		{"", []string{"http://a.test/v1", "http://a.test/v1/"}, false},      // no https among them
-		{"", []string{"http://a.test", "https://a.test"}, true},             // credentials still need --base-url
+		{"", nil, false},
+		{"", []string{"/api/v3"}, false},
+		{"", []string{"https://a.test", "https://b.test"}, false},
+		{"", []string{"http://a.test/v1", "https://a.test/v2"}, false},
+		{"", []string{"http://a.test:8080/v1", "https://a.test/v1"}, false},
+		{"", []string{"http://a.test/v1", "http://a.test/v1/"}, false},
+		{"", []string{"http://a.test", "https://a.test"}, true},
 		{"", []string{"https://a.test/v1", "https://a.test/v1", "https://b.test"}, false},
-		{"", []string{"https://api.example.test"}, true}, // credentials need an explicit --base-url (T3)
+		{"", []string{"https://api.example.test"}, true},
 		{"ftp://x.test", nil, false},
 		{"https://user:pw@x.test", nil, false},
 		{"https://x.test/?a=1", nil, false},

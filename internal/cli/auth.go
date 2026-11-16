@@ -18,7 +18,6 @@ import (
 	"github.com/swayam5342/plugit/internal/secrets"
 )
 
-// maxSecretBytes caps a credential read from input.
 const maxSecretBytes = 16 << 10
 
 type keyringSetter interface {
@@ -26,19 +25,14 @@ type keyringSetter interface {
 }
 
 type authDeps struct {
-	in     io.Reader // read when not a terminal (piped input, for scripts)
-	out    io.Writer
-	errOut io.Writer // prompts
-	// readHidden reads one line from the terminal without echo. nil means
-	// in is not a terminal.
+	in         io.Reader
+	out        io.Writer
+	errOut     io.Writer
 	readHidden func() ([]byte, error)
 	keyring    keyringSetter
-	// For type oauth2: how to resolve the client secret, reach the
-	// authorization server, and wait between device-flow polls. nil means
-	// the real ones.
-	resolver *secrets.Resolver
-	doer     httpx.Doer
-	sleep    func(context.Context, time.Duration) error
+	resolver   *secrets.Resolver
+	doer       httpx.Doer
+	sleep      func(context.Context, time.Duration) error
 }
 
 func newAuthCmd(g *globalFlags) *cobra.Command {
@@ -113,7 +107,6 @@ func storeSecret(d authDeps, cfg *config.API, ref secrets.Ref, prompt string) er
 		return errors.New("basic auth credentials look like user:password; nothing stored")
 	}
 	if err := d.keyring.Set(ref.Service, ref.Key, secret); err != nil {
-		// Backend messages are not wrapped: they could quote the value.
 		return fmt.Errorf("%w: could not store %s", secrets.ErrKeyring, ref)
 	}
 	_, err = fmt.Fprintf(d.out, "Stored the credential for %s in %s.\n", name, ref)

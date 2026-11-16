@@ -94,8 +94,9 @@ textarea.field { resize: vertical; line-height: 1.45; }
 /* ---------- navigation ---------- */
 .nav { position: absolute; inset: 0 0 auto 0; z-index: 5; display: flex; align-items: center; gap: 2rem; padding-block: 1.75rem; font-size: var(--step-small); }
 .wordmark { font-weight: 600; font-size: var(--step-body); letter-spacing: -0.02em; text-decoration: none; }
-.wordmark .star { color: var(--accent); display: inline-block; transition: transform 600ms var(--ease-out); }
-.wordmark:hover .star { transform: rotate(90deg); }
+.wordmark { display: inline-flex; align-items: center; gap: 0.4em; }
+.wordmark .plug { width: 1em; height: 1em; color: var(--accent); transition: transform 600ms var(--ease-out); }
+.wordmark:hover .plug { transform: translateY(-0.15em); }
 .nav nav { display: flex; gap: 1.5rem; margin-left: auto; }
 
 /* ---------- hero ---------- */

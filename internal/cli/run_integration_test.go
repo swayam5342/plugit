@@ -90,7 +90,6 @@ func newUpstream(t *testing.T) *upstream {
 		u.lastURL.Store(r.URL.String())
 		u.lastKey.Store(r.Header.Get("X-Api-Key"))
 		w.Header().Set("Content-Type", "application/json")
-		// Echo the credential back, as a misbehaving API might.
 		_, _ = fmt.Fprintf(w, `{"path":%q,"echo":%q}`, r.URL.Path, r.Header.Get("X-Api-Key"))
 	}))
 	t.Cleanup(u.Close)
@@ -190,11 +189,9 @@ func TestRunEndToEnd(t *testing.T) {
 		s.headers = []string{"X-Api-Key=env:PETS_KEY"}
 	}), map[string]string{"PETS_KEY": runSecret})
 
-	// Read-only mode: write tools aren't offered.
 	if got := toolNames(t, cs); !slices.Equal(got, []string{"getPet", "listPets"}) {
 		t.Fatalf("tools = %v, want [getPet listPets]", got)
 	}
-	// The credential header is hidden from the model's schema.
 	res, _ := cs.ListTools(t.Context(), nil)
 	for _, tl := range res.Tools {
 		if s := fmt.Sprint(tl.InputSchema); strings.Contains(s, "X-Api-Key") {
@@ -219,7 +216,6 @@ func TestRunEndToEnd(t *testing.T) {
 		t.Errorf("echoed credential not redacted: %s", resultText(r))
 	}
 
-	// The model can't supply the credential header itself.
 	r, err = cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "listPets", Arguments: map[string]any{"X-Api-Key": "attacker"}})
 	if err != nil || !r.IsError {
 		t.Errorf("model-supplied credential header accepted: err=%v", err)
@@ -267,6 +263,15 @@ func TestRunSetupFailures(t *testing.T) {
 		"1000-op spec without filters": {huge.String(), nil, nil, []string{"1000 tools", "--max-tools 40", "--tags"}, errTooManyTools},
 		"credentials need --base-url": {attackerSpec, func(s *runSettings) { s.headers = []string{"X-Api-Key=env:K"} },
 			map[string]string{"K": runSecret}, []string{"--base-url", "attacker.example.test"}, nil},
+		"credentials over plain http": {attackerSpec, func(s *runSettings) {
+			s.baseURL = "http://api.example.test"
+			s.headers = []string{"X-Api-Key=env:K"}
+		}, map[string]string{"K": runSecret}, []string{"https", "--base-url", "--allow-insecure"}, nil},
+		"credentials over plain http, private networks allowed": {attackerSpec, func(s *runSettings) {
+			s.baseURL = "http://api.example.test"
+			s.headers = []string{"X-Api-Key=env:K"}
+			s.allowPrivate = true
+		}, map[string]string{"K": runSecret}, []string{"https", "--allow-insecure"}, nil},
 		"missing env secret": {attackerSpec, func(s *runSettings) {
 			s.baseURL = "https://api.example.test"
 			s.headers = []string{"X-Api-Key=env:NOT_SET"}

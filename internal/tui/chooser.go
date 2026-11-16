@@ -13,8 +13,8 @@ import (
 // Choice is one row of a Chooser.
 type Choice struct {
 	Label  string
-	Detail string // shown faint after the label, e.g. a config path
-	Note   string // a short highlighted tag, e.g. "detected"
+	Detail string
+	Note   string
 }
 
 // Chooser is a small inline multi-select (used to pick MCP clients).
@@ -94,7 +94,6 @@ func (c *Chooser) View() tea.View {
 	w := max(c.width, 20)
 	title := th.Accent.Render("✦ ") + th.Title.Render(safe(c.title))
 	if c.done {
-		// The last frame stays on screen: leave a one-line summary.
 		var names []string
 		for _, i := range c.selectedIndexes() {
 			names = append(names, safe(c.choices[i].Label))

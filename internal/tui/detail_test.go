@@ -14,8 +14,6 @@ import (
 	"github.com/swayam5342/plugit/internal/policy"
 )
 
-// fakeLint reports one error for GET /pets/{id} when it's selected, and
-// records the toolsets it was asked about.
 type fakeLint struct{ asked []config.Toolset }
 
 func (f *fakeLint) run(ts config.Toolset) []lint.Finding {
@@ -61,7 +59,7 @@ func TestPickerLintBadges(t *testing.T) {
 
 func TestToolDetail(t *testing.T) {
 	p, f := newLintPicker("GET /pets")
-	moveTo(t, p, "pp_getPet") // not selected: lint is still run for it
+	moveTo(t, p, "pp_getPet")
 	press(p, "i")
 	v := view(p)
 	for _, want := range []string{
@@ -76,7 +74,6 @@ func TestToolDetail(t *testing.T) {
 			t.Errorf("detail missing %q:\n%s", want, v)
 		}
 	}
-	// The hidden header is listed but never in the schema the model sees.
 	if i := strings.Index(v, "Input schema"); i < 0 || strings.Contains(v[i:], "X-Api-Key") {
 		t.Errorf("hidden param in the input schema:\n%s", v)
 	}
@@ -153,7 +150,6 @@ func TestPickerResponseFields(t *testing.T) {
 	}
 	press(p, "esc")
 
-	// Invalid paths are refused and the editor stays open.
 	press(p, "f", "ctrl+u", "a..b", "enter")
 	if !strings.Contains(view(p), "response field") {
 		t.Errorf("no validation message:\n%s", view(p))
@@ -163,7 +159,6 @@ func TestPickerResponseFields(t *testing.T) {
 		t.Error("invalid fields replaced the valid ones")
 	}
 
-	// Empty clears them.
 	press(p, "f", "ctrl+u", "enter")
 	if ts, _ := p.Result(); len(ts.Tools["GET /pets"].ResponseFields) != 0 {
 		t.Errorf("not cleared: %v", ts.Tools["GET /pets"].ResponseFields)

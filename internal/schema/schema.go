@@ -28,14 +28,11 @@ import (
 
 // Options configures Prepare.
 type Options struct {
-	// Fixed lists upstream parameter names whose values come from config.
-	// Header names match case-insensitively; other locations exactly.
 	Fixed []string
 }
 
 const maxPropName = 64
 
-// forbiddenHeaders are never model-settable (lowercase).
 var forbiddenHeaders = map[string]bool{
 	"authorization": true, "cookie": true, "host": true, "forwarded": true,
 	"content-length": true, "content-type": true, "transfer-encoding": true,
@@ -62,8 +59,6 @@ func Prepare(t model.Tool, opts Options) model.Tool {
 	fx := fixedSet(opts.Fixed)
 	ns := newNamespace()
 
-	// Path params claim names first, then query, then header; output keeps
-	// the spec's order.
 	kept := make([]model.Param, 0, len(t.Params))
 	for _, p := range t.Params {
 		if p.In == model.InHeader && IsForbiddenHeader(p.UpstreamName) {
@@ -194,10 +189,8 @@ func InputSchema(t model.Tool) json.RawMessage {
 	return mustJSON(out)
 }
 
-// ---- names ----
-
 type namespace struct {
-	used map[string]model.Location // lowercase name -> location that claimed it
+	used map[string]model.Location
 }
 
 func newNamespace() *namespace { return &namespace{used: map[string]model.Location{}} }
@@ -295,8 +288,6 @@ func truncate(s string, n int) string {
 	return s
 }
 
-// ---- fixed params ----
-
 type fixed struct {
 	exact map[string]bool
 	lower map[string]bool
@@ -317,8 +308,6 @@ func (f fixed) has(name string, in model.Location) bool {
 	}
 	return f.exact[name]
 }
-
-// ---- JSON helpers ----
 
 func decode(raw json.RawMessage) map[string]any {
 	m := map[string]any{}

@@ -187,6 +187,9 @@ PlugIt treats the spec, the model's tool arguments and the API's responses as un
   attached only to requests for exactly that origin; redirects stay on it.
 - **SSRF guard.** The resolved IP is checked at connect time: loopback and private ranges
   need `allow_private: true`, and cloud metadata addresses are always blocked.
+- **No credentials over plain http, no risky paths.** A config that would send a credential to
+  a remote host over `http://` doesn't load, and spec paths with spaces, `..` or backslashes
+  are skipped. `network.allow_insecure: true` (`--allow-insecure`) is the one switch for both.
 - **Secrets** come from the OS keyring or env vars only, never from config files or the command
   line, and are redacted (raw, percent-encoded and base64) from logs, errors and every tool
   result.

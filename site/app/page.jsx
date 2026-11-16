@@ -1,4 +1,3 @@
-import { STAR } from '@/components/glyphs';
 import Picker from '@/components/Picker';
 import Screens from '@/components/Screens';
 import Film from '@/components/Film';
@@ -15,7 +14,11 @@ export default function Home() {
     <>
       <header className="nav wrap">
         <a className="wordmark" href="#top" aria-label="PlugIt, back to the top">
-          <span className="star" aria-hidden="true">{STAR}</span> plugit
+          <svg className="plug" viewBox="0 0 32 32" aria-hidden="true">
+            <path d="M12 3v7M20 3v7M16 23v9" fill="none" stroke="currentColor" strokeWidth="3" />
+            <path d="M7 10h18v5a9 9 0 0 1-18 0z" fill="currentColor" />
+          </svg>
+          plugit
         </a>
         <nav aria-label="Sections">
           <a className="link" href="#how">How it works</a>

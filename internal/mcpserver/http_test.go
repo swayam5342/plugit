@@ -13,8 +13,6 @@ import (
 
 const httpToken = "test-token-123-http-not-real"
 
-// bearer adds the token to every request, as an MCP client configured
-// with the header would.
 type bearer struct {
 	token string
 	base  http.RoundTripper
@@ -100,11 +98,9 @@ func TestHTTPRefusals(t *testing.T) {
 			}
 		})
 	}
-	// A local web page (loopback origin) with the token is allowed.
 	if resp := post(t, srv.URL, map[string]string{"Authorization": auth, "Origin": "http://localhost:3000"}); resp.StatusCode != http.StatusOK {
 		t.Errorf("loopback origin: status %d", resp.StatusCode)
 	}
-	// 401 says how to authenticate, without echoing anything.
 	if resp := post(t, srv.URL, nil); resp.Header.Get("WWW-Authenticate") != "Bearer" {
 		t.Errorf("WWW-Authenticate = %q", resp.Header.Get("WWW-Authenticate"))
 	}

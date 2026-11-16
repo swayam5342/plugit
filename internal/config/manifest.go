@@ -19,19 +19,18 @@ const MaxManifestBytes = 256 << 20
 // MaxSnapshotBytes caps spec.snapshot.json (the spec fetch limit).
 const MaxSnapshotBytes = 20 << 20
 
-// manifestFormat is the manifest.json layout version.
 const manifestFormat = 1
 
 // ErrCacheMiss means manifest.json is missing, unreadable or out of date.
-// The cache is derived data, so the caller re-parses the snapshot.
 var ErrCacheMiss = errors.New("manifest cache miss")
 
 // CacheKey is everything a parsed manifest depends on. A cache whose key
 // differs in any field is stale.
 type CacheKey struct {
-	SpecSHA256 string `json:"spec_sha256"` // sha256 of spec.snapshot.json
-	Prefix     string `json:"prefix"`      // tool names depend on it
-	Parser     string `json:"parser"`      // plugit build that parsed it
+	SpecSHA256  string `json:"spec_sha256"`
+	Prefix      string `json:"prefix"`
+	Parser      string `json:"parser"`
+	UnsafePaths bool   `json:"unsafe_paths,omitempty"`
 }
 
 type manifestFile struct {

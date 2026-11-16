@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -146,5 +147,32 @@ func TestJSONBodyUnchanged(t *testing.T) {
 	b, _ := io.ReadAll(req.Body)
 	if string(b) != `{"email":"a@b.test"}` || req.Header.Get("Content-Type") != "application/json" {
 		t.Errorf("body = %s, ct = %s", b, req.Header.Get("Content-Type"))
+	}
+}
+
+func TestFormSpreadObjectCannotShadowFields(t *testing.T) {
+	tl := formTool(nil, "email", "filter")
+	tl.Params = append(tl.Params, model.Param{Name: "tenant_id", UpstreamName: "tenant_id", In: model.InBody, Hidden: true, Schema: json.RawMessage(`{}`)})
+	tg := Target{Fixed: []Fixed{{Name: "tenant_id", Value: "t1"}}}
+
+	for name, raw := range map[string]string{
+		"fixed field":        `{"filter":{"tenant_id":"other"}}`,
+		"fixed field, deep":  `{"filter":{"tenant_id":{"a":"other"}}}`,
+		"another argument":   `{"email":"a@b.test","filter":{"email":"x@y.test"}}`,
+		"an unsent argument": `{"filter":{"email":"x@y.test"}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := build(t, tl, raw, tg); !errors.Is(err, ErrBadArgument) {
+				t.Errorf("err = %v, want ErrBadArgument", err)
+			}
+		})
+	}
+
+	v, _ := formBody(t, tl, `{"filter":{"status":"open"}}`, tg)
+	if got := v["tenant_id"]; len(got) != 1 || got[0] != "t1" {
+		t.Errorf("tenant_id = %v, want just the fixed value", got)
+	}
+	if v.Get("status") != "open" {
+		t.Errorf("spread object lost: %v", v)
 	}
 }

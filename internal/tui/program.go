@@ -22,7 +22,6 @@ func NoColor() bool { return noColor.Load() }
 func programOptions(ctx context.Context, r io.Reader, w io.Writer) []tea.ProgramOption {
 	opts := []tea.ProgramOption{tea.WithContext(ctx), tea.WithInput(r), tea.WithOutput(w)}
 	if NoColor() {
-		// ASCII keeps bold and faint text but drops every colour.
 		opts = append(opts, tea.WithColorProfile(colorprofile.ASCII))
 	}
 	return opts

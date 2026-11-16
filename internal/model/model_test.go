@@ -65,7 +65,6 @@ func TestStringsAndJSON(t *testing.T) {
 		}
 	}
 
-	// Golden files depend on stable, readable JSON for these enums.
 	b, err := json.Marshal(struct {
 		S Safety
 		L Location

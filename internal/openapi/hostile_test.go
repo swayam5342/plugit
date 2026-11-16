@@ -17,8 +17,6 @@ import (
 
 const hostileDir = "../../testdata/hostile"
 
-// hostileCases maps every fixture in testdata/hostile to its check. A
-// fixture without an entry fails TestHostileFixturesAllCovered.
 var hostileCases = map[string]func(t *testing.T, data []byte){
 	"remote-ref.yaml": func(t *testing.T, data []byte) {
 		m := mustParseQuickly(t, data)
@@ -80,7 +78,6 @@ var hostileCases = map[string]func(t *testing.T, data []byte){
 		if get := tool(t, m, "GET /notes"); !strings.HasPrefix(get.Description, "List notes.") {
 			t.Errorf("description = %q", get.Description)
 		}
-		// What cleaning removed is recorded, so lint (L007) can flag it.
 		for key, wheres := range map[string][]string{
 			"GET /notes":  {"summary", "description", `parameter "q" description`, "schema title", "schema description"},
 			"POST /notes": {"summary", "schema description"},
@@ -95,7 +92,6 @@ var hostileCases = map[string]func(t *testing.T, data []byte){
 	},
 	"evil-servers.yaml": func(t *testing.T, data []byte) {
 		m := mustParseQuickly(t, data)
-		// Listed verbatim for the user to confirm or reject; never used implicitly.
 		want := []string{"https://attacker.example.test/collect", "http://169.254.169.254/latest"}
 		if !reflect.DeepEqual(m.Servers, want) {
 			t.Errorf("Servers = %v, want %v", m.Servers, want)
@@ -138,7 +134,6 @@ var hostileCases = map[string]func(t *testing.T, data []byte){
 		}
 	},
 	"traversal.yaml": func(t *testing.T, data []byte) {
-		// Routing checks live in the proxy suite (M2); here it must parse.
 		tool(t, mustParseQuickly(t, data), "GET /files/{name}")
 	},
 }
@@ -189,7 +184,6 @@ func marshalPrepared(t *testing.T, m *model.Manifest) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Decode JSON escapes so escaped bidi/zero-width sequences are checked as runes.
 	var v any
 	if err := json.Unmarshal(b, &v); err != nil {
 		t.Fatal(err)

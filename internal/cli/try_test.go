@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -64,15 +67,12 @@ func TestTryPrintsRequestAndResponse(t *testing.T) {
 func TestTryArgumentTypes(t *testing.T) {
 	up := newUpstream(t)
 	p := setupTryAPI(t, up.URL, "")
-	// limit is an integer in the spec, so "2" is sent as a number.
 	if _, err := runTry(t, p, "", "pp_list_pets", tryFlags{args: []string{"limit=2"}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if up.lastURL.Load() != "/pets?limit=2" {
 		t.Errorf("url = %v", up.lastURL.Load())
 	}
-	// The operation key works as well as the tool name. id is a string, so
-	// "007" stays "007".
 	if _, err := runTry(t, p, "", "GET /pets/{id}", tryFlags{args: []string{"id=007"}}, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -160,8 +160,6 @@ func TestTryUnknownTool(t *testing.T) {
 func TestTryUpstreamError(t *testing.T) {
 	up := newUpstream(t)
 	p := setupTryAPI(t, up.URL, "")
-	// The fake upstream answers 200 for everything; a traversal attempt is
-	// refused before any request is made.
 	out, err := runTry(t, p, "", "pp_getPet", tryFlags{args: []string{"id=.."}}, nil)
 	if err == nil || !strings.Contains(out, "pp_getPet") {
 		t.Errorf("out = %q err = %v", out, err)
@@ -225,5 +223,24 @@ func TestTryFormPolicy(t *testing.T) {
 	}
 	if err := runTryForm(t, p, "", "pp_createPet", tryFlags{yes: true}, func(_ context.Context, in tui.TryInput) error { confirm = in.Confirm; return nil }); err != nil || confirm != "" {
 		t.Errorf("--yes should pre-confirm: err=%v confirm=%q", err, confirm)
+	}
+}
+
+func TestTryStripsTerminalEscapesFromResponse(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = io.WriteString(w, "line one\n\x1b]0;owned\x07\x1b[2Jline two\u202e")
+	}))
+	t.Cleanup(up.Close)
+	p := setupTryAPI(t, up.URL, "")
+	out, err := runTry(t, p, "", "pp_getPet", tryFlags{args: []string{"id=7"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.ContainsAny(out, "\x1b\x07\u202e") {
+		t.Errorf("output carries terminal control characters: %q", out)
+	}
+	if !strings.Contains(out, "line one\n") || !strings.Contains(out, "line two") {
+		t.Errorf("text or line breaks lost: %q", out)
 	}
 }

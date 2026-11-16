@@ -181,7 +181,7 @@ func cleanText(s string) string {
 		switch {
 		case r == '\n' || r == '\r' || r == '\t':
 			return ' '
-		case unicode.IsControl(r), unicode.Is(unicode.Cf, r): // Cf: bidi overrides, zero-width, tag chars
+		case unicode.IsControl(r), unicode.Is(unicode.Cf, r):
 			return -1
 		}
 		return r

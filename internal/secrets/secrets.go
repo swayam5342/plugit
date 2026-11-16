@@ -20,13 +20,12 @@ import (
 
 // Sentinel errors callers can match with errors.Is.
 var (
-	ErrNoScheme      = errors.New("value needs an explicit literal:, env: or keyring: prefix")
-	ErrLiteralSecret = errors.New("secrets must come from env: or keyring:, not a literal value")
-	ErrInvalidRef    = errors.New("invalid reference")
-	ErrNotFound      = errors.New("secret not found")
-	ErrEmpty         = errors.New("secret is empty")
-	ErrKeyring       = errors.New("keyring error")
-	// ErrKeyringItemNotFound is what a KeyringGetter returns for a missing item.
+	ErrNoScheme            = errors.New("value needs an explicit literal:, env: or keyring: prefix")
+	ErrLiteralSecret       = errors.New("secrets must come from env: or keyring:, not a literal value")
+	ErrInvalidRef          = errors.New("invalid reference")
+	ErrNotFound            = errors.New("secret not found")
+	ErrEmpty               = errors.New("secret is empty")
+	ErrKeyring             = errors.New("keyring error")
 	ErrKeyringItemNotFound = errors.New("keyring item not found")
 )
 
@@ -43,10 +42,10 @@ const (
 // Ref is a parsed reference. Only the fields for its Scheme are set.
 type Ref struct {
 	Scheme  Scheme
-	Literal string // Literal
-	Var     string // Env
-	Service string // Keyring
-	Key     string // Keyring
+	Literal string
+	Var     string
+	Service string
+	Key     string
 }
 
 var envVarRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -55,7 +54,6 @@ var envVarRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 func ParseRef(s string) (Ref, error) {
 	scheme, rest, ok := strings.Cut(s, ":")
 	if !ok {
-		// Never echo s: a bare value may well be a pasted secret.
 		return Ref{}, ErrNoScheme
 	}
 	switch scheme {
@@ -145,8 +143,6 @@ func (res *Resolver) Resolve(r Ref) (string, error) {
 			return "", fmt.Errorf("%w: keyring item %s/%s (run `plugit auth`)", ErrNotFound, r.Service, r.Key)
 		}
 		if err != nil {
-			// Don't wrap the backend's message: it is outside our control and
-			// could include the value.
 			return "", fmt.Errorf("%w: reading keyring item %s/%s failed", ErrKeyring, r.Service, r.Key)
 		}
 		if v == "" {

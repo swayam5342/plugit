@@ -23,12 +23,11 @@ import (
 )
 
 type statsSettings struct {
-	name   string        // "" for every API
-	since  time.Duration // window (default 7 days)
-	asJSON bool
-	out    io.Writer
-	info   BuildInfo
-	// interactive opens the stats screen; nil prints a table.
+	name        string
+	since       time.Duration
+	asJSON      bool
+	out         io.Writer
+	info        BuildInfo
 	interactive func(ctx context.Context, in tui.StatsInput) error
 }
 
@@ -73,7 +72,7 @@ func showStats(ctx context.Context, p config.Paths, s statsSettings) error {
 	}
 	open := store.OpenExisting
 	if s.interactive != nil {
-		open = store.Open // the screen waits for calls
+		open = store.Open
 	}
 	db, err := open(ctx, p.DB())
 	if errors.Is(err, store.ErrNoLog) {
@@ -151,7 +150,7 @@ func apiBudget(p config.Paths, name string, info BuildInfo) string {
 		return ""
 	}
 	cache, _ := p.Manifest(name)
-	m, err := config.ReadManifest(cache, config.CacheKey{SpecSHA256: sum, Prefix: cfg.Prefix, Parser: parserID(info)})
+	m, err := config.ReadManifest(cache, config.CacheKey{SpecSHA256: sum, Prefix: cfg.Prefix, Parser: parserID(info), UnsafePaths: cfg.Network.AllowInsecure})
 	if err != nil {
 		return ""
 	}

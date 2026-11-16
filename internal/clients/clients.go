@@ -43,9 +43,9 @@ const (
 // edits in place (Format set).
 type Info struct {
 	ID     Client
-	Name   string // for people: "Claude Desktop"
-	CLI    string // executable that owns the client's config
-	Format Format // where servers live in the client's JSON file
+	Name   string
+	CLI    string
+	Format Format
 }
 
 var all = []Info{
@@ -133,8 +133,8 @@ func (i Info) RemoveArgs(name string) []string {
 type Env struct {
 	GOOS       string
 	Home       string
-	AppData    string // Windows %APPDATA%
-	ConfigHome string // Linux $XDG_CONFIG_HOME, or ~/.config
+	AppData    string
+	ConfigHome string
 }
 
 // DefaultEnv describes the current user's environment.

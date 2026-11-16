@@ -33,7 +33,6 @@ import (
 // ErrCancelled means the user left the picker without saving.
 var ErrCancelled = errors.New("cancelled; nothing saved")
 
-// Budget thresholds shown as warnings (lint L010).
 const (
 	warnTools  = 40
 	warnTokens = 8000
@@ -46,13 +45,11 @@ var toolNameRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 // PickerInput is what the picker edits.
 type PickerInput struct {
 	API      string
-	Tools    []model.Tool // named with the prefix, fixed params hidden
+	Tools    []model.Tool
 	Prefix   string
 	Mode     policy.Mode
-	Selected config.Toolset // initial selection and overrides
-	// Lint, if set, lints a selection (as a toolset); the picker shows the
-	// findings as row badges, in the footer and in the tool detail.
-	Lint func(config.Toolset) []lint.Finding
+	Selected config.Toolset
+	Lint     func(config.Toolset) []lint.Finding
 }
 
 type rowKind int
@@ -65,7 +62,7 @@ const (
 type row struct {
 	kind  rowKind
 	group int
-	tool  int // index into Picker.tools
+	tool  int
 }
 
 type group struct {
@@ -91,7 +88,7 @@ type Picker struct {
 	groups   []group
 	selected map[model.OpKey]bool
 	over     map[model.OpKey]config.ToolOverride
-	missing  map[string]config.ToolOverride // listed keys the spec doesn't have; kept as they are
+	missing  map[string]config.ToolOverride
 
 	collapsed map[int]bool
 	filter    string
@@ -109,27 +106,24 @@ type Picker struct {
 	dirty bool
 	saved bool
 
-	// policyMode is the API's policy.mode as edited here (m cycles it);
-	// fullPending means the next m confirms the switch to full.
 	policyMode  policy.Mode
 	fullPending bool
 
-	// recomputed on every change
 	conflict   string
-	count      int // selected tools
-	offered    int // selected and listed under the mode
+	count      int
+	offered    int
 	writes     int
 	budget     int
 	finalNames map[model.OpKey]string
 	toolTokens map[model.OpKey]int
-	nameWidth  int // column width for tool names
+	nameWidth  int
 
 	th       theme
 	showHelp bool
 
-	detail     *detailState                  // the open Tool detail screen, if any
-	lintErrors int                           // errors in the current selection
-	lintWorst  map[model.OpKey]lint.Severity // most severe finding per tool
+	detail     *detailState
+	lintErrors int
+	lintWorst  map[model.OpKey]lint.Severity
 }
 
 // NewPicker builds a picker.
@@ -178,7 +172,6 @@ func (p *Picker) buildGroups() {
 	}
 	names := slices.Sorted(maps.Keys(byName))
 	slices.SortStableFunc(names, func(a, b string) int {
-		// "(untagged)" goes last.
 		return cmp.Compare(boolInt(a == untagged), boolInt(b == untagged))
 	})
 	for _, n := range names {
@@ -240,7 +233,6 @@ func (p *Picker) rebuild() {
 			p.rows = append(p.rows, row{kind: rowTool, group: gi, tool: ti})
 		}
 	}
-	// Keep the cursor on the same row when it is still visible.
 	p.cursor = 0
 	if cur != nil {
 		for i, r := range p.rows {
@@ -436,7 +428,7 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (p *Picker) current() (row, bool) {
-	if p.cursor < len(p.rows) {
+	if p.cursor >= 0 && p.cursor < len(p.rows) {
 		return p.rows[p.cursor], true
 	}
 	return row{}, false
@@ -461,7 +453,7 @@ func (p *Picker) updateList(msg tea.KeyPressMsg) tea.Cmd {
 	case "home", "g":
 		p.cursor = 0
 	case "end", "G":
-		p.cursor = len(p.rows) - 1
+		p.cursor = max(len(p.rows)-1, 0)
 	case "space", "x":
 		if !ok {
 			break
@@ -677,8 +669,6 @@ func (p *Picker) commitInput() tea.Cmd {
 	return nil
 }
 
-// ---- rendering ----
-
 // safe strips control and format characters from untrusted text.
 func safe(s string) string {
 	return strings.Map(func(r rune) rune {
@@ -700,7 +690,6 @@ func truncate(s string, n int) string {
 	return string(r[:n-1]) + "…"
 }
 
-// seg is a piece of a row: its text and how to draw it.
 type seg struct {
 	text  string
 	style lipgloss.Style
@@ -724,10 +713,9 @@ func styled(ss []seg) string {
 
 const pathWidth = 34
 
-// Screen layout: everything except the list, in lines.
 const (
-	headerLines = 5 // box of two lines, then a blank line
-	footerLines = 6 // position, detail, input box (three), status bar
+	headerLines = 5
+	footerLines = 6
 )
 
 func (p *Picker) helpLines() []string {
@@ -788,7 +776,7 @@ func (p *Picker) rowSegs(r row, cursor bool) []seg {
 	}
 	ss := []seg{
 		box,
-		{fmt.Sprintf("%-7s ", t.Method), method},
+		{fmt.Sprintf("%-7s ", safe(t.Method)), method},
 		{fmt.Sprintf("%-*s ", pathWidth, truncate(safe(t.Path), pathWidth)), th.Dim},
 		{fmt.Sprintf("%-*s", p.nameWidth, safe(p.displayName(t))), name},
 	}
@@ -799,7 +787,7 @@ func (p *Picker) rowSegs(r row, cursor bool) []seg {
 		ss = append(ss, seg{"  ✎", th.Accent})
 	}
 	if o := p.over[t.Key]; o.Policy != "" {
-		ss = append(ss, seg{"  " + o.Policy, th.policy(o.Policy)})
+		ss = append(ss, seg{"  " + safe(o.Policy), th.policy(o.Policy)})
 	}
 	if n := len(p.over[t.Key].ResponseFields); n > 0 {
 		unit := "fields"
@@ -859,7 +847,6 @@ func (p *Picker) View() tea.View {
 	w := max(p.width, 20)
 	var lines []string
 
-	// Header box: name, API, mode; then what's on offer.
 	title := th.Accent.Render("✦ ") + th.Title.Render("plugit") + th.Dim.Render(" · ") + th.Title.Render(safe(p.in.API))
 	if p.dirty {
 		title += th.Warn.Render("  ● unsaved")
@@ -871,11 +858,8 @@ func (p *Picker) View() tea.View {
 	lines = append(lines, th.box(w, th.Border, spread(title, th.pill(p.policyMode), w-4), th.Dim.Render(sub))...)
 	lines = append(lines, "")
 
-	// The list.
 	h := p.listHeight()
 	for i := p.offset; i < min(p.offset+h, len(p.rows)); i++ {
-		// Groups at the margin, tools indented under them; the cursor
-		// mark sits just before the row.
 		bar := "  "
 		if i == p.cursor {
 			bar = th.Accent.Render("› ")
@@ -899,7 +883,6 @@ func (p *Picker) View() tea.View {
 	}
 	lines = append(lines, spread("", pos, w))
 
-	// Detail: a message if there is one, else the row under the cursor.
 	elbow := th.Dim.Render("  ⎿  ")
 	detail := ""
 	switch r, ok := p.current(); {
@@ -913,13 +896,12 @@ func (p *Picker) View() tea.View {
 		if o := p.over[t.Key]; o.Description != "" {
 			d = o.Description
 		}
-		detail = th.method(t.Method).Render(t.Method) + " " + safe(t.Path) + th.Dim.Render("  "+safe(d))
+		detail = th.method(t.Method).Render(safe(t.Method)) + " " + safe(t.Path) + th.Dim.Render("  "+safe(d))
 	case ok:
 		detail = th.Dim.Render("space selects the whole group, enter folds it")
 	}
 	lines = append(lines, fit(elbow+detail, w))
 
-	// Input box, like a prompt: focused while typing.
 	var input string
 	border := th.Border
 	switch p.mode {
@@ -938,7 +920,6 @@ func (p *Picker) View() tea.View {
 	}
 	lines = append(lines, th.box(w, border, input)...)
 
-	// Status bar: totals and the token budget.
 	large := p.offered > warnTools || p.budget > warnTokens
 	stats := th.Dim
 	if large {
@@ -977,3 +958,17 @@ func RunPicker(ctx context.Context, in PickerInput, r io.Reader, w io.Writer) (c
 // Safe strips control and format characters from untrusted text before it
 // is printed to a terminal.
 func Safe(s string) string { return safe(s) }
+
+// SafeText is Safe for text of several lines: line breaks and tabs are
+// kept, every other control or format character is removed.
+func SafeText(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' {
+			return r
+		}
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, s)
+}

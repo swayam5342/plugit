@@ -60,7 +60,6 @@ func TestValidatorNullArgumentsMeanNone(t *testing.T) {
 }
 
 func TestValidatorDegradesSafelyOnUncompilableSchema(t *testing.T) {
-	// ECMA-262 lookahead isn't supported by Go's regexp: the schema won't compile.
 	tl := Prepare(model.Tool{Key: "GET /x", Params: []model.Param{
 		p("q", model.InQuery, true, `{"type":"string","pattern":"^(?=a)a$"}`),
 	}}, Options{})
@@ -68,7 +67,6 @@ func TestValidatorDegradesSafelyOnUncompilableSchema(t *testing.T) {
 	if !v.Degraded() {
 		t.Fatal("expected a degraded validator")
 	}
-	// Still enforced: required args and no unknown args.
 	if err := v.Validate(json.RawMessage(`{}`)); !errors.Is(err, ErrInvalidArgs) {
 		t.Errorf("missing required: %v", err)
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -98,7 +99,6 @@ func (b *builder) newTool(method, path, summary, description string, tags []stri
 	}
 }
 
-// maxTagLen caps a tag in runes.
 const maxTagLen = 64
 
 // cleanTags cleans tags like every other spec string: they reach the user's
@@ -116,34 +116,73 @@ func cleanTags(tags []string) []string {
 
 // validPath rejects path templates that could smuggle a query or fragment,
 // climb out of the pinned base path, or carry invisible text into tool keys
-// and descriptions. Path templates come from the untrusted spec.
+// and descriptions. Path templates come from the untrusted spec. The
+// percent-decoded form is checked too, since a server decodes it. Hard
+// problems always skip the path; risky ones skip it unless AllowUnsafePaths
+// is on.
 func (b *builder) validPath(path string) bool {
-	reason := ""
+	decoded, err := url.PathUnescape(path)
+	if err != nil {
+		decoded = path
+	}
+	reason, risky := hardPathProblem(path, decoded), false
+	if reason == "" {
+		reason, risky = riskyPathProblem(path, decoded), true
+	}
 	switch {
-	case !strings.HasPrefix(path, "/"):
-		reason = "it must start with '/'"
-	case strings.ContainsAny(path, `?#\`):
-		reason = `it contains '?', '#' or '\'`
-	case strings.IndexFunc(path, func(r rune) bool {
-		return unicode.IsControl(r) || unicode.IsSpace(r) || unicode.Is(unicode.Cf, r)
-	}) >= 0:
-		reason = "it contains whitespace, control or invisible characters"
-	default:
-		for seg := range strings.SplitSeq(path, "/") {
-			if seg == "." || seg == ".." {
-				reason = "it contains a '.' or '..' segment"
-				break
-			}
-		}
+	case reason == "":
+		return true
+	case risky && b.opts.AllowUnsafePaths:
+		return true
 	}
-	if reason != "" {
-		b.warn(fmt.Sprintf("path %+q skipped: %s", truncateRef(path), reason))
-		return false
+	msg := fmt.Sprintf("path %+q skipped: %s", truncateRef(path), reason)
+	if risky {
+		msg += "; to import it anyway, set network.allow_insecure (--allow-insecure)"
 	}
-	return true
+	b.warn(msg)
+	return false
 }
 
-// ---- OpenAPI 3.x ----
+func hardPathProblem(path, decoded string) string {
+	unprintable := func(r rune) bool {
+		return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || (unicode.IsSpace(r) && r != ' ')
+	}
+	switch {
+	case !strings.HasPrefix(path, "/"):
+		return "it must start with '/'"
+	case strings.ContainsAny(path, "?#"):
+		return "it contains '?' or '#'"
+	case strings.IndexFunc(path, unprintable) >= 0:
+		return "it contains control or invisible characters"
+	case strings.IndexFunc(decoded, unprintable) >= 0:
+		return "it contains percent-encoded control or invisible characters"
+	}
+	return ""
+}
+
+func riskyPathProblem(path, decoded string) string {
+	dots := func(s string) bool {
+		for seg := range strings.SplitSeq(s, "/") {
+			if seg == "." || seg == ".." {
+				return true
+			}
+		}
+		return false
+	}
+	switch {
+	case strings.Contains(path, " "):
+		return "it contains a space"
+	case strings.Contains(path, `\`):
+		return `it contains '\'`
+	case dots(path):
+		return "it contains a '.' or '..' segment"
+	case strings.Contains(decoded, `\`):
+		return `it contains a percent-encoded '\'`
+	case dots(decoded):
+		return "it contains a percent-encoded '.' or '..' segment"
+	}
+	return ""
+}
 
 func (b *builder) fromV3(doc *v3.Document) {
 	if doc.Info != nil {
@@ -215,8 +254,6 @@ func (b *builder) v3Op(method, path string, item *v3.PathItem, op *v3.Operation)
 	}
 
 	if rb := op.RequestBody; rb != nil && rb.Content != nil && rb.Content.Len() > 0 {
-		// JSON first, then a URL-encoded form, then multipart (SPEC M6
-		// design note: form and multipart bodies).
 		var all []string
 		var jsonMT, formMT, multiMT *v3.MediaType
 		for pair := rb.Content.First(); pair != nil; pair = pair.Next() {
@@ -247,8 +284,6 @@ func (b *builder) v3Op(method, path string, item *v3.PathItem, op *v3.Operation)
 	t.Issues = c.issues
 	b.addOp(t, op.OperationId)
 }
-
-// ---- Swagger 2.0 ----
 
 func (b *builder) fromV2(doc *v2.Swagger) {
 	if doc.Info != nil {
@@ -342,15 +377,12 @@ func (b *builder) v2Op(method, path string, item *v2.PathItem, op *v2.Operation,
 		if len(formRequired) > 0 {
 			obj["required"] = formRequired
 		}
-		// Swagger 2.0 formData arrays default to collectionFormat csv; multi
-		// (repeated keys) is the OpenAPI 3 form default plugit sends.
 		t.Body = formBody(c, ct, mustJSON(obj), nil, formAnyRequired)
 	}
 	t.Issues = c.issues
 	b.addOp(t, op.OperationId)
 }
 
-// Form content types.
 const (
 	ctForm      = "application/x-www-form-urlencoded"
 	ctMultipart = "multipart/form-data"
@@ -380,8 +412,6 @@ func formBody(c *converter, ct string, raw json.RawMessage, enc map[string]model
 		c.issue(model.IssueUnsupported, "file field %q left out of the %s body (file content can't come from a model)", name, ct)
 	}
 	if len(props) == 0 {
-		// No declared fields: nothing a model could fill in (Stripe puts an
-		// empty form body on its GET and DELETE operations).
 		return nil
 	}
 	for k := range enc {
@@ -426,7 +456,7 @@ func v3Encodings(mt *v3.MediaType) map[string]model.Encoding {
 			style = "form"
 		}
 		if style != "form" && style != "deepObject" {
-			continue // spaceDelimited and friends: send with the default
+			continue
 		}
 		explode := style == "form"
 		if e.Explode != nil {
@@ -442,9 +472,17 @@ func v2ParamSchema(c *converter, p *v2.Parameter) map[string]any {
 		c.issue(model.IssueUnsupported, "file parameter %q not supported yet", p.Name)
 	}
 	out := map[string]any{}
-	setStr(out, "type", p.Type)
+	types, isFile := knownTypes([]string{p.Type})
+	if len(types) == 1 {
+		out["type"] = types[0]
+	}
 	setStr(out, "format", p.Format)
 	setStr(out, "pattern", p.Pattern)
+	if isFile {
+		markFile(out)
+	}
+	c.hiddenValue("schema format", p.Format)
+	c.hiddenValue("schema pattern", p.Pattern)
 	setPtr(out, "minimum", p.Minimum)
 	setPtr(out, "maximum", p.Maximum)
 	if p.ExclusiveMinimum != nil && *p.ExclusiveMinimum && p.Minimum != nil {
@@ -462,11 +500,13 @@ func v2ParamSchema(c *converter, p *v2.Parameter) map[string]any {
 	setPtr(out, "uniqueItems", p.UniqueItems)
 	setPtr(out, "multipleOf", p.MultipleOf)
 	setEnum(out, p.Enum)
+	c.hiddenValue("schema enum value", out["enum"])
 	if v, ok := decodeNode(p.Default); ok {
 		out["default"] = v
+		c.hiddenValue("schema default value", v)
 	}
 	if p.Items != nil {
-		out["items"] = v2Items(p.Items, 1)
+		out["items"] = v2Items(c, p.Items, 1)
 	}
 	return out
 }
@@ -474,17 +514,22 @@ func v2ParamSchema(c *converter, p *v2.Parameter) map[string]any {
 // v2Items converts Swagger 2.0 array items. Numeric constraints are dropped:
 // libopenapi exposes them as plain ints, so "absent" and "0" look the same,
 // and dropping a constraint only makes the schema more permissive.
-func v2Items(it *v2.Items, depth int) map[string]any {
+func v2Items(c *converter, it *v2.Items, depth int) map[string]any {
 	out := map[string]any{}
 	if depth > MaxSchemaDepth {
 		return out
 	}
-	setStr(out, "type", it.Type)
+	if types, _ := knownTypes([]string{it.Type}); len(types) == 1 {
+		out["type"] = types[0]
+	}
 	setStr(out, "format", it.Format)
 	setStr(out, "pattern", it.Pattern)
+	c.hiddenValue("schema format", it.Format)
+	c.hiddenValue("schema pattern", it.Pattern)
 	setEnum(out, it.Enum)
+	c.hiddenValue("schema enum value", out["enum"])
 	if it.Items != nil {
-		out["items"] = v2Items(it.Items, depth+1)
+		out["items"] = v2Items(c, it.Items, depth+1)
 	}
 	return out
 }
@@ -501,8 +546,6 @@ func setEnum(out map[string]any, nodes []*yaml.Node) {
 	}
 	out["enum"] = vals
 }
-
-// ---- shared ----
 
 // mergeParams applies operation-level parameters over path-level ones with
 // the same location and name, keeping first-seen order.
@@ -531,7 +574,6 @@ func mergeParams[P any](pathLevel, opLevel []*P, id func(*P) (string, string)) [
 	return out
 }
 
-// cookieNameRe is an RFC 6265 cookie-name (an RFC 7230 token).
 var cookieNameRe = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$")
 
 func (b *builder) addParam(t *model.Tool, c *converter, name, in string, required bool, desc string, schema json.RawMessage) {
@@ -542,14 +584,12 @@ func (b *builder) addParam(t *model.Tool, c *converter, name, in string, require
 	var loc model.Location
 	switch strings.ToLower(in) {
 	case "path":
-		loc, required = model.InPath, true // path params are always required
+		loc, required = model.InPath, true
 	case "query":
 		loc = model.InQuery
 	case "header":
 		loc = model.InHeader
 	case "cookie":
-		// The name goes into the Cookie header plugit builds: it must be
-		// an RFC 6265 token (SPEC M6 design note: cookie parameters).
 		if !cookieNameRe.MatchString(name) {
 			c.issue(model.IssueUnsupported, "%q isn't a valid cookie name; parameter dropped", name)
 			return

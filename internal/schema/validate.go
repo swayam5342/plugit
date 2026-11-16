@@ -35,8 +35,6 @@ func NewValidator(t model.Tool) *Validator {
 	}
 	s, err := compile(minimalSchema(t))
 	if err != nil {
-		// Unreachable: the minimal schema uses only basic keywords. Keep
-		// failing closed rather than accepting anything.
 		return &Validator{degraded: true}
 	}
 	return &Validator{schema: s, degraded: true}
@@ -87,7 +85,7 @@ func compile(schemaJSON []byte) (*jsonschema.Schema, error) {
 	}
 	c := jsonschema.NewCompiler()
 	c.DefaultDraft(jsonschema.Draft2020)
-	c.UseLoader(refuseLoader{}) // never read files or URLs
+	c.UseLoader(refuseLoader{})
 	const loc = "plugit:///tool.json"
 	if err := c.AddResource(loc, doc); err != nil {
 		return nil, err

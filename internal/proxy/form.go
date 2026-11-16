@@ -14,7 +14,6 @@ import (
 	"github.com/swayam5342/plugit/internal/model"
 )
 
-// Body content types plugit can send.
 const (
 	ctJSON      = "application/json"
 	ctForm      = "application/x-www-form-urlencoded"
@@ -24,7 +23,10 @@ const (
 // encodeBody serializes the body arguments for the operation's content
 // type (SPEC M6 design note: form and multipart bodies). It returns the
 // body and its Content-Type, or nil when there is no body.
-func encodeBody(b *model.Body, fields map[string]any, root any, hasRoot bool) ([]byte, string, error) {
+//
+// declared holds the tool's body field names, fixed ones included: in a
+// form, a spread object may not use one of them (SPEC T6).
+func encodeBody(b *model.Body, fields map[string]any, root any, hasRoot bool, declared map[string]bool) ([]byte, string, error) {
 	if !hasRoot && len(fields) == 0 {
 		return nil, "", nil
 	}
@@ -58,7 +60,7 @@ func encodeBody(b *model.Body, fields map[string]any, root any, hasRoot bool) ([
 	vals := url.Values{}
 	for _, k := range slices.Sorted(maps.Keys(obj)) {
 		enc, explicit := b.Encoding[k]
-		if err := formField(vals, k, obj[k], enc, explicit); err != nil {
+		if err := formField(vals, k, obj[k], enc, explicit, declared); err != nil {
 			return nil, "", err
 		}
 	}
@@ -87,7 +89,7 @@ func formScalar(v any) (string, bool) {
 
 // formField adds one top-level field. Without an explicit encoding the
 // OpenAPI default applies: style form, explode true.
-func formField(vals url.Values, key string, v any, enc model.Encoding, explicit bool) error {
+func formField(vals url.Values, key string, v any, enc model.Encoding, explicit bool, declared map[string]bool) error {
 	if v == nil {
 		return nil
 	}
@@ -111,8 +113,6 @@ func formField(vals url.Values, key string, v any, enc model.Encoding, explicit 
 		}
 		parts, ok := scalarList(x)
 		if !ok {
-			// Objects can't be repeated keys: the whole array goes in
-			// brackets, so its indexes stay consistent.
 			return deepField(vals, key, v)
 		}
 		for _, s := range parts {
@@ -133,6 +133,9 @@ func formField(vals url.Values, key string, v any, enc model.Encoding, explicit 
 			return nil
 		}
 		for _, k := range slices.Sorted(maps.Keys(x)) {
+			if k != key && declared[k] {
+				return fmt.Errorf("%w: field %q can't set %q: that is another field of this form", ErrBadArgument, key, k)
+			}
 			if s, ok := formScalar(x[k]); ok {
 				vals.Add(k, s)
 			} else if err := deepField(vals, k, x[k]); err != nil {

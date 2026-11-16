@@ -80,7 +80,6 @@ func NewRootCmd(info BuildInfo) *cobra.Command {
 	return root
 }
 
-// globalFlags are the flags every command accepts.
 type globalFlags struct {
 	configDir string
 	noColor   bool

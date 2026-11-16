@@ -19,7 +19,6 @@ import (
 // HTTPPath is where the Streamable HTTP endpoint lives.
 const HTTPPath = "/mcp"
 
-// Limits for the HTTP transport.
 const (
 	maxHTTPBody       = 4 << 20
 	httpSessionIdle   = 30 * time.Minute
@@ -141,7 +140,6 @@ func ServeHTTP(ctx context.Context, cfg Config, addr, token string, ready func(e
 	}
 	go func() {
 		<-ctx.Done()
-		// ctx is done by now: shut down gracefully on a fresh deadline.
 		shutdown, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		_ = server.Shutdown(shutdown)

@@ -13,10 +13,8 @@ import (
 	"github.com/swayam5342/plugit/internal/naming"
 )
 
-// converter turns libopenapi schemas into plain JSON Schema for one tool. It
-// shares a node budget across all of the tool's schemas.
 type converter struct {
-	is30     bool // OpenAPI 3.0 semantics (nullable, boolean exclusive bounds)
+	is30     bool
 	maxDesc  int
 	budget   int
 	issues   []model.Issue
@@ -95,7 +93,7 @@ func (c *converter) schema(s *base.Schema, depth int) map[string]any {
 		return map[string]any{"not": map[string]any{}}
 	}
 
-	types := append([]string(nil), s.Type...)
+	types, isFile := knownTypes(s.Type)
 	if c.is30 && s.Nullable != nil && *s.Nullable && len(types) > 0 && !slices.Contains(types, "null") {
 		types = append(types, "null")
 	}
@@ -117,6 +115,11 @@ func (c *converter) schema(s *base.Schema, depth int) map[string]any {
 	}
 	setStr(out, "format", s.Format)
 	setStr(out, "pattern", s.Pattern)
+	if isFile {
+		markFile(out)
+	}
+	c.hiddenValue("schema format", s.Format)
+	c.hiddenValue("schema pattern", s.Pattern)
 	setPtr(out, "multipleOf", s.MultipleOf)
 	setPtr(out, "minimum", s.Minimum)
 	setPtr(out, "maximum", s.Maximum)
@@ -131,20 +134,23 @@ func (c *converter) schema(s *base.Schema, depth int) map[string]any {
 	setPtr(out, "maxProperties", s.MaxProperties)
 
 	setEnum(out, s.Enum)
+	c.hiddenValue("schema enum value", out["enum"])
 	if v, ok := decodeNode(s.Const); ok {
 		out["const"] = v
+		c.hiddenValue("schema const value", v)
 	}
 	if v, ok := decodeNode(s.Default); ok {
 		out["default"] = v
+		c.hiddenValue("schema default value", v)
 	}
 
 	if s.Properties != nil && s.Properties.Len() > 0 {
 		props := map[string]any{}
 		for pair := s.Properties.First(); pair != nil; pair = pair.Next() {
-			// readOnly properties are set by the server; never ask the model for them.
 			if child := pair.Value().Schema(); child != nil && child.ReadOnly != nil && *child.ReadOnly {
 				continue
 			}
+			c.hiddenValue("schema property name", pair.Key())
 			props[pair.Key()] = c.proxy(pair.Value(), depth+1)
 		}
 		out["properties"] = props
@@ -280,4 +286,54 @@ func setPtr[T any](out map[string]any, key string, v *T) {
 	if v != nil {
 		out[key] = *v
 	}
+}
+
+// hiddenValue reports hidden content in a schema value that can't be cleaned
+// without changing what the API accepts (L007). v is a string or a decoded
+// JSON value.
+func (c *converter) hiddenValue(where string, v any) {
+	switch x := v.(type) {
+	case string:
+		if r := naming.Hidden(x); r != "" {
+			c.issue(model.IssueHiddenText, "%s contains %s (left in: it is part of what the API accepts)", where, r)
+		}
+	case []any:
+		for _, e := range x {
+			c.hiddenValue(where, e)
+		}
+	case map[string]any:
+		for k, e := range x {
+			c.hiddenValue(where, k)
+			c.hiddenValue(where, e)
+		}
+	}
+}
+
+// knownTypes keeps the JSON Schema type names in types: "type" is spec text
+// that reaches the model. isFile reports Swagger's "file".
+func knownTypes(types []string) (known []string, isFile bool) {
+	known = make([]string, 0, len(types))
+	for _, typ := range types {
+		switch {
+		case jsonSchemaTypes[typ]:
+			known = append(known, typ)
+		case typ == "file":
+			isFile = true
+		}
+	}
+	return known, isFile
+}
+
+// markFile makes out a binary string, JSON Schema's form of Swagger's
+// "file" (see isFileField).
+func markFile(out map[string]any) {
+	if _, typed := out["type"]; !typed {
+		out["type"] = "string"
+	}
+	out["format"] = "binary"
+}
+
+var jsonSchemaTypes = map[string]bool{
+	"string": true, "number": true, "integer": true, "boolean": true,
+	"array": true, "object": true, "null": true,
 }

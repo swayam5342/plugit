@@ -29,11 +29,11 @@ import (
 	"github.com/swayam5342/plugit/internal/naming"
 )
 
-// Limits on untrusted specs.
+// Limits on untrusted spec structure.
 const (
-	MaxSchemaDepth = 12   // nesting levels kept when converting a schema
-	MaxSchemaNodes = 5000 // schema nodes converted per tool
-	MaxRefDepth    = 32   // $ref -> $ref hops
+	MaxSchemaDepth = 12
+	MaxSchemaNodes = 5000
+	MaxRefDepth    = 32
 	maxWarnings    = 25
 )
 
@@ -48,13 +48,10 @@ var (
 
 // Options configures Parse.
 type Options struct {
-	// Prefix is prepended to every tool name ("pets" -> "pets_listPets").
-	Prefix string
-	// MaxDescription caps descriptions in runes (naming.DefaultMaxDescription if 0).
-	MaxDescription int
-	// Logger receives libopenapi's diagnostics. nil discards them. Never
-	// pass a logger that writes to stdout.
-	Logger *slog.Logger
+	Prefix           string
+	MaxDescription   int
+	AllowUnsafePaths bool
+	Logger           *slog.Logger
 }
 
 // Parse builds a Manifest from spec bytes (JSON or YAML).
@@ -76,7 +73,7 @@ func Parse(data []byte, opts Options) (m *model.Manifest, err error) {
 	}
 
 	cfg := datamodel.NewDocumentConfiguration()
-	cfg.Logger = logger // the default logs to stdout
+	cfg.Logger = logger
 	cfg.AllowFileReferences = false
 	cfg.AllowRemoteReferences = false
 	cfg.SkipExternalRefResolution = true

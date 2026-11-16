@@ -18,8 +18,8 @@ import (
 type StatsInput struct {
 	Title    string
 	Source   func(ctx context.Context, since time.Time) ([]store.ToolStats, error)
-	Budgets  map[string]string // per API, e.g. "≈2.3k tokens · 8 tools"
-	Interval time.Duration     // refresh period
+	Budgets  map[string]string
+	Interval time.Duration
 	Now      func() time.Time
 }
 
@@ -31,7 +31,6 @@ type StatsMsg struct {
 
 type statsTick struct{}
 
-// Windows the stats screen offers, by number key.
 var statsWindows = []struct {
 	label string
 	d     time.Duration

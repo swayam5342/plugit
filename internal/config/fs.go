@@ -16,8 +16,6 @@ import (
 func EnsureDir(dir string) error {
 	dir = filepath.Clean(dir)
 
-	// Collect missing components from dir upwards, then create them top-down
-	// so each new directory is secured before anything is placed inside it.
 	var missing []string
 	for d := dir; ; {
 		fi, err := os.Stat(d)
@@ -62,7 +60,6 @@ func WriteFileAtomic(path string, data []byte) (err error) {
 	if dir == "" {
 		dir = "."
 	}
-	// CreateTemp opens with O_EXCL and mode 0600.
 	tmp, err := os.CreateTemp(dir, "."+base+".tmp-*")
 	if err != nil {
 		return fmt.Errorf("writing %s: creating temp file: %w", path, err)
@@ -75,7 +72,6 @@ func WriteFileAtomic(path string, data []byte) (err error) {
 		}
 	}()
 
-	// Secure before writing so the data never sits under a wider ACL.
 	if err = restrictToOwner(tmpName, false); err != nil {
 		return fmt.Errorf("writing %s: securing temp file: %w", path, err)
 	}

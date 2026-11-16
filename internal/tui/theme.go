@@ -11,10 +11,6 @@ import (
 	"github.com/swayam5342/plugit/internal/policy"
 )
 
-// theme is the palette and the drawing helpers built on it. Colours are
-// true colour, picked for a dark or a light background (the screens ask
-// the terminal which it has); Bubble Tea downsamples them for 256- and
-// 16-colour terminals and drops them for NO_COLOR.
 type theme struct {
 	accent, green, yellow, red, blue, cyan, faint, border, onPill color.Color
 

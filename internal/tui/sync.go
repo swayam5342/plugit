@@ -18,9 +18,9 @@ import (
 type SyncInput struct {
 	API      string
 	Diff     curate.SyncDiff
-	BaseURL  string // pinned; sync never changes it
-	Toolset  string // where chosen new operations go
-	LintNote string // e.g. "2 lint errors in tools you serve", or ""
+	BaseURL  string
+	Toolset  string
+	LintNote string
 }
 
 // SyncScreen shows what a new spec changes and lets the user pick which
@@ -139,8 +139,11 @@ func (s *SyncScreen) body(w int) (lines []string, cursorLine int) {
 		if a.New != nil {
 			desc, name = safe(a.New.Description), safe(a.New.Name)
 		}
-		add(bar + box + th.method(a.Key.Method()).Render(fmt.Sprintf("%-7s", a.Key.Method())) + " " +
+		add(bar + box + th.method(a.Key.Method()).Render(fmt.Sprintf("%-7s", safe(a.Key.Method()))) + " " +
 			fmt.Sprintf("%-32s", truncate(safe(a.Key.Path()), 32)) + " " + th.Bold.Render(name) + th.Dim.Render("  "+desc))
+		if len(a.AutoSelected) > 0 {
+			add("      " + th.Warn.Render("served at once by "+safe(strings.Join(a.AutoSelected, ", "))+" (selected by tags or methods)"))
+		}
 	}
 	add("")
 
@@ -148,7 +151,7 @@ func (s *SyncScreen) body(w int) (lines []string, cursorLine int) {
 	for _, c := range d.Changed {
 		where := th.Dim.Render("  not in a toolset")
 		if len(c.Listed) > 0 {
-			where = th.Warn.Render("  served in " + strings.Join(c.Listed, ", "))
+			where = th.Warn.Render("  served in " + safe(strings.Join(c.Listed, ", ")))
 		}
 		add("    " + opLine(c.New) + th.Dim.Render("  "+strings.Join(c.What, ", ")) + where)
 		if c.New != nil && len(c.Listed) > 0 && slices.Contains(c.What, "description") {
@@ -161,7 +164,7 @@ func (s *SyncScreen) body(w int) (lines []string, cursorLine int) {
 	for _, r := range d.Removed {
 		note := th.Dim.Render("  not in a toolset")
 		if len(r.Listed) > 0 {
-			note = th.Dim.Render("  listed in " + strings.Join(r.Listed, ", ") + "; its overrides are kept in plugit.yaml")
+			note = th.Dim.Render("  listed in " + safe(strings.Join(r.Listed, ", ")) + "; its overrides are kept in plugit.yaml")
 		}
 		add("    " + opLine(r.Old) + note)
 	}

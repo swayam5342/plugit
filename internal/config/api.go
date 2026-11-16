@@ -25,16 +25,7 @@ import (
 
 // CurrentVersion is the plugit.yaml schema version this build reads and
 // writes. Changing the schema means bumping it and adding a migration.
-//
-// History:
-//   - 1: the first schema (v0.1).
-//   - 2: adds toolsets.<name>.tools.<key>.rate_limit (per-tool rate limits,
-//     M5). Version 1 files need no changes; migrate just relabels them.
-//   - 3: adds toolsets.<name>.tools.<key>.response_fields (response field
-//     filtering, M6). Again nothing to rewrite.
-//   - 4: adds auth.type oauth2 with auth.flow, token_url, device_url,
-//     client_id and scopes (M6). Nothing to rewrite.
-const CurrentVersion = 4
+const CurrentVersion = 6
 
 // MaxConfigBytes caps plugit.yaml. A real config is a few kilobytes.
 const MaxConfigBytes = 1 << 20
@@ -64,8 +55,8 @@ const (
 	AuthBearer AuthType = "bearer"
 	AuthHeader AuthType = "header"
 	AuthQuery  AuthType = "query"
-	AuthBasic  AuthType = "basic"  // the secret is "user:pass"
-	AuthOAuth2 AuthType = "oauth2" // version 4; see Auth.Flow
+	AuthBasic  AuthType = "basic"
+	AuthOAuth2 AuthType = "oauth2"
 )
 
 // OAuth flows (auth.flow).
@@ -97,25 +88,27 @@ type API struct {
 	Auth     Auth               `yaml:"auth"`
 	Policy   Policy             `yaml:"policy"`
 	Log      Log                `yaml:"log"`
+	Lint     Lint               `yaml:"lint,omitempty"`
 	Toolsets map[string]Toolset `yaml:"toolsets"`
 }
 
 // Source records where the spec came from.
 type Source struct {
-	URL    string `yaml:"url"` // URL or file path
+	URL    string `yaml:"url"`
 	SHA256 string `yaml:"sha256,omitempty"`
 }
 
 // Fixed is a parameter sent on every request and hidden from the model.
 type Fixed struct {
 	Name  string `yaml:"name"`
-	In    string `yaml:"in,omitempty"` // query | header; the spec-declared location wins
-	Value string `yaml:"value"`        // literal:V | env:VAR | keyring:service/key
+	In    string `yaml:"in,omitempty"`
+	Value string `yaml:"value"`
 }
 
 // Network holds per-API network limits.
 type Network struct {
 	AllowPrivate     bool          `yaml:"allow_private"`
+	AllowInsecure    bool          `yaml:"allow_insecure,omitempty"`
 	Timeout          time.Duration `yaml:"timeout,omitempty"`
 	MaxResponseBytes int64         `yaml:"max_response_bytes,omitempty"`
 }
@@ -123,54 +116,59 @@ type Network struct {
 // Auth describes the API credential.
 type Auth struct {
 	Type   AuthType `yaml:"type,omitempty"`
-	Header string   `yaml:"header,omitempty"` // type header
-	Param  string   `yaml:"param,omitempty"`  // type query
-	Secret string   `yaml:"secret,omitempty"` // env:VAR | keyring:service/key (oauth2: the client secret)
+	Header string   `yaml:"header,omitempty"`
+	Param  string   `yaml:"param,omitempty"`
+	Secret string   `yaml:"secret,omitempty"`
 
-	// type oauth2 (version 4). The endpoints are typed by the user, never
-	// taken from a spec; the client secret goes only to TokenURL.
-	Flow      string   `yaml:"flow,omitempty"`       // client_credentials | device_code
-	TokenURL  string   `yaml:"token_url,omitempty"`  // https (http only to loopback)
-	DeviceURL string   `yaml:"device_url,omitempty"` // device_code only
-	ClientID  string   `yaml:"client_id,omitempty"`  // public identifier
+	Flow      string   `yaml:"flow,omitempty"`
+	TokenURL  string   `yaml:"token_url,omitempty"`
+	DeviceURL string   `yaml:"device_url,omitempty"`
+	ClientID  string   `yaml:"client_id,omitempty"`
 	Scopes    []string `yaml:"scopes,omitempty"`
 }
 
 // Policy holds the API-wide call policy.
 type Policy struct {
 	Mode      string `yaml:"mode,omitempty"`
-	RateLimit string `yaml:"rate_limit,omitempty"` // N/sec | N/min | N/hour, per serve process
+	RateLimit string `yaml:"rate_limit,omitempty"`
 }
 
 // Log holds call-log settings (the call log itself arrives in M4).
 type Log struct {
 	Args            LogArgs `yaml:"args,omitempty"`
 	ResponsePreview bool    `yaml:"response_preview"`
-	Retention       string  `yaml:"retention,omitempty"` // e.g. 30d or 72h
+	Retention       string  `yaml:"retention,omitempty"`
 }
 
 // Toolset is a named selection of tools with per-tool overrides.
 type Toolset struct {
-	Tools       map[string]ToolOverride `yaml:"tools,omitempty"` // key: "METHOD /path"
+	Tools       map[string]ToolOverride `yaml:"tools,omitempty"`
 	IncludeTags []string                `yaml:"include_tags,omitempty"`
 	Methods     []string                `yaml:"methods,omitempty"`
 }
 
 // ToolOverride customizes one tool. Empty fields keep the generated value.
 type ToolOverride struct {
-	Name        string `yaml:"name,omitempty"`
-	Description string `yaml:"description,omitempty"`
-	Policy      string `yaml:"policy,omitempty"`     // allow | confirm | deny
-	RateLimit   string `yaml:"rate_limit,omitempty"` // N/sec | N/min | N/hour, on top of policy.rate_limit (version 2)
-	// ResponseFields keeps only these parts of a JSON success response
-	// (version 3; see package jsonpick for the path syntax).
+	Name           string   `yaml:"name,omitempty"`
+	Description    string   `yaml:"description,omitempty"`
+	Policy         string   `yaml:"policy,omitempty"`
+	RateLimit      string   `yaml:"rate_limit,omitempty"`
 	ResponseFields []string `yaml:"response_fields,omitempty"`
+	LintIgnore     []string `yaml:"lint_ignore,omitempty"`
 }
 
 // IsZero reports whether the override changes nothing.
 func (o ToolOverride) IsZero() bool {
-	return o.Name == "" && o.Description == "" && o.Policy == "" && o.RateLimit == "" && len(o.ResponseFields) == 0
+	return o.Name == "" && o.Description == "" && o.Policy == "" && o.RateLimit == "" && len(o.ResponseFields) == 0 && len(o.LintIgnore) == 0
 }
+
+// Lint holds lint settings (version 6).
+type Lint struct {
+	Ignore []string `yaml:"ignore,omitempty"`
+}
+
+// IsZero lets an empty lint block be left out of the file.
+func (l Lint) IsZero() bool { return len(l.Ignore) == 0 }
 
 // PolicyMode is the validated policy mode.
 func (c *API) PolicyMode() policy.Mode { return policy.Mode(c.Policy.Mode) }
@@ -226,11 +224,6 @@ func readCapped(path string, limit int64) ([]byte, error) {
 // defaults. Unknown and duplicate keys are errors, so a typo can't silently
 // disable a safety setting. All problems are reported together.
 func ParseAPI(data []byte) (*API, error) {
-	// First pass: decode the whole document generically. That expands every
-	// alias, so the library's alias limit applies to all of it (a typed
-	// decode can stop early on a type error). It also lets the version be
-	// checked first: a newer schema may use keys this build doesn't know, and
-	// "upgrade plugit" is the useful message for that.
 	var raw any
 	if err := yaml.Load(data, &raw, yamlOpts()...); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidConfig, yamlError(err))
@@ -258,15 +251,12 @@ func ParseAPI(data []byte) (*API, error) {
 
 // migrate brings a validated older config up to CurrentVersion.
 func (c *API) migrate() {
-	if c.Version < 4 {
-		// Every step so far only added optional fields: nothing to rewrite.
-		c.Version = 4
+	if c.Version < 6 {
+		c.Version = 6
 	}
 }
 
 func yamlOpts() []yaml.Option {
-	// The library's default limits cap nesting depth and alias expansion, and
-	// a stream with more than one document is an error.
 	return []yaml.Option{yaml.WithUniqueKeys()}
 }
 
@@ -307,10 +297,9 @@ var (
 	headerNameRe = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,256}$")
 	sha256Re     = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	retentionRe  = regexp.MustCompile(`^([0-9]{1,5})d$`)
+	lintRuleRe   = regexp.MustCompile(`^L[0-9]{3}$`)
 )
 
-// toolMethods are the methods an operation key may use (TRACE is never a
-// tool, SPEC §3.5 rule 5).
 var toolMethods = map[string]bool{
 	"GET": true, "HEAD": true, "OPTIONS": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true,
 }
@@ -373,6 +362,11 @@ func (c *API) Validate() error {
 	}
 
 	c.validateAuth(bad, wrap)
+	if c.hasCredential() {
+		if err := CheckCredentialTransport(c.BaseURL, c.Network.AllowInsecure); err != nil {
+			bad("base_url", "%s; to send it over http anyway, set network.allow_insecure: true", err)
+		}
+	}
 
 	if _, err := policy.ParseMode(c.Policy.Mode); err != nil {
 		wrap("policy.mode", err)
@@ -390,6 +384,14 @@ func (c *API) Validate() error {
 	}
 	if c.Log.Retention != "" && !validRetention(c.Log.Retention) {
 		bad("log.retention", "%q: use days (30d) or a duration (72h)", naming.CleanText(c.Log.Retention, 40))
+	}
+	if msg := checkLintRules(c.Lint.Ignore); msg != "" {
+		bad("lint.ignore", "%s", msg)
+	}
+	for _, r := range c.Lint.Ignore {
+		if alwaysErrorRules[r] {
+			bad("lint.ignore", "%s is always an error and can't be ignored for the whole API", r)
+		}
 	}
 
 	if len(c.Toolsets) == 0 {
@@ -421,7 +423,6 @@ func (c *API) validateAuth(bad func(string, string, ...any), wrap func(string, e
 			bad("auth.param", "only used with type query")
 		}
 	case AuthHeader:
-		// Authorization is the one forbidden header a credential may use.
 		if !headerNameRe.MatchString(a.Header) ||
 			(schema.IsForbiddenHeader(a.Header) && !strings.EqualFold(a.Header, "Authorization")) {
 			bad("auth.header", "must be a valid header name other than an auth or hop-by-hop header like Host or Cookie")
@@ -479,6 +480,9 @@ func (c *API) validateToolset(name string, ts Toolset, bad func(string, string, 
 		if _, err := jsonpick.Parse(o.ResponseFields); err != nil {
 			wrap(kf+".response_fields", err)
 		}
+		if msg := checkLintRules(o.LintIgnore); msg != "" {
+			bad(kf+".lint_ignore", "%s", msg)
+		}
 	}
 	for _, m := range ts.Methods {
 		if !toolMethods[strings.ToUpper(m)] {
@@ -492,9 +496,6 @@ func (c *API) validateToolset(name string, ts Toolset, bad func(string, string, 
 	}
 }
 
-// validateBaseURL accepts an absolute http(s) URL with a host and no
-// userinfo, query or fragment. The value is never echoed: it may carry
-// credentials.
 // validateOAuth checks type oauth2 and reports whether a client secret is
 // required (client credentials) or optional (device flow).
 func (c *API) validateOAuth(bad func(string, string, ...any), wrap func(string, error)) bool {
@@ -529,7 +530,7 @@ func (c *API) validateOAuth(bad func(string, string, ...any), wrap func(string, 
 				wrap("auth.secret", err)
 			}
 		}
-		return false // public clients have no secret
+		return false
 	default:
 		bad("auth.flow", "%q: use client_credentials or device_code", naming.CleanText(a.Flow, 40))
 		return false
@@ -553,6 +554,9 @@ func validateOAuthURL(raw string) error {
 	return nil
 }
 
+// validateBaseURL accepts an absolute http(s) URL with a host and no
+// userinfo, query or fragment. The value is never echoed: it may carry
+// credentials.
 func validateBaseURL(raw string) error {
 	if raw == "" {
 		return errors.New("missing")
@@ -571,6 +575,51 @@ func validateBaseURL(raw string) error {
 		return errors.New("must not have a query or fragment; use fixed for query parameters")
 	}
 	return nil
+}
+
+func (c *API) hasCredential() bool {
+	if c.Auth.Type != AuthNone && c.Auth.Type != "" {
+		return true
+	}
+	for _, f := range c.Fixed {
+		if ref, err := secrets.ParseRef(f.Value); err == nil && ref.IsSecret() {
+			return true
+		}
+	}
+	return false
+}
+
+// CheckCredentialTransport refuses plain http to a remote host when a
+// credential is sent (SPEC T8), unless allowInsecure is on. The URL is never
+// echoed.
+func CheckCredentialTransport(baseURL string, allowInsecure bool) error {
+	u, err := url.Parse(baseURL)
+	if err != nil || u.Scheme != "http" || allowInsecure {
+		return nil
+	}
+	host := u.Hostname()
+	if ip := net.ParseIP(host); strings.EqualFold(host, "localhost") || (ip != nil && ip.IsLoopback()) {
+		return nil
+	}
+	return errors.New("must be https when a credential is configured: plain http would send it unencrypted " +
+		"(without a switch, http is only allowed to localhost)")
+}
+
+var alwaysErrorRules = map[string]bool{"L003": true, "L009": true, "L011": true}
+
+// checkLintRules says what is wrong with a list of lint rule IDs, or "".
+func checkLintRules(rules []string) string {
+	seen := map[string]bool{}
+	for _, r := range rules {
+		switch {
+		case !lintRuleRe.MatchString(r):
+			return fmt.Sprintf("%q is not a lint rule: use IDs like L017", naming.CleanText(r, 20))
+		case seen[r]:
+			return r + " is listed twice"
+		}
+		seen[r] = true
+	}
+	return ""
 }
 
 func validRetention(s string) bool {

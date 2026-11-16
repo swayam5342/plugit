@@ -21,13 +21,12 @@ import (
 type callSource = func(ctx context.Context, afterID int64) ([]store.Call, error)
 
 type logsSettings struct {
-	name     string // "" for every API
-	follow   bool
-	asJSON   bool
-	limit    int           // newest calls to show first (default 50)
-	interval time.Duration // follow poll interval (default 500ms)
-	out      io.Writer
-	// interactive opens the live inspector; nil prints instead.
+	name        string
+	follow      bool
+	asJSON      bool
+	limit       int
+	interval    time.Duration
+	out         io.Writer
 	interactive func(ctx context.Context, title string, allAPIs bool, src callSource) error
 }
 
@@ -80,7 +79,6 @@ func showLogs(ctx context.Context, p config.Paths, s logsSettings) error {
 	filter := store.Filter{API: s.name}
 
 	if s.interactive != nil {
-		// The inspector waits for calls, so create the log if needed.
 		db, err := store.Open(ctx, p.DB())
 		if err != nil {
 			return err

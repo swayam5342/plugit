@@ -187,7 +187,6 @@ func TestForbiddenHeadersRemoved(t *testing.T) {
 		params = append(params, p(h, model.InHeader, false, `{"type":"string"}`))
 	}
 	params = append(params, p("X-Request-Id", model.InHeader, false, `{"type":"string"}`))
-	// The same names in a non-header location are ordinary parameters.
 	params = append(params, p("host", model.InQuery, false, `{"type":"string"}`))
 
 	out := Prepare(model.Tool{Key: "GET /x", Params: params}, Options{})

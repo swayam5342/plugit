@@ -27,36 +27,32 @@ import (
 )
 
 type addSettings struct {
-	name, spec   string
-	baseURL      string
-	prefix       string
-	mode         policy.Mode
-	allowPrivate bool
-	timeout      time.Duration
-	headers      []string // Name=env:VAR|keyring:svc/key
-	fixed        []string // name=literal:V|env:VAR|keyring:svc/key
-	// fromRun selects tools the way `plugit run` does (mode + filters),
-	// without the picker.
+	name, spec           string
+	baseURL              string
+	prefix               string
+	mode                 policy.Mode
+	allowPrivate         bool
+	allowInsecure        bool
+	timeout              time.Duration
+	headers              []string
+	fixed                []string
 	fromRun              bool
 	tags, methods, paths []string
 	maxTools             int
-	yes                  bool // accept the spec's server as the base URL
+	yes                  bool
 }
 
-// pickResult is what the picker hands back: the toolset, and the API's
-// policy mode as set there with m (empty keeps the mode it started with).
 type pickResult struct {
 	toolset config.Toolset
 	mode    policy.Mode
 }
 
-// pickInput is what the picker works on.
 type pickInput struct {
 	api      string
-	tools    []model.Tool // named with the prefix, fixed params hidden
+	tools    []model.Tool
 	prefix   string
 	mode     policy.Mode
-	selected config.Toolset // initial selection
+	selected config.Toolset
 	lint     func(config.Toolset) []lint.Finding
 }
 
@@ -64,11 +60,10 @@ type addDeps struct {
 	paths   config.Paths
 	out     io.Writer
 	stderr  io.Writer
-	confirm func(string) (bool, error) // nil: no terminal
+	confirm func(string) (bool, error)
 	parse   func(context.Context, []byte, openapi.Options) (*model.Manifest, error)
-	// pick runs the interactive picker; nil means there's no terminal.
-	pick func(context.Context, pickInput) (pickResult, error)
-	info BuildInfo
+	pick    func(context.Context, pickInput) (pickResult, error)
+	info    BuildInfo
 }
 
 func newAddCmd(g *globalFlags, info BuildInfo) *cobra.Command {
@@ -116,6 +111,7 @@ store a keyring value with plugit auth.`,
 	fl.StringVar(&s.prefix, "prefix", "", "tool name prefix, e.g. gh -> gh_listIssues")
 	fl.StringVar(&mode, "mode", string(policy.ReadOnly), "policy mode: read-only, confirm-writes or full")
 	fl.BoolVar(&s.allowPrivate, "allow-private", false, "allow loopback and private-network addresses")
+	fl.BoolVar(&s.allowInsecure, "allow-insecure", false, "accept what plugit otherwise refuses: credentials over plain http to a remote host, and spec paths with spaces, '..' or backslashes")
 	fl.DurationVar(&s.timeout, "timeout", httpx.DefaultTimeout, "per-request timeout")
 	fl.StringArrayVar(&s.headers, "header", nil, "credential header Name=env:VAR or Name=keyring:service/key")
 	fl.StringArrayVar(&s.fixed, "fixed", nil, "fixed hidden parameter name=literal:V, name=env:VAR or name=keyring:service/key")
@@ -153,7 +149,7 @@ func addAPI(ctx context.Context, s addSettings, d addDeps) error {
 	if err != nil {
 		return err
 	}
-	m, err := d.parse(ctx, sp.Bytes, openapi.Options{Prefix: s.prefix})
+	m, err := d.parse(ctx, sp.Bytes, openapi.Options{Prefix: s.prefix, AllowUnsafePaths: s.allowInsecure})
 	if err != nil {
 		return err
 	}
@@ -198,7 +194,7 @@ func addAPI(ctx context.Context, s addSettings, d addDeps) error {
 			source = abs
 		}
 	} else {
-		source = safeLocation(source) // never store a query (it may hold a key)
+		source = safeLocation(source)
 	}
 	cfg := &config.API{
 		Version:  config.CurrentVersion,
@@ -207,7 +203,7 @@ func addAPI(ctx context.Context, s addSettings, d addDeps) error {
 		BaseURL:  baseURL,
 		Prefix:   s.prefix,
 		Fixed:    fixed,
-		Network:  config.Network{AllowPrivate: s.allowPrivate, Timeout: s.timeout},
+		Network:  config.Network{AllowPrivate: s.allowPrivate, AllowInsecure: s.allowInsecure, Timeout: s.timeout},
 		Auth:     auth,
 		Policy:   config.Policy{Mode: string(mode)},
 		Toolsets: map[string]config.Toolset{defaultToolset: ts},
@@ -264,7 +260,7 @@ func saveAPIFiles(p config.Paths, cfg *config.API, snapshot []byte, m *model.Man
 		return err
 	}
 	cachePath, _ := p.Manifest(cfg.Name)
-	if err := config.WriteManifest(cachePath, config.CacheKey{SpecSHA256: sum, Prefix: cfg.Prefix, Parser: parser}, m); err != nil {
+	if err := config.WriteManifest(cachePath, config.CacheKey{SpecSHA256: sum, Prefix: cfg.Prefix, Parser: parser, UnsafePaths: cfg.Network.AllowInsecure}, m); err != nil {
 		return err
 	}
 	return config.SaveAPI(p, cfg)

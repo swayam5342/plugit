@@ -10,6 +10,16 @@ const instrument = Instrument_Sans({
 
 const base = process.env.NEXT_PUBLIC_BASE_PATH || '';
 
+// A plug: two prongs, a body and a cord, in the site accent on black.
+const favicon =
+  "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>" +
+  "<rect width='32' height='32' fill='#000000'/>" +
+  "<g fill='none' stroke='#4cb3f0' stroke-width='3'>" +
+  "<path d='M12 3v7M20 3v7M16 23v9'/>" +
+  '</g>' +
+  "<path d='M7 10h18v5a9 9 0 0 1-18 0z' fill='#4cb3f0'/>" +
+  '</svg>';
+
 export const metadata = {
   // Where the site is hosted, for absolute share-image URLs.
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'https://plugit.swayam.li'),
@@ -22,7 +32,7 @@ export const metadata = {
     images: [`${base}/media/still-picker.jpg`],
   },
   icons: {
-    icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23000000'/%3E%3Cpath d='M16 4l3 9 9 3-9 3-3 9-3-9-9-3 9-3z' fill='%234cb3f0'/%3E%3C/svg%3E",
+    icon: `data:image/svg+xml,${encodeURIComponent(favicon)}`,
   },
 };
 

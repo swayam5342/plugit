@@ -25,32 +25,28 @@ var serverKeyRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 type installSettings struct {
 	name    string
 	client  string
-	toolset string // "" means default
-	as      string // server key in the client config; "" means name
+	toolset string
+	as      string
 	yes     bool
 }
 
 type installDeps struct {
 	paths     config.Paths
-	configDir string // the --config-dir flag, passed on to serve when set
+	configDir string
 	out       io.Writer
-	// confirm asks a yes/no question; nil means no terminal.
-	confirm  func(question string) (bool, error)
-	env      clients.Env
-	exe      func() (string, error)
-	lookPath func(string) (string, error)
-	run      func(ctx context.Context, name string, args ...string) ([]byte, error)
-	now      func() time.Time
-	// choose lets the user pick clients when --client is omitted; nil
-	// means no terminal.
-	choose func([]clientOption) ([]clients.Client, error)
+	confirm   func(question string) (bool, error)
+	env       clients.Env
+	exe       func() (string, error)
+	lookPath  func(string) (string, error)
+	run       func(ctx context.Context, name string, args ...string) ([]byte, error)
+	now       func() time.Time
+	choose    func([]clientOption) ([]clients.Client, error)
 }
 
-// clientOption is a client offered by the chooser.
 type clientOption struct {
 	Info     clients.Info
-	Detected bool   // looks installed on this machine
-	Where    string // its config file, or the CLI that owns its config
+	Detected bool
+	Where    string
 }
 
 func newInstallCmd(g *globalFlags) *cobra.Command {

@@ -61,8 +61,6 @@ func TestEditUpdatesOneToolset(t *testing.T) {
 	if err := editAPI(t.Context(), p, "pets", "", d); err != nil {
 		t.Fatal(err)
 	}
-	// The picker starts from the saved toolset, with overrides, and never
-	// sees the auth header as a parameter.
 	if in.selected.Tools["GET /pets"].Name != "list_pets" || in.prefix != "pp" {
 		t.Errorf("picker input = %+v", in.selected)
 	}
@@ -84,7 +82,6 @@ func TestEditUpdatesOneToolset(t *testing.T) {
 	if _, ok := def.Tools["POST /pets"]; ok {
 		t.Error("deselected tool kept")
 	}
-	// Keys the spec doesn't have are passed through, not silently dropped.
 	if _, ok := def.Tools["GET /gone"]; !ok {
 		t.Error("missing key dropped")
 	}
@@ -129,7 +126,7 @@ func TestEditNewToolsetAndCancel(t *testing.T) {
 // The picker gets a linter for the API being edited (lint badges, the
 // footer count and the tool detail).
 func TestEditPickerLints(t *testing.T) {
-	p := setupAPI(t, "http://pets.example.test") // plain http + auth: L011 is API-wide, not per toolset
+	p := setupInsecureAPI(t, "http://pets.example.test")
 	var findings []lint.Finding
 	pick := func(_ context.Context, in pickInput) (pickResult, error) {
 		if in.lint == nil {

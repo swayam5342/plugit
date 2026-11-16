@@ -134,7 +134,7 @@ func TestLoadHugeFileDefaultLimit(t *testing.T) {
 func TestLoadHugeURLDefaultLimit(t *testing.T) {
 	chunk := []byte(strings.Repeat(" ", 1<<20))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		for range 21 { // 21 MiB, no Content-Length
+		for range 21 {
 			if _, err := w.Write(chunk); err != nil {
 				return
 			}

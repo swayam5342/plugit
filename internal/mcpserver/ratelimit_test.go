@@ -34,7 +34,6 @@ func TestToolRateLimit(t *testing.T) {
 	if c := rec.last(t); c.Outcome != store.RateLimited {
 		t.Errorf("recorded %+v", c)
 	}
-	// Other tools have their own (here: no) tool limit.
 	if res, _ := r.call(t, "headPets", map[string]any{}); res.IsError {
 		t.Errorf("headPets limited by listPets' budget: %s", text(res))
 	}

@@ -43,7 +43,6 @@ func (r Rate) String() string {
 }
 
 // Limiter is a token bucket: a burst of N calls, refilled at N per period.
-// It is safe for concurrent use. A nil *Limiter allows everything.
 type Limiter struct {
 	rate   Rate
 	now    func() time.Time

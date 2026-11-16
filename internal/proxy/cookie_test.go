@@ -28,7 +28,6 @@ func TestCookieHeader(t *testing.T) {
 	if len(cookies) != 2 || cookies[0].Name != "lang" || cookies[1].Value != "dark" {
 		t.Errorf("parsed cookies = %v", cookies)
 	}
-	// Numbers and booleans are fine; no cookie arguments, no header.
 	if req := mustBuild(t, getMe, `{"theme":7,"lang":true}`, Target{}); req.Header.Get("Cookie") != "lang=true; theme=7" {
 		t.Errorf("Cookie = %q", req.Header.Get("Cookie"))
 	}
@@ -63,7 +62,6 @@ func TestCookieFixedSecret(t *testing.T) {
 	if strings.Contains(shown, "test-session-secret-1") || strings.Contains(shown, "dark") || !strings.Contains(shown, "session=") {
 		t.Errorf("printed Cookie = %q", shown)
 	}
-	// The model can't set it: hidden params aren't arguments.
 	if _, err := build(t, tl, `{"session":"forged"}`, tg); err == nil {
 		t.Error("the model set the hidden session cookie")
 	}

@@ -1,5 +1,5 @@
 // Package lint checks an API's toolsets for quality and safety problems
-// (SPEC §4, rules L001-L013). It is pure: it looks only at the parsed
+// (SPEC 4, rules L001-L019). It is pure: it looks only at the parsed
 // manifest and the config it is given.
 package lint
 
@@ -30,12 +30,11 @@ const (
 	BudgetTokens = 8000
 )
 
-// Limits for the other rules.
 const (
-	maxDescription = naming.DefaultMaxDescription // L002
-	maxDepth       = 8                            // L005
-	maxProperties  = 50                           // L005
-	maxParams      = 15                           // L006
+	maxDescription = naming.DefaultMaxDescription
+	maxDepth       = 8
+	maxProperties  = 50
+	maxParams      = 15
 )
 
 // Severity is how bad a finding is.
@@ -64,17 +63,17 @@ func (s Severity) MarshalJSON() ([]byte, error) { return json.Marshal(s.String()
 type Finding struct {
 	Rule     string      `json:"rule"`
 	Severity Severity    `json:"severity"`
-	Toolset  string      `json:"toolset,omitempty"` // "" for API-wide findings
+	Toolset  string      `json:"toolset,omitempty"`
 	Tool     model.OpKey `json:"tool,omitempty"`
-	Name     string      `json:"name,omitempty"` // the tool's final name
+	Name     string      `json:"name,omitempty"`
 	Message  string      `json:"message"`
 }
 
 // Input is what lint looks at.
 type Input struct {
 	API    config.API
-	Tools  []model.Tool // the manifest's tools, named with the prefix
-	Hidden []string     // credential and fixed params, hidden from the model
+	Tools  []model.Tool
+	Hidden []string
 }
 
 // Summary counts findings by severity.
@@ -103,30 +102,54 @@ func Summarize(fs []Finding) Summary {
 // HasErrors reports whether any finding is an error.
 func HasErrors(fs []Finding) bool { return Summarize(fs).Errors > 0 }
 
-// Run lints the API and every toolset, most severe findings first.
+// Run lints the API and every toolset, most severe findings first. Ignored
+// findings are left out (see RunCounting).
 func Run(in Input) []Finding {
-	fs := apiFindings(in.API)
+	fs, _ := RunCounting(in)
+	return fs
+}
+
+// RunCounting is Run, and also says how many findings the config ignores.
+func RunCounting(in Input) (fs []Finding, ignored int) {
+	fs = apiFindings(in.API)
 	for _, name := range slices.Sorted(maps.Keys(in.API.Toolsets)) {
-		fs = append(fs, Toolset(in, name)...)
+		kept, n := toolset(in, name)
+		fs, ignored = append(fs, kept...), ignored+n
 	}
 	sortFindings(fs)
-	return fs
+	return fs, ignored
 }
 
 // Toolset lints one toolset.
 func Toolset(in Input, name string) []Finding {
+	fs, _ := toolset(in, name)
+	return fs
+}
+
+// ignored reports whether the config accepts f: lint.ignore hides a rule's
+// warnings and infos everywhere, a tool's lint_ignore hides the rule for
+// that tool, errors included.
+func ignored(a config.API, ts config.Toolset, f Finding) bool {
+	if f.Severity < Error && slices.Contains(a.Lint.Ignore, f.Rule) {
+		return true
+	}
+	return f.Tool != "" && slices.Contains(ts.Tools[string(f.Tool)].LintIgnore, f.Rule)
+}
+
+func toolset(in Input, name string) (kept []Finding, n int) {
 	ts := in.API.Toolsets[name]
 	sel := curate.Select(in.Tools, ts, in.API.Prefix)
 	mode := in.API.PolicyMode()
 	l := &linter{toolset: name}
 
 	seen := map[string]model.Tool{}
+	squashed := map[string]model.Tool{}
+	var unconfirmed []string
 	offered, budget := 0, 0
 	for _, st := range sel.Tools {
 		t := schema.Prepare(st.Tool, schema.Options{Fixed: in.Hidden})
 		l.tool = t
 
-		// L003: names after overrides.
 		lower := strings.ToLower(t.Name)
 		if other, dup := seen[lower]; dup {
 			l.add("L003", Error, "name %q clashes with %s (%q); names are compared ignoring case", t.Name, other.Key, other.Name)
@@ -136,8 +159,12 @@ func Toolset(in Input, name string) []Finding {
 		if len(t.Name) > naming.MaxNameLen {
 			l.add("L003", Error, "name %q is longer than %d characters with the prefix", t.Name, naming.MaxNameLen)
 		}
+		if other, dup := squashed[squash(t.Name)]; dup && !strings.EqualFold(other.Name, t.Name) {
+			l.add("L019", Warn, "name %q differs from %s (%q) only by case or separators; models mix such names up", t.Name, other.Key, other.Name)
+		} else if !dup {
+			squashed[squash(t.Name)] = t
+		}
 
-		// L001, L002: descriptions.
 		if t.Description == t.Method+" "+t.Path {
 			l.add("L001", Warn, "no description in the spec; add one with `plugit edit`")
 		}
@@ -145,7 +172,6 @@ func Toolset(in Input, name string) []Finding {
 			l.add("L002", Warn, "description override is %d characters; it is cut to %d", utf8.RuneCountInString(o.Description), maxDescription)
 		}
 
-		// L004-L007 on what the model sees.
 		var visible []model.Param
 		for _, p := range t.Params {
 			if !p.Hidden {
@@ -170,12 +196,17 @@ func Toolset(in Input, name string) []Finding {
 			}
 		}
 
-		// L008, L009: lifecycle and policy.
 		if t.Deprecated {
 			l.add("L008", Info, "the spec marks this operation deprecated")
 		}
 		if st.Override == policy.OverrideAllow && t.Safety == model.Destructive && mode != policy.Full {
 			l.add("L009", Error, "destructive tool set to allow has no effect under policy mode %s (it stays %s); remove the override or use mode full", mode, policy.Check(t.Safety, mode, policy.None).Decision)
+		}
+		if w := writeLike(strings.TrimPrefix(t.Name, in.API.Prefix+"_"), t.Path); w != "" && t.Safety == model.ReadOnly && st.Override == policy.None {
+			l.add("L015", Warn, "%s is treated as read-only but looks like it changes something (%q); if it does, set its policy to confirm or deny", t.Method, w)
+		}
+		if mode == policy.Full && t.Safety == model.Destructive && st.Override != policy.OverrideConfirm && st.Override != policy.OverrideDeny {
+			unconfirmed = append(unconfirmed, t.Name)
 		}
 
 		if policy.Lists(t.Safety, mode) && st.Override != policy.OverrideDeny {
@@ -184,21 +215,40 @@ func Toolset(in Input, name string) []Finding {
 		}
 	}
 
-	// L010: the whole toolset.
 	if offered > BudgetTools || budget > BudgetTokens {
 		l.tool = model.Tool{}
 		l.add("L010", Warn, "%d tools, %s tokens offered (thresholds: %d tools, %s tokens); models pick tools less reliably from long lists", offered, tokens.Format(budget), BudgetTools, tokens.Format(BudgetTokens))
 	}
-	return l.out
+	if n := len(unconfirmed); n > 0 {
+		l.tool = model.Tool{}
+		shown := unconfirmed[:min(n, 3)]
+		more := ""
+		if n > len(shown) {
+			more = fmt.Sprintf(" and %d more", n-len(shown))
+		}
+		l.add("L018", Warn, "%d destructive tool(s) run without confirmation under policy mode full (%s%s); set their policy to confirm", n, strings.Join(shown, ", "), more)
+	}
+	for _, f := range l.out {
+		if ignored(in.API, ts, f) {
+			n++
+			continue
+		}
+		kept = append(kept, f)
+	}
+	return kept, n
 }
 
 // apiFindings are the API-wide rules.
 func apiFindings(a config.API) []Finding {
 	var out []Finding
-	// L011: credentials over plain http to a remote host.
 	if u, err := url.Parse(a.BaseURL); err == nil && u.Scheme == "http" && !loopback(u.Hostname()) && sendsSecrets(a) {
-		out = append(out, Finding{Rule: "L011", Severity: Error,
-			Message: fmt.Sprintf("base_url %s is plain http to a remote host, and credentials are sent: use https", u.Redacted())})
+		f := Finding{Rule: "L011", Severity: Error,
+			Message: fmt.Sprintf("base_url %s is plain http to a remote host, and credentials are sent: use https", u.Redacted())}
+		if a.Network.AllowInsecure {
+			f.Severity = Warn
+			f.Message = fmt.Sprintf("base_url %s is plain http to a remote host, and credentials are sent unencrypted (network.allow_insecure is on): use https if the API offers it", u.Redacted())
+		}
+		out = append(out, f)
 	}
 	return out
 }
@@ -245,6 +295,15 @@ func (l *linter) add(rule string, sev Severity, format string, a ...any) {
 func (l *linter) param(p model.Param) {
 	where := fmt.Sprintf("parameter %q", p.Name)
 	l.text(where+" description", p.Desc)
+	if p.In != model.InPath && credentialName.MatchString(strings.Join(words(p.UpstreamName), "_")) {
+		l.add("L016", Warn, "%s looks like a credential the model would have to supply; make it a fixed value so it stays hidden", where)
+	}
+	switch riskyParam(p.UpstreamName) {
+	case "command":
+		l.add("L017", Warn, "%s looks like a command or query the API will run: whatever the model writes there is executed upstream", where)
+	case "target":
+		l.add("L017", Info, "%s looks like a URL, host or file the API will reach for: the model chooses where", where)
+	}
 	var s any
 	if json.Unmarshal(p.Schema, &s) != nil {
 		return
@@ -270,8 +329,9 @@ func typed(m map[string]any) bool {
 	return false
 }
 
-// walk visits a schema: it reports every title and description to text,
-// and returns the nesting depth and the most properties on one object.
+// walk visits a schema: it reports every title, description and enum, const
+// or default string to text, and returns the nesting depth and the most
+// properties on one object.
 func walk(s any, depth int, text func(field, s string)) (maxD, wide int) {
 	m, ok := s.(map[string]any)
 	if !ok {
@@ -281,6 +341,11 @@ func walk(s any, depth int, text func(field, s string)) (maxD, wide int) {
 	for _, f := range []string{"title", "description"} {
 		if v, ok := m[f].(string); ok {
 			text(f, v)
+		}
+	}
+	for _, f := range []string{"enum", "const", "default"} {
+		if v, ok := m[f]; ok {
+			valueStrings(v, 1, func(s string) { text(f+" value", s) })
 		}
 	}
 	child := func(c any, d int) {
@@ -308,10 +373,26 @@ func walk(s any, depth int, text func(field, s string)) (maxD, wide int) {
 	return maxD, wide
 }
 
-// ---- L007: text aimed at the model ----
+func valueStrings(v any, depth int, fn func(string)) {
+	if depth > maxDepth {
+		return
+	}
+	switch x := v.(type) {
+	case string:
+		fn(x)
+	case []any:
+		for _, e := range x {
+			valueStrings(e, depth+1, fn)
+		}
+	case map[string]any:
+		for _, k := range slices.Sorted(maps.Keys(x)) {
+			fn(k)
+			valueStrings(x[k], depth+1, fn)
+		}
+	}
+}
 
 var (
-	// Instructions to the model rather than documentation for a caller.
 	injection = regexp.MustCompile(`(?i)\b(` +
 		`(ignore|disregard|forget|override)\s+(all\s+|any\s+|the\s+|your\s+)*(previous|prior|above|earlier|preceding|system)\b` +
 		`|exfiltrat\w*` +
@@ -324,19 +405,15 @@ var (
 		`|developer\s+mode` +
 		`|</?\s*(system|instructions?|prompt)\s*>` +
 		`)`)
-	// Docs wording that is also how injected instructions read. Real specs
-	// use it ("you must be an admin"), so it is a warning (decided
-	// 2026-11-12 after measuring the GitHub spec).
 	weakInstruction = regexp.MustCompile(`(?i)\byou\s+must\b`)
 	link            = regexp.MustCompile(`(?i)\b(https?|ftp|file)://[^\s"'<>)\]]+`)
 
-	// Things that look like credentials. Matches are never echoed.
 	credentials = []*regexp.Regexp{
-		regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`),                             // AWS access key
-		regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]{30,}\b`),                   // GitHub token
-		regexp.MustCompile(`\b(sk|pk|rk)_(live|test)_[A-Za-z0-9]{16,}\b`),      // Stripe-style key
-		regexp.MustCompile(`\bxox[abprs]-[A-Za-z0-9-]{10,}\b`),                 // Slack token
-		regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.`), // JWT
+		regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`),
+		regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]{30,}\b`),
+		regexp.MustCompile(`\b(sk|pk|rk)_(live|test)_[A-Za-z0-9]{16,}\b`),
+		regexp.MustCompile(`\bxox[abprs]-[A-Za-z0-9-]{10,}\b`),
+		regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.`),
 		regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`),
 		regexp.MustCompile(`(?i)\b(api[_-]?key|access[_-]?token|secret|password|passwd)\s*[:=]\s*["']?[A-Za-z0-9_\-+/]{12,}`),
 	}
@@ -347,10 +424,26 @@ func (l *linter) text(where, s string) {
 	if s == "" {
 		return
 	}
-	if m := injection.FindString(s); m != "" {
-		l.add("L007", Error, "%s reads like an instruction to the model: %q", where, quote(m))
+	if m, how := instruction(s); m != "" {
+		if how != "" {
+			how = " (" + how + ")"
+		}
+		l.add("L007", Error, "%s reads like an instruction to the model%s: %q", where, how, quote(m))
 	} else if m := weakInstruction.FindString(s); m != "" {
 		l.add("L007", Warn, "%s is phrased as an instruction (%q); check it's meant for the caller", where, quote(m))
+	}
+	if m := localSecrets.FindString(s); m != "" {
+		l.add("L007", Warn, "%s tells the reader to use a local secret file (%q)", where, quote(m))
+	}
+	if w := mixedScript(s); w != "" {
+		l.add("L007", Warn, "%s mixes alphabets in one word (%q): lookalike letters can hide a word from review", where, quote(w))
+	}
+	for _, dec := range encodedText(s) {
+		if m, _ := instruction(dec); m != "" {
+			l.add("L007", Error, "%s hides an instruction to the model in encoded text: %q", where, quote(m))
+		} else {
+			l.add("L014", Warn, "%s contains base64 or hex that decodes to readable text (%q); a model can decode it", where, quote(dec))
+		}
 	}
 	if m := link.FindString(s); m != "" {
 		host := "a link"

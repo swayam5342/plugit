@@ -14,22 +14,21 @@ import (
 
 // OpChange is one operation that differs between two manifests.
 type OpChange struct {
-	Key    model.OpKey
-	Old    *model.Tool // nil when added
-	New    *model.Tool // nil when removed
-	What   []string    // for changes: which aspects differ
-	Listed []string    // toolsets that list this key, sorted
+	Key          model.OpKey
+	Old          *model.Tool
+	New          *model.Tool
+	What         []string
+	Listed       []string
+	AutoSelected []string
 }
 
 // SyncDiff is what `plugit sync` shows before adopting a new spec (SPEC
 // §2.3 "Sync diff", T3).
 type SyncDiff struct {
-	Added, Removed, Changed     []OpChange // each sorted by key
+	Added, Removed, Changed     []OpChange
 	ServersBefore, ServersAfter []string
 	ServersChanged              bool
-	// BaseURLListed reports whether the new spec still declares the pinned
-	// base_url among its servers. It's only meaningful when ServersChanged.
-	BaseURLListed bool
+	BaseURLListed               bool
 }
 
 // Empty reports whether nothing changed.
@@ -58,11 +57,21 @@ func DiffManifests(old, updated *model.Manifest, cfg config.API) SyncDiff {
 		}
 		return out
 	}
+	auto := func(t *model.Tool) []string {
+		var out []string
+		for _, name := range slices.Sorted(maps.Keys(cfg.Toolsets)) {
+			ts := cfg.Toolsets[name]
+			if len(ts.Tools) == 0 && (len(ts.IncludeTags) > 0 || len(ts.Methods) > 0) && matchesFilters(*t, ts) {
+				out = append(out, name)
+			}
+		}
+		return out
+	}
 	for k, n := range after {
 		o, ok := before[k]
 		switch {
 		case !ok:
-			d.Added = append(d.Added, OpChange{Key: k, New: n, Listed: listed(k)})
+			d.Added = append(d.Added, OpChange{Key: k, New: n, Listed: listed(k), AutoSelected: auto(n)})
 		default:
 			if what := differences(o, n); len(what) > 0 {
 				d.Changed = append(d.Changed, OpChange{Key: k, Old: o, New: n, What: what, Listed: listed(k)})
