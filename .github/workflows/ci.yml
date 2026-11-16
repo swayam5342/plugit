@@ -1,9 +1,12 @@
 name: CI
 
+# Checks run on pull requests, by hand, and from release.yml before a
+# tagged release. Pushes to main do not trigger them, and release binaries
+# are only built for v* tags (see release.yml).
 on:
-  push:
-    branches: [main]
   pull_request:
+  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -86,27 +89,3 @@ jobs:
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
           govulncheck ./...
-
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        target:
-          - { goos: windows, goarch: amd64 }
-          - { goos: darwin, goarch: arm64 }
-          - { goos: linux, goarch: amd64 }
-          - { goos: linux, goarch: arm64 }
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: stable
-      - name: cross-compile ${{ matrix.target.goos }}/${{ matrix.target.goarch }}
-        env:
-          GOOS: ${{ matrix.target.goos }}
-          GOARCH: ${{ matrix.target.goarch }}
-          CGO_ENABLED: "0"
-        run: go build -trimpath -ldflags "-s -w -X main.version=ci-${{ github.sha }}" -o /dev/null ./cmd/plugit
