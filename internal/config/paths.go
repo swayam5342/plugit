@@ -13,6 +13,8 @@ import (
 	"strings"
 )
 
+// ErrInvalidAPIName is returned when an API name is not safe to use as a
+// directory name.
 var ErrInvalidAPIName = errors.New("invalid API name")
 
 var apiNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
@@ -53,6 +55,7 @@ func RootDir(override string) (string, error) {
 	return filepath.Join(base, "plugit"), nil
 }
 
+// Paths computes file locations under a config root. It does no I/O.
 type Paths struct {
 	root string
 }

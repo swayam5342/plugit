@@ -16,6 +16,7 @@ import (
 	"github.com/swayam5342/plugit/internal/policy"
 )
 
+// TryInput configures the Try it screen (SPEC §2.3).
 type TryInput struct {
 	API     string
 	Tool    model.Tool
@@ -24,6 +25,7 @@ type TryInput struct {
 	Send    func(ctx context.Context, args map[string]string) TryResult
 }
 
+// TryResult is one call's outcome, already redacted.
 type TryResult struct {
 	Request  string
 	Status   int
@@ -34,6 +36,8 @@ type TryResult struct {
 
 type tryResultMsg TryResult
 
+// TryIt is a form generated from a tool's parameters that makes one call
+// and shows the redacted request and the response.
 type TryIt struct {
 	in      TryInput
 	params  []model.Param

@@ -26,6 +26,7 @@ import (
 	"github.com/swayam5342/plugit/internal/model"
 )
 
+// Options configures Prepare.
 type Options struct {
 	Fixed []string
 }

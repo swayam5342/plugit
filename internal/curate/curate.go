@@ -15,13 +15,16 @@ import (
 	"github.com/swayam5342/plugit/internal/policy"
 )
 
+// ErrNameConflict means the final tool names clash or don't fit.
 var ErrNameConflict = errors.New("tool name conflict")
 
+// Selected is one active tool.
 type Selected struct {
 	Tool     model.Tool
 	Override policy.Override
 }
 
+// Result is the active toolset.
 type Result struct {
 	Tools   []Selected
 	Missing []model.OpKey

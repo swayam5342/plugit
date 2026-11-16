@@ -16,21 +16,25 @@ import (
 	"strings"
 )
 
+// Sentinel errors callers can match with errors.Is.
 var (
 	ErrInvalidConfig = errors.New("client config is not a JSON object plugit can edit safely")
 	ErrNotOurs       = errors.New("an MCP server entry with that name exists and wasn't added by plugit")
 )
 
+// Entry is the MCP server entry plugit writes.
 type Entry struct {
 	Command string   `json:"command"`
 	Args    []string `json:"args"`
 }
 
+// Format says where a client's JSON config keeps its servers.
 type Format struct {
 	ServersKey string
 	Type       string
 }
 
+// Known formats.
 var (
 	MCPServers    = Format{ServersKey: "mcpServers"}
 	VSCodeServers = Format{ServersKey: "servers", Type: "stdio"}
@@ -209,6 +213,7 @@ func isPlugitEntry(raw json.RawMessage, name string) bool {
 	return false
 }
 
+// PlugitEntry is a plugit serve entry found in a client config.
 type PlugitEntry struct {
 	Entry
 	API string

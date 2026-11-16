@@ -22,21 +22,26 @@ import (
 	"time"
 	"unicode/utf8"
 
+	// Registers the pure-Go "sqlite" database/sql driver.
 	_ "modernc.org/sqlite"
 
 	"github.com/swayam5342/plugit/internal/config"
 )
 
+// SchemaVersion is the call log's schema version (PRAGMA user_version).
 const SchemaVersion = 1
 
+// Caps on stored text, so one huge call can't bloat the log.
 const (
 	MaxArgsBytes    = 16 << 10
 	MaxPreviewBytes = 2 << 10
 	MaxErrorBytes   = 1 << 10
 )
 
+// Outcome is how a call ended.
 type Outcome string
 
+// Call outcomes.
 const (
 	OK          Outcome = "ok"
 	HTTPError   Outcome = "http_error"
@@ -46,6 +51,7 @@ const (
 	Failed      Outcome = "error"
 )
 
+// Call is one logged tool call. Every text field is already redacted.
 type Call struct {
 	ID       int64           `json:"id"`
 	Time     time.Time       `json:"time"`
@@ -62,6 +68,7 @@ type Call struct {
 	Error    string          `json:"error,omitempty"`
 }
 
+// DB is an open call log.
 type DB struct {
 	sql *sql.DB
 }
@@ -180,6 +187,7 @@ func (db *DB) Prune(ctx context.Context, api string, before time.Time) (int64, e
 	return res.RowsAffected()
 }
 
+// Filter selects calls.
 type Filter struct {
 	API     string
 	AfterID int64
@@ -240,6 +248,7 @@ func (db *DB) List(ctx context.Context, f Filter) ([]Call, error) {
 	return out, nil
 }
 
+// ToolStats summarizes one tool's calls.
 type ToolStats struct {
 	API      string        `json:"api"`
 	Tool     string        `json:"tool"`
@@ -312,6 +321,9 @@ func percentile(sorted []time.Duration, p int) time.Duration {
 	return sorted[max(rank, 1)-1]
 }
 
+// Recorder writes calls in the background so recording never blocks or
+// fails a tool call (SPEC §3.7 step 9). When its buffer is full, calls are
+// dropped and counted.
 type Recorder struct {
 	db      *DB
 	ch      chan Call
@@ -372,6 +384,7 @@ func (r *Recorder) Close() {
 	<-r.done
 }
 
+// ErrNoLog means there is no call log yet (nothing has been served).
 var ErrNoLog = errors.New("no calls recorded yet")
 
 // OpenExisting opens the log for reading, or returns ErrNoLog if it

@@ -12,14 +12,20 @@ import (
 	"github.com/swayam5342/plugit/internal/model"
 )
 
+// MaxManifestBytes caps manifest.json (the same cap as the parse child's
+// output).
 const MaxManifestBytes = 256 << 20
 
+// MaxSnapshotBytes caps spec.snapshot.json (the spec fetch limit).
 const MaxSnapshotBytes = 20 << 20
 
 const manifestFormat = 1
 
+// ErrCacheMiss means manifest.json is missing, unreadable or out of date.
 var ErrCacheMiss = errors.New("manifest cache miss")
 
+// CacheKey is everything a parsed manifest depends on. A cache whose key
+// differs in any field is stale.
 type CacheKey struct {
 	SpecSHA256  string `json:"spec_sha256"`
 	Prefix      string `json:"prefix"`

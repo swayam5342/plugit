@@ -30,6 +30,7 @@ import (
 	"github.com/swayam5342/plugit/internal/tokens"
 )
 
+// ErrCancelled means the user left the picker without saving.
 var ErrCancelled = errors.New("cancelled; nothing saved")
 
 const (
@@ -41,6 +42,7 @@ const untagged = "(untagged)"
 
 var toolNameRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
+// PickerInput is what the picker edits.
 type PickerInput struct {
 	API      string
 	Tools    []model.Tool
@@ -79,6 +81,7 @@ const (
 	modeConfirmQuit
 )
 
+// Picker is the tool picker: a Bubble Tea model.
 type Picker struct {
 	in       PickerInput
 	tools    []model.Tool

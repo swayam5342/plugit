@@ -10,12 +10,14 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+// Choice is one row of a Chooser.
 type Choice struct {
 	Label  string
 	Detail string
 	Note   string
 }
 
+// Chooser is a small inline multi-select (used to pick MCP clients).
 type Chooser struct {
 	title, subtitle string
 	choices         []Choice

@@ -27,12 +27,14 @@ import (
 	"time"
 )
 
+// Defaults applied when the corresponding Options field is zero.
 const (
 	DefaultTimeout          = 30 * time.Second
 	DefaultMaxResponseBytes = 1 << 20
 	DefaultMaxRedirects     = 5
 )
 
+// Sentinel errors callers can match with errors.Is.
 var (
 	ErrBlockedAddress    = errors.New("blocked address")
 	ErrRedirectBlocked   = errors.New("cross-origin redirect blocked")
@@ -40,14 +42,17 @@ var (
 	ErrResponseTruncated = errors.New("response truncated at size cap")
 )
 
+// Doer sends an HTTP request. *http.Client implements it; tests inject fakes.
 type Doer interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
+// Resolver looks up the addresses of a host. *net.Resolver implements it.
 type Resolver interface {
 	LookupNetIP(ctx context.Context, network, host string) ([]netip.Addr, error)
 }
 
+// Options configures NewClient. The zero value is the secure default.
 type Options struct {
 	AllowPrivate     bool
 	Timeout          time.Duration

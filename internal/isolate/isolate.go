@@ -30,14 +30,17 @@ import (
 	"github.com/swayam5342/plugit/internal/openapi"
 )
 
+// ChildArg is the hidden first argument that turns plugit into a parse child.
 const ChildArg = "__parse"
 
+// Defaults applied when the corresponding Runner field is zero.
 const (
 	DefaultTimeout   = 30 * time.Second
 	DefaultMaxOutput = 256 << 20
 	maxRequest       = 64 << 20
 )
 
+// Sentinel errors callers can match with errors.Is.
 var (
 	ErrParserCrashed = errors.New("spec parser crashed")
 	ErrParseTimeout  = errors.New("spec parser timed out")
@@ -67,6 +70,7 @@ var errorKinds = []struct {
 	{"invalid", openapi.ErrInvalidSpec},
 }
 
+// Runner starts parse children.
 type Runner struct {
 	Exe       string
 	Args      []string

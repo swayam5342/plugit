@@ -29,6 +29,7 @@ import (
 	"github.com/swayam5342/plugit/internal/naming"
 )
 
+// Limits on untrusted spec structure.
 const (
 	MaxSchemaDepth = 12
 	MaxSchemaNodes = 5000
@@ -36,6 +37,7 @@ const (
 	maxWarnings    = 25
 )
 
+// Sentinel errors callers can match with errors.Is.
 var (
 	ErrUnsupportedSpec = errors.New("unsupported spec: need OpenAPI 3.0, 3.1 or Swagger 2.0")
 	ErrRefTooDeep      = errors.New("$ref chain too deep")
@@ -44,6 +46,7 @@ var (
 	ErrInvalidSpec     = errors.New("invalid spec")
 )
 
+// Options configures Parse.
 type Options struct {
 	Prefix           string
 	MaxDescription   int

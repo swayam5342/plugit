@@ -20,11 +20,13 @@ import (
 	"github.com/swayam5342/plugit/internal/httpx"
 )
 
+// Default limits for loading a spec.
 const (
 	DefaultMaxBytes = 20 << 20
 	DefaultTimeout  = 15 * time.Second
 )
 
+// Sentinel errors callers can match with errors.Is.
 var (
 	ErrTooLarge          = errors.New("spec exceeds size limit")
 	ErrEmpty             = errors.New("spec is empty")
@@ -33,8 +35,10 @@ var (
 	ErrHTTPStatus        = errors.New("unexpected HTTP status fetching spec")
 )
 
+// Format is the serialization of a spec document.
 type Format int
 
+// Spec formats.
 const (
 	JSON Format = iota + 1
 	YAML
@@ -50,6 +54,7 @@ func (f Format) String() string {
 	return "unknown"
 }
 
+// Spec is a loaded spec document.
 type Spec struct {
 	Bytes  []byte
 	SHA256 string
@@ -57,12 +62,14 @@ type Spec struct {
 	Source string
 }
 
+// Options configures a Loader. The zero value is the secure default.
 type Options struct {
 	AllowPrivate bool
 	MaxBytes     int64
 	Timeout      time.Duration
 }
 
+// Loader loads specs. Create it with New.
 type Loader struct {
 	client   httpx.Doer
 	maxBytes int64

@@ -25,14 +25,18 @@ import (
 	"strings"
 )
 
+// Mask replaces every redacted value.
 const Mask = "***"
 
+// Options configures a Redactor.
 type Options struct {
 	SecretHeaders     []string
 	SecretQueryParams []string
 	Secrets           []string
 }
 
+// Redactor masks secrets. It is immutable after New and safe for concurrent
+// use.
 type Redactor struct {
 	opts     Options
 	headers  map[string]bool

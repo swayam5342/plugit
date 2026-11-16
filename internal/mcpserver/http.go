@@ -16,6 +16,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// HTTPPath is where the Streamable HTTP endpoint lives.
 const HTTPPath = "/mcp"
 
 const (
@@ -25,6 +26,7 @@ const (
 	httpIdleTimeout   = 2 * time.Minute
 )
 
+// ErrNotLoopback means an HTTP listen address isn't on this machine only.
 var ErrNotLoopback = errors.New("the HTTP transport only listens on loopback (127.0.0.1 or ::1)")
 
 // ListenAddr normalizes an HTTP listen address and refuses anything but

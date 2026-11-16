@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+// OpKey is a tool's stable identity across renames and syncs:
+// "METHOD /path/template", e.g. "GET /repos/{owner}/{repo}/issues".
 type OpKey string
 
 // NewOpKey builds an OpKey with an upper-case method.
@@ -28,8 +30,10 @@ func (k OpKey) Path() string {
 	return p
 }
 
+// Safety classifies what calling a tool can do.
 type Safety int
 
+// Safety levels, from least to most dangerous.
 const (
 	ReadOnly Safety = iota
 	Write
@@ -76,8 +80,10 @@ func (s *Safety) UnmarshalJSON(b []byte) error {
 	return fmt.Errorf("unknown safety %q", name)
 }
 
+// Location is where an argument is sent in the HTTP request.
 type Location int
 
+// Argument locations.
 const (
 	InPath Location = iota
 	InQuery
@@ -125,6 +131,7 @@ func ParseLocation(s string) (Location, bool) {
 	return 0, false
 }
 
+// Tool is one API operation exposed (or exposable) as an MCP tool.
 type Tool struct {
 	Key         OpKey    `json:"key"`
 	ID          string   `json:"id"`
@@ -140,6 +147,7 @@ type Tool struct {
 	Issues      []Issue  `json:"issues,omitempty"`
 }
 
+// Param is one argument of a tool.
 type Param struct {
 	Name         string          `json:"name"`
 	UpstreamName string          `json:"upstreamName"`
@@ -150,6 +158,7 @@ type Param struct {
 	Hidden       bool            `json:"hidden,omitempty"`
 }
 
+// Body is a tool's request body.
 type Body struct {
 	ContentType string              `json:"contentType"`
 	Schema      json.RawMessage     `json:"schema"`
@@ -157,13 +166,18 @@ type Body struct {
 	Encoding    map[string]Encoding `json:"encoding,omitempty"`
 }
 
+// Encoding is how one form field is serialized (an OpenAPI encoding
+// object, with explode resolved). Fields without one use style form,
+// explode true.
 type Encoding struct {
 	Style   string `json:"style,omitempty"`
 	Explode bool   `json:"explode"`
 }
 
+// IssueKind classifies an ingest problem. Lint rules map these to findings.
 type IssueKind string
 
+// Ingest issue kinds.
 const (
 	IssueSchemaDegraded IssueKind = "schema-degraded"
 	IssueBodyNested     IssueKind = "body-nested"
@@ -171,11 +185,13 @@ const (
 	IssueHiddenText     IssueKind = "hidden-text"
 )
 
+// Issue is a problem found while ingesting one tool.
 type Issue struct {
 	Kind   IssueKind `json:"kind"`
 	Detail string    `json:"detail"`
 }
 
+// Manifest is the result of ingesting one spec.
 type Manifest struct {
 	Title       string   `json:"title"`
 	Version     string   `json:"version"`

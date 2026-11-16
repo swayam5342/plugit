@@ -23,10 +23,15 @@ import (
 	"github.com/swayam5342/plugit/internal/secrets"
 )
 
+// CurrentVersion is the plugit.yaml schema version this build reads and
+// writes. Changing the schema means bumping it and adding a migration.
 const CurrentVersion = 6
 
+// MaxConfigBytes caps plugit.yaml. A real config is a few kilobytes.
 const MaxConfigBytes = 1 << 20
 
+// Limits on network settings. They keep a hand-edited value from disabling
+// the protections they exist for (SPEC T12).
 const (
 	DefaultTimeout          = 30 * time.Second
 	MaxTimeout              = 10 * time.Minute
@@ -34,14 +39,17 @@ const (
 	MaxMaxResponseBytes     = 64 << 20
 )
 
+// Sentinel errors callers can match with errors.Is.
 var (
 	ErrInvalidConfig      = errors.New("invalid config")
 	ErrUnsupportedVersion = errors.New("unsupported config version")
 	ErrAPINotFound        = errors.New("API not found")
 )
 
+// AuthType is how the API credential is attached.
 type AuthType string
 
+// Auth types (SPEC §3.6, §9 item 2).
 const (
 	AuthNone   AuthType = "none"
 	AuthBearer AuthType = "bearer"
@@ -51,19 +59,24 @@ const (
 	AuthOAuth2 AuthType = "oauth2"
 )
 
+// OAuth flows (auth.flow).
 const (
 	FlowClientCredentials = "client_credentials"
 	FlowDeviceCode        = "device_code"
 )
 
+// LogArgs says how call arguments are logged.
 type LogArgs string
 
+// Log argument modes.
 const (
 	LogArgsNone     LogArgs = "none"
 	LogArgsRedacted LogArgs = "redacted"
 	LogArgsFull     LogArgs = "full"
 )
 
+// API is one API's plugit.yaml (SPEC §3.6). Secret-bearing fields hold
+// references (env:, keyring:), never values.
 type API struct {
 	Version  int                `yaml:"version"`
 	Name     string             `yaml:"name"`
@@ -79,17 +92,20 @@ type API struct {
 	Toolsets map[string]Toolset `yaml:"toolsets"`
 }
 
+// Source records where the spec came from.
 type Source struct {
 	URL    string `yaml:"url"`
 	SHA256 string `yaml:"sha256,omitempty"`
 }
 
+// Fixed is a parameter sent on every request and hidden from the model.
 type Fixed struct {
 	Name  string `yaml:"name"`
 	In    string `yaml:"in,omitempty"`
 	Value string `yaml:"value"`
 }
 
+// Network holds per-API network limits.
 type Network struct {
 	AllowPrivate     bool          `yaml:"allow_private"`
 	AllowInsecure    bool          `yaml:"allow_insecure,omitempty"`
@@ -97,6 +113,7 @@ type Network struct {
 	MaxResponseBytes int64         `yaml:"max_response_bytes,omitempty"`
 }
 
+// Auth describes the API credential.
 type Auth struct {
 	Type   AuthType `yaml:"type,omitempty"`
 	Header string   `yaml:"header,omitempty"`
@@ -110,23 +127,27 @@ type Auth struct {
 	Scopes    []string `yaml:"scopes,omitempty"`
 }
 
+// Policy holds the API-wide call policy.
 type Policy struct {
 	Mode      string `yaml:"mode,omitempty"`
 	RateLimit string `yaml:"rate_limit,omitempty"`
 }
 
+// Log holds call-log settings (the call log itself arrives in M4).
 type Log struct {
 	Args            LogArgs `yaml:"args,omitempty"`
 	ResponsePreview bool    `yaml:"response_preview"`
 	Retention       string  `yaml:"retention,omitempty"`
 }
 
+// Toolset is a named selection of tools with per-tool overrides.
 type Toolset struct {
 	Tools       map[string]ToolOverride `yaml:"tools,omitempty"`
 	IncludeTags []string                `yaml:"include_tags,omitempty"`
 	Methods     []string                `yaml:"methods,omitempty"`
 }
 
+// ToolOverride customizes one tool. Empty fields keep the generated value.
 type ToolOverride struct {
 	Name           string   `yaml:"name,omitempty"`
 	Description    string   `yaml:"description,omitempty"`
@@ -141,6 +162,7 @@ func (o ToolOverride) IsZero() bool {
 	return o.Name == "" && o.Description == "" && o.Policy == "" && o.RateLimit == "" && len(o.ResponseFields) == 0 && len(o.LintIgnore) == 0
 }
 
+// Lint holds lint settings (version 6).
 type Lint struct {
 	Ignore []string `yaml:"ignore,omitempty"`
 }
@@ -652,6 +674,8 @@ func SaveAPI(p Paths, c *API) error {
 	return WriteFileAtomic(path, data)
 }
 
+// DefaultRetention is how long the call log keeps an API's calls when
+// log.retention is unset (SPEC §3.6).
 const DefaultRetention = 30 * 24 * time.Hour
 
 // RetentionPeriod is log.retention as a duration ("30d" or a Go duration).

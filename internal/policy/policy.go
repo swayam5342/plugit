@@ -14,18 +14,23 @@ import (
 	"github.com/swayam5342/plugit/internal/model"
 )
 
+// ErrInvalid is returned for an unknown mode or override.
 var ErrInvalid = errors.New("invalid policy value")
 
+// Mode is an API-wide policy.
 type Mode string
 
+// Policy modes. ReadOnly is the default.
 const (
 	ReadOnly      Mode = "read-only"
 	ConfirmWrites Mode = "confirm-writes"
 	Full          Mode = "full"
 )
 
+// Override is a per-tool policy.
 type Override string
 
+// Per-tool overrides.
 const (
 	None            Override = ""
 	OverrideAllow   Override = "allow"
@@ -33,8 +38,10 @@ const (
 	OverrideDeny    Override = "deny"
 )
 
+// Decision is the outcome of Check.
 type Decision int
 
+// Decisions, from least to most restrictive.
 const (
 	Allow Decision = iota + 1
 	Confirm
@@ -53,6 +60,7 @@ func (d Decision) String() string {
 	return fmt.Sprintf("Decision(%d)", int(d))
 }
 
+// Result is a decision and, unless it is Allow, why.
 type Result struct {
 	Decision Decision
 	Reason   string

@@ -14,6 +14,7 @@ import (
 	"github.com/swayam5342/plugit/internal/model"
 )
 
+// SyncInput configures the Sync diff screen (SPEC §2.3).
 type SyncInput struct {
 	API      string
 	Diff     curate.SyncDiff
@@ -22,6 +23,8 @@ type SyncInput struct {
 	LintNote string
 }
 
+// SyncScreen shows what a new spec changes and lets the user pick which
+// new operations to add. Overrides are always kept.
 type SyncScreen struct {
 	in       SyncInput
 	selected map[int]bool

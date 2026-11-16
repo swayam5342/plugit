@@ -18,6 +18,7 @@ import (
 	"strings"
 )
 
+// Sentinel errors callers can match with errors.Is.
 var (
 	ErrNoScheme            = errors.New("value needs an explicit literal:, env: or keyring: prefix")
 	ErrLiteralSecret       = errors.New("secrets must come from env: or keyring:, not a literal value")
@@ -28,14 +29,17 @@ var (
 	ErrKeyringItemNotFound = errors.New("keyring item not found")
 )
 
+// Scheme says where a reference's value comes from.
 type Scheme int
 
+// Reference schemes.
 const (
 	Literal Scheme = iota + 1
 	Env
 	Keyring
 )
 
+// Ref is a parsed reference. Only the fields for its Scheme are set.
 type Ref struct {
 	Scheme  Scheme
 	Literal string
@@ -102,10 +106,13 @@ func (r Ref) String() string {
 	return ""
 }
 
+// KeyringGetter reads an OS keyring item. It returns ErrKeyringItemNotFound
+// for a missing item.
 type KeyringGetter interface {
 	Get(service, key string) (string, error)
 }
 
+// Resolver resolves references.
 type Resolver struct {
 	LookupEnv func(string) (string, bool)
 	Keyring   KeyringGetter

@@ -20,6 +20,7 @@ const maxInspectorCalls = 2000
 
 const maxDetailLines = 6
 
+// InspectorInput configures the call inspector (SPEC §2.3).
 type InspectorInput struct {
 	Title    string
 	AllAPIs  bool
@@ -27,6 +28,7 @@ type InspectorInput struct {
 	Interval time.Duration
 }
 
+// CallsMsg delivers calls newer than the last ones seen (or a read error).
 type CallsMsg struct {
 	Calls []store.Call
 	Err   error
@@ -34,6 +36,7 @@ type CallsMsg struct {
 
 type pollMsg struct{}
 
+// Inspector is a live tail of the call log: a Bubble Tea model.
 type Inspector struct {
 	in       InspectorInput
 	calls    []store.Call

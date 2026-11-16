@@ -20,6 +20,7 @@ import (
 	"github.com/swayam5342/plugit/internal/redact"
 )
 
+// Result is a tool result, ready for MCP. Text is always redacted.
 type Result struct {
 	Text      string
 	IsError   bool

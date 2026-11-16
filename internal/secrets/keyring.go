@@ -6,6 +6,8 @@ import (
 	"github.com/zalando/go-keyring"
 )
 
+// OSKeyring is the OS credential store: Windows Credential Manager, macOS
+// Keychain or the Secret Service on Linux.
 type OSKeyring struct{}
 
 // Get reads an item.

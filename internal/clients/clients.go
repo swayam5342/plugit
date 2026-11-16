@@ -16,12 +16,17 @@ import (
 	"github.com/swayam5342/plugit/internal/config"
 )
 
+// MaxConfigBytes caps a client config plugit will read.
 const MaxConfigBytes = 16 << 20
 
+// ErrClientNotFound means the client's config directory doesn't exist, so
+// the client is probably not installed.
 var ErrClientNotFound = errors.New("client config directory not found")
 
+// Client is an MCP client plugit can install into.
 type Client string
 
+// Supported clients.
 const (
 	ClaudeDesktop Client = "claude-desktop"
 	ClaudeCode    Client = "claude-code"
@@ -33,6 +38,9 @@ const (
 	LMStudio      Client = "lm-studio"
 )
 
+// Info describes how plugit installs into a client. A client is either
+// configured through its own CLI (CLI set) or through a JSON file plugit
+// edits in place (Format set).
 type Info struct {
 	ID     Client
 	Name   string
@@ -121,6 +129,7 @@ func (i Info) RemoveArgs(name string) []string {
 	return append(args, name)
 }
 
+// Env holds the locations ConfigPath depends on.
 type Env struct {
 	GOOS       string
 	Home       string

@@ -12,6 +12,7 @@ import (
 	"github.com/swayam5342/plugit/internal/model"
 )
 
+// OpChange is one operation that differs between two manifests.
 type OpChange struct {
 	Key          model.OpKey
 	Old          *model.Tool
@@ -21,6 +22,8 @@ type OpChange struct {
 	AutoSelected []string
 }
 
+// SyncDiff is what `plugit sync` shows before adopting a new spec (SPEC
+// §2.3 "Sync diff", T3).
 type SyncDiff struct {
 	Added, Removed, Changed     []OpChange
 	ServersBefore, ServersAfter []string

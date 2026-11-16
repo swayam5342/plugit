@@ -10,6 +10,7 @@ import (
 	"time"
 )
 
+// Rate is a call budget: N calls per Per (SPEC §9 item 5).
 type Rate struct {
 	N   int
 	Per time.Duration
@@ -41,6 +42,7 @@ func (r Rate) String() string {
 	return fmt.Sprintf("%d/%s", r.N, r.Per)
 }
 
+// Limiter is a token bucket: a burst of N calls, refilled at N per period.
 type Limiter struct {
 	rate   Rate
 	now    func() time.Time

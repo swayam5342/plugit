@@ -37,6 +37,8 @@ import (
 	"github.com/swayam5342/plugit/internal/store"
 )
 
+// Tool is one tool to serve: a prepared model.Tool (see schema.Prepare) and
+// its per-tool policy.
 type Tool struct {
 	Tool     model.Tool
 	Override policy.Override
@@ -44,6 +46,7 @@ type Tool struct {
 	Fields   *jsonpick.Picker
 }
 
+// Config configures a server.
 type Config struct {
 	Name     string
 	Version  string
@@ -57,6 +60,8 @@ type Config struct {
 	Limit    *policy.Limiter
 }
 
+// CallLog sends one redacted record per call to the call log (SPEC §3.7
+// step 9).
 type CallLog struct {
 	Record  func(store.Call)
 	API     string
@@ -222,6 +227,7 @@ func (h *handler) limited() string {
 
 var confirmSchema = json.RawMessage(`{"type":"object","properties":{"confirm":{"type":"boolean","title":"Make this call","default":true}}}`)
 
+// ConfirmTimeout is how long an answer to a confirmation stays valid.
 const ConfirmTimeout = 5 * time.Minute
 
 const maxShownArgs = 2000

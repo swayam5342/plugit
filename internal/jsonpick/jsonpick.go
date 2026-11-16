@@ -12,6 +12,7 @@ import (
 	"strings"
 )
 
+// Limits on a field list.
 const (
 	MaxPaths   = 32
 	MaxPathLen = 256
@@ -19,6 +20,8 @@ const (
 
 var segmentRe = regexp.MustCompile(`^(\[\*\]|[^.\[\]\s]+(\[\*\])?)$`)
 
+// Picker keeps the fields it was parsed from. A nil *Picker keeps
+// everything.
 type Picker struct {
 	root  *node
 	paths []string

@@ -24,6 +24,7 @@ import (
 	"github.com/swayam5342/plugit/internal/tokens"
 )
 
+// Budget thresholds for L010 (also shown by the picker).
 const (
 	BudgetTools  = 40
 	BudgetTokens = 8000
@@ -36,8 +37,10 @@ const (
 	maxParams      = 15
 )
 
+// Severity is how bad a finding is.
 type Severity int
 
+// Severities, least severe first.
 const (
 	Info Severity = iota
 	Warn
@@ -56,6 +59,7 @@ func (s Severity) String() string {
 // MarshalJSON writes the severity by name.
 func (s Severity) MarshalJSON() ([]byte, error) { return json.Marshal(s.String()) }
 
+// Finding is one problem.
 type Finding struct {
 	Rule     string      `json:"rule"`
 	Severity Severity    `json:"severity"`
@@ -65,12 +69,14 @@ type Finding struct {
 	Message  string      `json:"message"`
 }
 
+// Input is what lint looks at.
 type Input struct {
 	API    config.API
 	Tools  []model.Tool
 	Hidden []string
 }
 
+// Summary counts findings by severity.
 type Summary struct {
 	Errors   int `json:"errors"`
 	Warnings int `json:"warnings"`

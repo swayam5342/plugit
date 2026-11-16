@@ -39,6 +39,8 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, info BuildIn
 	return 0
 }
 
+// BuildInfo describes the running binary. Values are injected at build time
+// with -ldflags; empty fields fall back to development defaults.
 type BuildInfo struct {
 	Version string
 	Commit  string

@@ -25,8 +25,10 @@ import (
 	"github.com/swayam5342/plugit/internal/naming"
 )
 
+// Flow is an OAuth grant plugit supports.
 type Flow string
 
+// Flows.
 const (
 	ClientCredentials Flow = "client_credentials"
 	DeviceCode        Flow = "device_code"
@@ -39,8 +41,10 @@ const (
 	grantDevice   = "urn:ietf:params:oauth:grant-type:device_code"
 )
 
+// ErrNoRefreshToken means the device flow hasn't been run for this API.
 var ErrNoRefreshToken = errors.New("no OAuth refresh token stored: run `plugit auth` for this API to sign in")
 
+// Error is an error response from the authorization server.
 type Error struct {
 	Status      int
 	Code        string
@@ -60,6 +64,7 @@ func (e *Error) Error() string {
 	return msg
 }
 
+// Config is an API's OAuth settings, with the client secret resolved.
 type Config struct {
 	Flow         Flow
 	TokenURL     string
@@ -69,17 +74,21 @@ type Config struct {
 	Scopes       []string
 }
 
+// Store keeps the device flow's refresh token.
 type Store interface {
 	Load() (string, error)
 	Save(token string) error
 }
 
+// Token is an authorization server's answer.
 type Token struct {
 	Access  string
 	Refresh string
 	Expiry  time.Time
 }
 
+// Source hands out a valid access token, fetching a new one when the
+// cached one is about to expire. It is safe for concurrent use.
 type Source struct {
 	cfg   Config
 	doer  httpx.Doer
@@ -166,6 +175,7 @@ func (s *Source) secrets() []string {
 	return []string{s.cfg.ClientSecret, s.refresh}
 }
 
+// Device is a started device authorization (RFC 8628 §3.2).
 type Device struct {
 	UserCode                string
 	VerificationURI         string

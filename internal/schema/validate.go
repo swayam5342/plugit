@@ -12,10 +12,14 @@ import (
 	"github.com/swayam5342/plugit/internal/model"
 )
 
+// ErrInvalidArgs means tool-call arguments failed validation.
 var ErrInvalidArgs = errors.New("invalid arguments")
 
 const maxErrorLen = 600
 
+// Validator checks tool-call arguments against a tool's input schema
+// (SPEC §3.7 step 4). The input schema sets additionalProperties: false, so
+// unknown arguments (including attempts to set hidden fixed params) fail.
 type Validator struct {
 	schema   *jsonschema.Schema
 	degraded bool

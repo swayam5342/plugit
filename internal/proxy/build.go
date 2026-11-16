@@ -30,13 +30,16 @@ import (
 	"github.com/swayam5342/plugit/internal/schema"
 )
 
+// Sentinel errors callers can match with errors.Is.
 var (
 	ErrBadArgument = errors.New("bad argument")
 	ErrBuild       = errors.New("cannot build request")
 )
 
+// AuthType is how the credential is attached.
 type AuthType string
 
+// Auth types (SPEC §3.6).
 const (
 	AuthNone   AuthType = "none"
 	AuthBearer AuthType = "bearer"
@@ -45,6 +48,7 @@ const (
 	AuthBasic  AuthType = "basic"
 )
 
+// Auth is a resolved credential.
 type Auth struct {
 	Type         AuthType
 	Header       string
@@ -54,6 +58,9 @@ type Auth struct {
 	Unauthorized func()
 }
 
+// Fixed is a resolved fixed parameter. If the tool declares a parameter with
+// this name, the spec's location wins; otherwise In is used (query when
+// unset).
 type Fixed struct {
 	Name   string
 	In     model.Location
@@ -61,6 +68,7 @@ type Fixed struct {
 	Secret bool
 }
 
+// Target is everything about the upstream that isn't per call.
 type Target struct {
 	BaseURL   *url.URL
 	Auth      Auth
