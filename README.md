@@ -8,6 +8,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![M8ven Score](https://m8ven.ai/badge/mcp/swayam5342-plugit-1nub27)](https://m8ven.ai/mcp/swayam5342-plugit-1nub27?s=readme)
 [![M8ven Verified](https://m8ven.ai/badge/mcp/swayam5342-api2mcp-1c1a7l?variant=verified)](https://m8ven.ai/mcp/swayam5342-api2mcp-1c1a7l?s=readme)
+[![swayam5342/plugit MCP server](https://glama.ai/mcp/servers/swayam5342/plugit/badges/score.svg)](https://glama.ai/mcp/servers/swayam5342/plugit)
 
 **Website and live demo:** [plugit.swayam.li](https://plugit.swayam.li/)
 
