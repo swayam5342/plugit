@@ -3,6 +3,7 @@ package main
 
 import (
 	"os"
+	"runtime/debug"
 
 	"github.com/swayam5342/plugit/internal/cli"
 )
@@ -15,6 +16,9 @@ var (
 )
 
 func main() {
-	os.Exit(cli.Main(os.Args[1:], os.Stdin, os.Stdout, os.Stderr,
-		cli.BuildInfo{Version: version, Commit: commit, Date: date}))
+	info := cli.BuildInfo{Version: version, Commit: commit, Date: date}
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		info = info.Fill(bi)
+	}
+	os.Exit(cli.Main(os.Args[1:], os.Stdin, os.Stdout, os.Stderr, info))
 }

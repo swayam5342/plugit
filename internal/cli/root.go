@@ -7,6 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
+	"runtime/debug"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -45,6 +48,53 @@ type BuildInfo struct {
 	Version string
 	Commit  string
 	Date    string
+}
+
+// pseudoVersion matches the timestamp and commit at the end of a Go module
+// pseudo-version such as v0.2.1-0.20261117093015-abcdef123456(+dirty).
+var pseudoVersion = regexp.MustCompile(`(\d{14})-([0-9a-f]{12})(?:\+.*)?$`)
+
+// Fill fills empty fields from the binary's embedded Go build info.
+func (b BuildInfo) Fill(bi *debug.BuildInfo) BuildInfo {
+	if bi == nil {
+		return b
+	}
+	var rev, vcsTime string
+	for _, s := range bi.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+		case "vcs.time":
+			vcsTime = s.Value
+		}
+	}
+	v := bi.Main.Version
+	if v == "(devel)" {
+		v = ""
+	}
+	if m := pseudoVersion.FindStringSubmatch(v); m != nil {
+		if rev == "" {
+			rev = m[2]
+		}
+		if vcsTime == "" {
+			if t, err := time.Parse("20060102150405", m[1]); err == nil {
+				vcsTime = t.UTC().Format(time.RFC3339)
+			}
+		}
+	}
+	if len(rev) > 7 {
+		rev = rev[:7]
+	}
+	if b.Version == "" {
+		b.Version = v
+	}
+	if b.Commit == "" {
+		b.Commit = rev
+	}
+	if b.Date == "" {
+		b.Date = vcsTime
+	}
+	return b
 }
 
 func (b BuildInfo) withDefaults() BuildInfo {

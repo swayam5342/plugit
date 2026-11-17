@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/base64"
+	"runtime/debug"
 	"strings"
 	"testing"
 
@@ -38,6 +39,59 @@ func TestVersionCommand(t *testing.T) {
 			}
 			if got := out.String(); got != tc.want {
 				t.Errorf("version output = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuildInfoFill(t *testing.T) {
+	mod := func(version string, settings ...debug.BuildSetting) *debug.BuildInfo {
+		return &debug.BuildInfo{Main: debug.Module{Path: "github.com/swayam5342/plugit", Version: version}, Settings: settings}
+	}
+	tests := []struct {
+		name string
+		in   BuildInfo
+		bi   *debug.BuildInfo
+		want BuildInfo
+	}{
+		{
+			name: "go install at a tag fills the version",
+			bi:   mod("v0.2.0"),
+			want: BuildInfo{Version: "v0.2.0"},
+		},
+		{
+			name: "pseudo-version yields commit and date",
+			bi:   mod("v0.2.1-0.20261117093015-abcdef123456"),
+			want: BuildInfo{Version: "v0.2.1-0.20261117093015-abcdef123456", Commit: "abcdef1", Date: "2026-11-17T09:30:15Z"},
+		},
+		{
+			name: "local checkout build uses vcs settings",
+			bi: mod("v0.2.1-0.20261117093015-abcdef123456+dirty",
+				debug.BuildSetting{Key: "vcs.revision", Value: "0123456789abcdef0123456789abcdef01234567"},
+				debug.BuildSetting{Key: "vcs.time", Value: "2026-11-17T10:00:00Z"}),
+			want: BuildInfo{Version: "v0.2.1-0.20261117093015-abcdef123456+dirty", Commit: "0123456", Date: "2026-11-17T10:00:00Z"},
+		},
+		{
+			name: "devel version is ignored",
+			bi:   mod("(devel)"),
+			want: BuildInfo{},
+		},
+		{
+			name: "ldflags values win",
+			in:   BuildInfo{Version: "0.2.0", Commit: "fedcba9", Date: "2026-11-12T00:00:00Z"},
+			bi:   mod("v0.0.0-20260101000000-abcdef123456", debug.BuildSetting{Key: "vcs.revision", Value: "0123456789abcdef"}),
+			want: BuildInfo{Version: "0.2.0", Commit: "fedcba9", Date: "2026-11-12T00:00:00Z"},
+		},
+		{
+			name: "no build info",
+			bi:   nil,
+			want: BuildInfo{},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.in.Fill(tc.bi); got != tc.want {
+				t.Errorf("Fill = %+v, want %+v", got, tc.want)
 			}
 		})
 	}
