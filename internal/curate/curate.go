@@ -88,7 +88,7 @@ func Select(all []model.Tool, ts config.Toolset, prefix string) Result {
 }
 
 func matchesFilters(t model.Tool, ts config.Toolset) bool {
-	if len(ts.Methods) > 0 && !slices.ContainsFunc(ts.Methods, func(m string) bool { return strings.EqualFold(m, t.Method) }) {
+	if len(ts.Methods) > 0 && !slices.ContainsFunc(ts.Methods, func(m string) bool { return strings.EqualFold(m, t.Key.Method()) }) {
 		return false
 	}
 	if len(ts.IncludeTags) > 0 && !slices.ContainsFunc(t.Tags, func(tag string) bool {

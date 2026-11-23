@@ -58,8 +58,8 @@ func TestTextPlausibleRange(t *testing.T) {
 
 func testTool(name, desc string) model.Tool {
 	return model.Tool{
-		Key: model.NewOpKey("GET", "/pets"), Name: name, Description: desc, Method: "GET", Path: "/pets",
-		Params: []model.Param{{Name: "limit", UpstreamName: "limit", In: model.InQuery, Schema: json.RawMessage(`{"type":"integer"}`), Desc: "Page size"}},
+		Key: model.NewOpKey("GET", "/pets"), Name: name, Description: desc, HTTP: &model.HTTPOp{Method: "GET", Path: "/pets"},
+		Params: []model.Param{{Name: "limit", Bind: model.Binding{Upstream: "limit", In: model.InQuery}, Schema: json.RawMessage(`{"type":"integer"}`), Desc: "Page size"}},
 	}
 }
 

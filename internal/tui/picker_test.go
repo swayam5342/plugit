@@ -17,8 +17,8 @@ import (
 func tl(method, path, name string, tags ...string) model.Tool {
 	return model.Tool{
 		Key: model.NewOpKey(method, path), Name: name, Description: method + " " + path + " does things.",
-		Method: method, Path: path, Tags: tags, Safety: model.SafetyForMethod(method),
-		Params: []model.Param{{Name: "id", UpstreamName: "id", In: model.InQuery, Schema: json.RawMessage(`{"type":"string"}`)}},
+		HTTP: &model.HTTPOp{Method: method, Path: path}, Tags: tags, Safety: model.SafetyForMethod(method),
+		Params: []model.Param{{Name: "id", Bind: model.Binding{Upstream: "id", In: model.InQuery}, Schema: json.RawMessage(`{"type":"string"}`)}},
 	}
 }
 

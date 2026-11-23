@@ -130,7 +130,7 @@ func Build(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*
 	}
 	slices.Sort(names)
 
-	path := t.Path
+	path := t.HTTP.Path
 	query := url.Values{}
 	header := http.Header{}
 	bodyFields := map[string]any{}
@@ -147,38 +147,38 @@ func Build(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*
 		if v == nil {
 			continue
 		}
-		switch p.In {
+		switch p.Bind.In {
 		case model.InPath:
 			seg, err := pathSegment(name, v)
 			if err != nil {
 				return nil, err
 			}
-			path = strings.ReplaceAll(path, "{"+p.UpstreamName+"}", seg)
+			path = strings.ReplaceAll(path, "{"+p.Bind.Upstream+"}", seg)
 		case model.InQuery:
-			if err := addQuery(query, p.UpstreamName, v); err != nil {
+			if err := addQuery(query, p.Bind.Upstream, v); err != nil {
 				return nil, fmt.Errorf("%w: %q: %w", ErrBadArgument, name, err)
 			}
 		case model.InHeader:
-			if schema.IsForbiddenHeader(p.UpstreamName) {
-				return nil, fmt.Errorf("%w: %q: the %s header can't be set by a tool", ErrBadArgument, name, p.UpstreamName)
+			if schema.IsForbiddenHeader(p.Bind.Upstream) {
+				return nil, fmt.Errorf("%w: %q: the %s header can't be set by a tool", ErrBadArgument, name, p.Bind.Upstream)
 			}
 			s, err := headerValue(v)
 			if err != nil {
 				return nil, fmt.Errorf("%w: %q: %w", ErrBadArgument, name, err)
 			}
-			header.Set(p.UpstreamName, s)
+			header.Set(p.Bind.Upstream, s)
 		case model.InCookie:
-			s, err := cookieValue(p.UpstreamName, v)
+			s, err := cookieValue(p.Bind.Upstream, v)
 			if err != nil {
 				return nil, fmt.Errorf("%w: %q: %w", ErrBadArgument, name, err)
 			}
-			cookies[p.UpstreamName] = s
+			cookies[p.Bind.Upstream] = s
 		case model.InBody:
-			bodyFields[p.UpstreamName] = v
+			bodyFields[p.Bind.Upstream] = v
 		case model.InBodyRoot:
 			bodyRoot, hasBodyRoot = v, true
 		default:
-			return nil, fmt.Errorf("%w: argument %q has unsupported location %s", ErrBuild, name, p.In)
+			return nil, fmt.Errorf("%w: argument %q has unsupported location %s", ErrBuild, name, p.Bind.In)
 		}
 	}
 
@@ -186,7 +186,7 @@ func Build(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*
 		in := f.In
 		upstream := f.Name
 		if p := declaredFixed(t, f.Name); p != nil {
-			in, upstream = p.In, p.UpstreamName
+			in, upstream = p.Bind.In, p.Bind.Upstream
 		} else if in != model.InHeader {
 			in = model.InQuery
 		}
@@ -224,11 +224,11 @@ func Build(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*
 
 	declared := map[string]bool{}
 	for _, p := range t.Params {
-		if p.In == model.InBody {
-			declared[p.UpstreamName] = true
+		if p.Bind.In == model.InBody {
+			declared[p.Bind.Upstream] = true
 		}
 	}
-	body, contentType, err := encodeBody(t.Body, bodyFields, bodyRoot, hasBodyRoot, declared)
+	body, contentType, err := encodeBody(t.HTTP.Body, bodyFields, bodyRoot, hasBodyRoot, declared)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +239,7 @@ func Build(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*
 	}
 	u.RawQuery = query.Encode()
 
-	req, err := http.NewRequestWithContext(ctx, strings.ToUpper(t.Method), u.String(), bytesReader(body))
+	req, err := http.NewRequestWithContext(ctx, strings.ToUpper(t.HTTP.Method), u.String(), bytesReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrBuild, err)
 	}
@@ -286,7 +286,7 @@ func declaredFixed(t model.Tool, name string) *model.Param {
 		if !p.Hidden {
 			continue
 		}
-		if p.UpstreamName == name || (p.In == model.InHeader && strings.EqualFold(p.UpstreamName, name)) {
+		if p.Bind.Upstream == name || (p.Bind.In == model.InHeader && strings.EqualFold(p.Bind.Upstream, name)) {
 			return p
 		}
 	}

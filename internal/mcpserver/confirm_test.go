@@ -18,8 +18,8 @@ import (
 )
 
 var createPetBody = tool("POST /pets", "createPet",
-	model.Param{Name: "name", UpstreamName: "name", In: model.InBody, Schema: json.RawMessage(`{"type":"string"}`)},
-	model.Param{Name: "api_token", UpstreamName: "api_token", In: model.InBody, Schema: json.RawMessage(`{"type":"string"}`)},
+	model.Param{Name: "name", Bind: model.Binding{Upstream: "name", In: model.InBody}, Schema: json.RawMessage(`{"type":"string"}`)},
+	model.Param{Name: "api_token", Bind: model.Binding{Upstream: "api_token", In: model.InBody}, Schema: json.RawMessage(`{"type":"string"}`)},
 )
 
 type elicitor struct {

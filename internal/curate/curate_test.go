@@ -14,7 +14,7 @@ import (
 func tool(method, path, name string, tags ...string) model.Tool {
 	return model.Tool{
 		Key: model.NewOpKey(method, path), Name: name, Description: method + " " + path,
-		Method: method, Path: path, Tags: tags, Safety: model.SafetyForMethod(method),
+		Tags: tags, Safety: model.SafetyForMethod(method), HTTP: &model.HTTPOp{Method: method, Path: path},
 	}
 }
 

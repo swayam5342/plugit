@@ -15,11 +15,11 @@ import (
 
 func tryTool() model.Tool {
 	return model.Tool{
-		Key: "GET /pets/{id}", Name: "pp_get_pet", Description: "Returns a single pet.", Method: "GET", Path: "/pets/{id}",
+		Key: "GET /pets/{id}", Name: "pp_get_pet", Description: "Returns a single pet.", HTTP: &model.HTTPOp{Method: "GET", Path: "/pets/{id}"},
 		Params: []model.Param{
-			{Name: "id", UpstreamName: "id", In: model.InPath, Required: true, Schema: json.RawMessage(`{"type":"string"}`), Desc: "The pet's ID"},
-			{Name: "verbose", UpstreamName: "verbose", In: model.InQuery, Schema: json.RawMessage(`{"type":"boolean"}`)},
-			{Name: "X-Api-Key", UpstreamName: "X-Api-Key", In: model.InHeader, Hidden: true, Schema: json.RawMessage(`{}`)},
+			{Name: "id", Bind: model.Binding{Upstream: "id", In: model.InPath}, Required: true, Schema: json.RawMessage(`{"type":"string"}`), Desc: "The pet's ID"},
+			{Name: "verbose", Bind: model.Binding{Upstream: "verbose", In: model.InQuery}, Schema: json.RawMessage(`{"type":"boolean"}`)},
+			{Name: "X-Api-Key", Bind: model.Binding{Upstream: "X-Api-Key", In: model.InHeader}, Hidden: true, Schema: json.RawMessage(`{}`)},
 		},
 	}
 }

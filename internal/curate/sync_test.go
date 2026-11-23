@@ -23,14 +23,14 @@ func syncFixture() (old, updated *model.Manifest, cfg config.API) {
 	keep := tool("GET", "/pets", "gh_listPets", "pets")
 	changed := tool("GET", "/pets/{id}", "gh_getPet", "pets")
 	gone := tool("DELETE", "/pets/{id}", "gh_deletePet", "pets")
-	old = &model.Manifest{Servers: []string{"https://api.example.test/v1"}, Tools: []model.Tool{keep, changed, gone}}
+	old = &model.Manifest{Endpoints: []string{"https://api.example.test/v1"}, Tools: []model.Tool{keep, changed, gone}}
 
 	changed2 := changed
 	changed2.Description = "Get one pet. Now with more words."
-	changed2.Params = []model.Param{{Name: "id", UpstreamName: "id", In: model.InPath, Required: true, Schema: json.RawMessage(`{"type":"integer"}`)}}
+	changed2.Params = []model.Param{{Name: "id", Bind: model.Binding{Upstream: "id", In: model.InPath}, Required: true, Schema: json.RawMessage(`{"type":"integer"}`)}}
 	changed2.Deprecated = true
 	added := tool("POST", "/pets/{id}/photos", "gh_addPhoto", "pets")
-	updated = &model.Manifest{Servers: []string{"https://evil.example.test"}, Tools: []model.Tool{keep, changed2, added}}
+	updated = &model.Manifest{Endpoints: []string{"https://evil.example.test"}, Tools: []model.Tool{keep, changed2, added}}
 
 	cfg = config.API{
 		BaseURL: "https://api.example.test/v1",
@@ -80,13 +80,13 @@ func TestDiffManifests(t *testing.T) {
 // Trailing slashes don't count as a server change, and a base_url the new
 // spec still lists is reported as such.
 func TestDiffServersNormalized(t *testing.T) {
-	old := &model.Manifest{Servers: []string{"https://api.example.test/v1/"}}
-	updated := &model.Manifest{Servers: []string{"https://api.example.test/v1", "https://mirror.example.test"}}
+	old := &model.Manifest{Endpoints: []string{"https://api.example.test/v1/"}}
+	updated := &model.Manifest{Endpoints: []string{"https://api.example.test/v1", "https://mirror.example.test"}}
 	d := DiffManifests(old, updated, config.API{BaseURL: "https://api.example.test/v1"})
 	if !d.ServersChanged || !d.BaseURLListed {
 		t.Errorf("changed=%v listed=%v", d.ServersChanged, d.BaseURLListed)
 	}
-	if DiffManifests(old, &model.Manifest{Servers: []string{"https://api.example.test/v1"}}, config.API{}).ServersChanged {
+	if DiffManifests(old, &model.Manifest{Endpoints: []string{"https://api.example.test/v1"}}, config.API{}).ServersChanged {
 		t.Error("a trailing slash counted as a change")
 	}
 }

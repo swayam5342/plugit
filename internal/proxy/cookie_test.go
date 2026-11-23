@@ -8,7 +8,7 @@ import (
 	"github.com/swayam5342/plugit/internal/redact"
 )
 
-var getMe = model.Tool{Key: "GET /me", Name: "getMe", Method: "GET", Path: "/me", Params: []model.Param{
+var getMe = model.Tool{Key: "GET /me", Name: "getMe", HTTP: &model.HTTPOp{Method: "GET", Path: "/me"}, Params: []model.Param{
 	param("theme", model.InCookie, false),
 	param("lang", model.InCookie, false),
 	param("q", model.InQuery, false),
@@ -51,7 +51,7 @@ func TestCookieValuesRejected(t *testing.T) {
 // goes in the Cookie header, never in the input schema, and is redacted.
 func TestCookieFixedSecret(t *testing.T) {
 	tl := getMe
-	tl.Params = append([]model.Param{{Name: "session", UpstreamName: "session", In: model.InCookie, Hidden: true}}, tl.Params...)
+	tl.Params = append([]model.Param{{Name: "session", Bind: model.Binding{Upstream: "session", In: model.InCookie}, Hidden: true}}, tl.Params...)
 	tg := Target{Fixed: []Fixed{{Name: "session", Value: "test-session-secret-1", Secret: true}}}
 	req := mustBuild(t, tl, `{"theme":"dark"}`, tg)
 	if got := req.Header.Get("Cookie"); got != "session=test-session-secret-1; theme=dark" {
@@ -69,7 +69,7 @@ func TestCookieFixedSecret(t *testing.T) {
 
 // A Cookie header parameter is still never a tool parameter.
 func TestCookieHeaderParamStillForbidden(t *testing.T) {
-	tl := model.Tool{Key: "GET /x", Name: "x", Method: "GET", Path: "/x", Params: []model.Param{param("Cookie", model.InHeader, false)}}
+	tl := model.Tool{Key: "GET /x", Name: "x", HTTP: &model.HTTPOp{Method: "GET", Path: "/x"}, Params: []model.Param{param("Cookie", model.InHeader, false)}}
 	req, err := build(t, tl, `{"Cookie":"admin=1"}`, Target{})
 	if err == nil && req.Header.Get("Cookie") != "" {
 		t.Errorf("raw Cookie header from the model: %q", req.Header.Get("Cookie"))

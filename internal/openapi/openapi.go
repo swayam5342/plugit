@@ -115,6 +115,7 @@ func Parse(data []byte, opts Options) (m *model.Manifest, err error) {
 	}
 
 	if info.SpecType == utils.OpenApi2 {
+		b.m.Format = "swagger"
 		v2, err := doc.BuildV2Model()
 		if v2 == nil {
 			return nil, fmt.Errorf("building Swagger 2.0 model: %w", errOrUnknown(err))
@@ -122,6 +123,7 @@ func Parse(data []byte, opts Options) (m *model.Manifest, err error) {
 		b.warnErr(err)
 		b.fromV2(&v2.Model)
 	} else {
+		b.m.Format = "openapi"
 		v3, err := doc.BuildV3Model()
 		if v3 == nil {
 			return nil, fmt.Errorf("building OpenAPI model: %w", errOrUnknown(err))

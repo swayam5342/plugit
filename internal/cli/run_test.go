@@ -171,7 +171,7 @@ func TestChooseBaseURLExplainsCredentialRule(t *testing.T) {
 
 func mtool(key model.OpKey, tags ...string) model.Tool {
 	return model.Tool{Key: key, Name: strings.NewReplacer(" ", "_", "/", "_", "{", "", "}", "").Replace(string(key)),
-		Method: key.Method(), Path: key.Path(), Tags: tags, Safety: model.SafetyForMethod(key.Method())}
+		HTTP: &model.HTTPOp{Method: key.Method(), Path: key.Path()}, Tags: tags, Safety: model.SafetyForMethod(key.Method())}
 }
 
 func keys(ts []model.Tool) []string {

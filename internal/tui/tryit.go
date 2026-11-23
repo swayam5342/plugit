@@ -214,7 +214,7 @@ func (m *TryIt) View() tea.View {
 	w := max(m.width, 20)
 	t := m.in.Tool
 	title := th.Accent.Render("✦ ") + th.Title.Render("plugit") + th.Dim.Render(" · try · ") + th.Title.Render(safe(t.Name))
-	sub := th.method(t.Method).Render(safe(t.Method)) + " " + safe(t.Path) + th.Dim.Render("  "+safe(t.Description))
+	sub := th.method(t.Key.Method()).Render(safe(t.Key.Method())) + " " + safe(t.Key.Path()) + th.Dim.Render("  "+safe(t.Description))
 	lines := th.box(w, th.Border, spread(title, th.pill(m.in.Mode), w-4), sub)
 	lines = append(lines, "")
 
@@ -236,7 +236,7 @@ func (m *TryIt) View() tea.View {
 		if p.Required {
 			label += " *"
 		}
-		meta := []string{paramType(p), p.In.String()}
+		meta := []string{paramType(p), p.Bind.In.String()}
 		if p.Required {
 			meta = append(meta, "required")
 		}

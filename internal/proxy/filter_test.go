@@ -11,7 +11,7 @@ import (
 	"github.com/swayam5342/plugit/internal/redact"
 )
 
-var listRepos = model.Tool{Key: "GET /repos", Name: "listRepos", Method: "GET", Path: "/repos"}
+var listRepos = model.Tool{Key: "GET /repos", Name: "listRepos", HTTP: &model.HTTPOp{Method: "GET", Path: "/repos"}}
 
 func pickCall(t *testing.T, h http.HandlerFunc, fields ...string) Result {
 	t.Helper()

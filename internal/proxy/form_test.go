@@ -16,8 +16,8 @@ import (
 const formCT = "application/x-www-form-urlencoded"
 
 func formTool(enc map[string]model.Encoding, fields ...string) model.Tool {
-	t := model.Tool{Key: "POST /v1/customers", Name: "createCustomer", Method: "POST", Path: "/v1/customers",
-		Body: &model.Body{ContentType: formCT, Schema: json.RawMessage(`{"type":"object"}`), Encoding: enc}}
+	t := model.Tool{Key: "POST /v1/customers", Name: "createCustomer",
+		HTTP: &model.HTTPOp{Method: "POST", Path: "/v1/customers", Body: &model.Body{ContentType: formCT, Schema: json.RawMessage(`{"type":"object"}`), Encoding: enc}}}
 	for _, f := range fields {
 		t.Params = append(t.Params, param(f, model.InBody, false))
 	}
@@ -99,7 +99,7 @@ func TestFormNestedFallbackAndNulls(t *testing.T) {
 // one parameter (bodyRoot) is encoded the same way.
 func TestFormFixedAndRoot(t *testing.T) {
 	tl := formTool(nil, "email")
-	tl.Params = append(tl.Params, model.Param{Name: "account", UpstreamName: "account", In: model.InBody, Hidden: true, Schema: json.RawMessage(`{}`)})
+	tl.Params = append(tl.Params, model.Param{Name: "account", Bind: model.Binding{Upstream: "account", In: model.InBody}, Hidden: true, Schema: json.RawMessage(`{}`)})
 	v, _ := formBody(t, tl, `{"email":"a@b.test"}`, Target{Fixed: []Fixed{{Name: "account", Value: "acct_1"}}})
 	if v.Get("account") != "acct_1" || v.Get("email") != "a@b.test" {
 		t.Errorf("body = %v", v)
@@ -118,7 +118,7 @@ func TestFormFixedAndRoot(t *testing.T) {
 
 func TestMultipartTextFields(t *testing.T) {
 	tl := formTool(nil, "title", "tags", "meta")
-	tl.Body.ContentType = "multipart/form-data"
+	tl.HTTP.Body.ContentType = "multipart/form-data"
 	req := mustBuild(t, tl, `{"title":"hello","tags":["a","b"],"meta":{"k":1}}`, Target{})
 	mt, params, err := mime.ParseMediaType(req.Header.Get("Content-Type"))
 	if err != nil || mt != "multipart/form-data" || params["boundary"] == "" {
@@ -142,7 +142,7 @@ func TestMultipartTextFields(t *testing.T) {
 // JSON bodies are unchanged.
 func TestJSONBodyUnchanged(t *testing.T) {
 	tl := formTool(nil, "email")
-	tl.Body.ContentType = "application/json"
+	tl.HTTP.Body.ContentType = "application/json"
 	req := mustBuild(t, tl, `{"email":"a@b.test"}`, Target{})
 	b, _ := io.ReadAll(req.Body)
 	if string(b) != `{"email":"a@b.test"}` || req.Header.Get("Content-Type") != "application/json" {
@@ -152,7 +152,7 @@ func TestJSONBodyUnchanged(t *testing.T) {
 
 func TestFormSpreadObjectCannotShadowFields(t *testing.T) {
 	tl := formTool(nil, "email", "filter")
-	tl.Params = append(tl.Params, model.Param{Name: "tenant_id", UpstreamName: "tenant_id", In: model.InBody, Hidden: true, Schema: json.RawMessage(`{}`)})
+	tl.Params = append(tl.Params, model.Param{Name: "tenant_id", Bind: model.Binding{Upstream: "tenant_id", In: model.InBody}, Hidden: true, Schema: json.RawMessage(`{}`)})
 	tg := Target{Fixed: []Fixed{{Name: "tenant_id", Value: "t1"}}}
 
 	for name, raw := range map[string]string{

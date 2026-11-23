@@ -16,7 +16,7 @@ import (
 )
 
 func param(name string, in model.Location, required bool) model.Param {
-	return model.Param{Name: name, UpstreamName: name, In: in, Required: required, Schema: json.RawMessage(`{}`)}
+	return model.Param{Name: name, Bind: model.Binding{Upstream: name, In: in}, Required: required, Schema: json.RawMessage(`{}`)}
 }
 
 func base(t *testing.T, raw string) *url.URL {
@@ -54,7 +54,7 @@ func mustBuild(t *testing.T, tl model.Tool, rawArgs string, tg Target) *http.Req
 	return req
 }
 
-var getPet = model.Tool{Key: "GET /pets/{petId}", Name: "getPet", Method: "GET", Path: "/pets/{petId}", Params: []model.Param{
+var getPet = model.Tool{Key: "GET /pets/{petId}", Name: "getPet", HTTP: &model.HTTPOp{Method: "GET", Path: "/pets/{petId}"}, Params: []model.Param{
 	param("petId", model.InPath, true),
 	param("limit", model.InQuery, false),
 	param("tags", model.InQuery, false),
@@ -89,7 +89,7 @@ func TestBuildPathQueryHeader(t *testing.T) {
 }
 
 func TestBuildScalarFormatting(t *testing.T) {
-	tl := model.Tool{Method: "GET", Path: "/x", Params: []model.Param{
+	tl := model.Tool{HTTP: &model.HTTPOp{Method: "GET", Path: "/x"}, Params: []model.Param{
 		param("i", model.InQuery, false), param("big", model.InQuery, false), param("f", model.InQuery, false),
 		param("b", model.InQuery, false), param("n", model.InQuery, false),
 	}}
@@ -158,7 +158,7 @@ func TestBuildRejectsBadHeaderValues(t *testing.T) {
 func TestBuildRejectsUnknownAndHiddenArguments(t *testing.T) {
 	tl := getPet
 	tl.Params = append([]model.Param{}, getPet.Params...)
-	tl.Params = append(tl.Params, model.Param{Name: "api_key", UpstreamName: "api_key", In: model.InQuery, Hidden: true, Schema: json.RawMessage(`{}`)})
+	tl.Params = append(tl.Params, model.Param{Name: "api_key", Bind: model.Binding{Upstream: "api_key", In: model.InQuery}, Hidden: true, Schema: json.RawMessage(`{}`)})
 	for _, raw := range []string{`{"petId": "1", "url": "http://evil.test"}`, `{"petId": "1", "api_key": "attacker"}`} {
 		if _, err := build(t, tl, raw, Target{}); !errors.Is(err, ErrBadArgument) {
 			t.Errorf("%s: err = %v, want ErrBadArgument", raw, err)
@@ -167,7 +167,7 @@ func TestBuildRejectsUnknownAndHiddenArguments(t *testing.T) {
 }
 
 func TestBuildUnresolvedPlaceholder(t *testing.T) {
-	tl := model.Tool{Method: "GET", Path: "/pets/{petId}/toys/{toyId}", Params: []model.Param{param("petId", model.InPath, true)}}
+	tl := model.Tool{HTTP: &model.HTTPOp{Method: "GET", Path: "/pets/{petId}/toys/{toyId}"}, Params: []model.Param{param("petId", model.InPath, true)}}
 	if _, err := build(t, tl, `{"petId": "1"}`, Target{}); !errors.Is(err, ErrBuild) {
 		t.Errorf("err = %v, want ErrBuild", err)
 	}
@@ -177,7 +177,7 @@ func TestBuildUnresolvedPlaceholder(t *testing.T) {
 }
 
 func TestBuildBaseURLJoining(t *testing.T) {
-	tl := model.Tool{Method: "GET", Path: "/items"}
+	tl := model.Tool{HTTP: &model.HTTPOp{Method: "GET", Path: "/items"}}
 	for b, want := range map[string]string{
 		"https://api.example.test":       "https://api.example.test/items",
 		"https://api.example.test/":      "https://api.example.test/items",
@@ -190,18 +190,18 @@ func TestBuildBaseURLJoining(t *testing.T) {
 			t.Errorf("base %s: url = %s, want %s", b, req.URL, want)
 		}
 	}
-	root := model.Tool{Method: "GET", Path: "/"}
+	root := model.Tool{HTTP: &model.HTTPOp{Method: "GET", Path: "/"}}
 	if got := mustBuild(t, root, `{}`, Target{BaseURL: base(t, "https://api.example.test/v1")}).URL.String(); got != "https://api.example.test/v1/" {
 		t.Errorf("root path url = %s", got)
 	}
 }
 
 func TestBuildFlattenedAndRootBodies(t *testing.T) {
-	flat := model.Tool{Method: "PUT", Path: "/pets/{id}", Body: &model.Body{ContentType: "application/json"}, Params: []model.Param{
+	flat := model.Tool{HTTP: &model.HTTPOp{Method: "PUT", Path: "/pets/{id}", Body: &model.Body{ContentType: "application/json"}}, Params: []model.Param{
 		param("id", model.InPath, true),
-		{Name: "body_id", UpstreamName: "id", In: model.InBody, Schema: json.RawMessage(`{}`)},
-		{Name: "name", UpstreamName: "name", In: model.InBody, Schema: json.RawMessage(`{}`)},
-		{Name: "tags", UpstreamName: "tags", In: model.InBody, Schema: json.RawMessage(`{}`)},
+		{Name: "body_id", Bind: model.Binding{Upstream: "id", In: model.InBody}, Schema: json.RawMessage(`{}`)},
+		{Name: "name", Bind: model.Binding{Upstream: "name", In: model.InBody}, Schema: json.RawMessage(`{}`)},
+		{Name: "tags", Bind: model.Binding{Upstream: "tags", In: model.InBody}, Schema: json.RawMessage(`{}`)},
 	}}
 	req := mustBuild(t, flat, `{"id": "p1", "body_id": 7, "name": "Rex", "tags": ["a"]}`, Target{})
 	assertBody(t, req, `{"id": 7, "name": "Rex", "tags": ["a"]}`)
@@ -209,8 +209,8 @@ func TestBuildFlattenedAndRootBodies(t *testing.T) {
 		t.Errorf("Content-Type = %q", req.Header.Get("Content-Type"))
 	}
 
-	root := model.Tool{Method: "POST", Path: "/batch", Body: &model.Body{ContentType: "application/json"}, Params: []model.Param{
-		{Name: "body", In: model.InBodyRoot, Schema: json.RawMessage(`{}`)},
+	root := model.Tool{HTTP: &model.HTTPOp{Method: "POST", Path: "/batch", Body: &model.Body{ContentType: "application/json"}}, Params: []model.Param{
+		{Name: "body", Bind: model.Binding{In: model.InBodyRoot}, Schema: json.RawMessage(`{}`)},
 	}}
 	assertBody(t, mustBuild(t, root, `{"body": [1, "two", {"three": 3}]}`, Target{}), `[1, "two", {"three": 3}]`)
 
@@ -237,11 +237,11 @@ func assertBody(t *testing.T, req *http.Request, want string) {
 }
 
 func TestBuildFixedParams(t *testing.T) {
-	tl := model.Tool{Method: "POST", Path: "/x", Body: &model.Body{ContentType: "application/json"}, Params: []model.Param{
-		{Name: "api_key", UpstreamName: "api_key", In: model.InQuery, Hidden: true, Schema: json.RawMessage(`{}`)},
-		{Name: "X-Api-Version", UpstreamName: "X-Api-Version", In: model.InHeader, Hidden: true, Schema: json.RawMessage(`{}`)},
-		{Name: "tenant", UpstreamName: "tenant", In: model.InBody, Hidden: true, Schema: json.RawMessage(`{}`)},
-		{Name: "name", UpstreamName: "name", In: model.InBody, Schema: json.RawMessage(`{}`)},
+	tl := model.Tool{HTTP: &model.HTTPOp{Method: "POST", Path: "/x", Body: &model.Body{ContentType: "application/json"}}, Params: []model.Param{
+		{Name: "api_key", Bind: model.Binding{Upstream: "api_key", In: model.InQuery}, Hidden: true, Schema: json.RawMessage(`{}`)},
+		{Name: "X-Api-Version", Bind: model.Binding{Upstream: "X-Api-Version", In: model.InHeader}, Hidden: true, Schema: json.RawMessage(`{}`)},
+		{Name: "tenant", Bind: model.Binding{Upstream: "tenant", In: model.InBody}, Hidden: true, Schema: json.RawMessage(`{}`)},
+		{Name: "name", Bind: model.Binding{Upstream: "name", In: model.InBody}, Schema: json.RawMessage(`{}`)},
 	}}
 	req := mustBuild(t, tl, `{"name": "n"}`, Target{Fixed: []Fixed{
 		{Name: "api_key", In: model.InHeader, Value: "test-token-123"},
@@ -260,7 +260,7 @@ func TestBuildFixedParams(t *testing.T) {
 }
 
 func TestBuildAuth(t *testing.T) {
-	tl := model.Tool{Method: "GET", Path: "/me"}
+	tl := model.Tool{HTTP: &model.HTTPOp{Method: "GET", Path: "/me"}}
 	const secret = "test-token-123"
 	cases := map[AuthType]func(t *testing.T, r *http.Request){
 		AuthBearer: func(t *testing.T, r *http.Request) {
@@ -303,7 +303,7 @@ func TestBuildAuth(t *testing.T) {
 }
 
 func TestBuildAuthOverridesModelSuppliedHeaders(t *testing.T) {
-	tl := model.Tool{Method: "GET", Path: "/me", Params: []model.Param{param("X-Api-Key", model.InHeader, false)}}
+	tl := model.Tool{HTTP: &model.HTTPOp{Method: "GET", Path: "/me"}, Params: []model.Param{param("X-Api-Key", model.InHeader, false)}}
 	req := mustBuild(t, tl, `{"X-Api-Key": "attacker"}`, Target{Auth: Auth{Type: AuthHeader, Header: "X-Api-Key", Secret: "test-token-123"}})
 	if got := req.Header.Values("X-Api-Key"); !reflect.DeepEqual(got, []string{"test-token-123"}) {
 		t.Errorf("X-Api-Key = %v", got)
@@ -311,7 +311,7 @@ func TestBuildAuthOverridesModelSuppliedHeaders(t *testing.T) {
 }
 
 func TestBuildRejectsBaseURLWithUserinfoOrQuery(t *testing.T) {
-	tl := model.Tool{Method: "GET", Path: "/x"}
+	tl := model.Tool{HTTP: &model.HTTPOp{Method: "GET", Path: "/x"}}
 	for _, b := range []string{"https://user:pw@api.example.test", "https://api.example.test/?a=1", "ftp://api.example.test", "/relative"} {
 		if _, err := build(t, tl, `{}`, Target{BaseURL: base(t, b)}); !errors.Is(err, ErrBuild) {
 			t.Errorf("base %s: err = %v, want ErrBuild", b, err)
@@ -320,7 +320,7 @@ func TestBuildRejectsBaseURLWithUserinfoOrQuery(t *testing.T) {
 }
 
 func TestBuildErrorsNeverContainSecrets(t *testing.T) {
-	tl := model.Tool{Method: "GET", Path: "/pets/{petId}", Params: []model.Param{param("petId", model.InPath, true)}}
+	tl := model.Tool{HTTP: &model.HTTPOp{Method: "GET", Path: "/pets/{petId}"}, Params: []model.Param{param("petId", model.InPath, true)}}
 	_, err := build(t, tl, `{"petId": ".."}`, Target{Auth: Auth{Type: AuthBearer, Secret: "test-token-123"}, Fixed: []Fixed{{Name: "k", Value: "fixed-secret-456"}}})
 	if err == nil {
 		t.Fatal("expected an error")

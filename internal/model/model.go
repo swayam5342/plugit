@@ -96,7 +96,8 @@ func (s *Safety) UnmarshalJSON(b []byte) error {
 // Location is where an argument is sent in the HTTP request.
 type Location int
 
-// Argument locations.
+// Argument locations. The first six are REST; the rest belong to other
+// protocols (SPEC §3.4 P3 Binding set).
 const (
 	InPath Location = iota
 	InQuery
@@ -104,10 +105,14 @@ const (
 	InCookie
 	InBody
 	InBodyRoot
+	InVariable // GraphQL
+	InField    // gRPC
+	InMetadata // gRPC
 )
 
 var locationNames = [...]string{
 	InPath: "path", InQuery: "query", InHeader: "header", InCookie: "cookie", InBody: "body", InBodyRoot: "bodyRoot",
+	InVariable: "variable", InField: "field", InMetadata: "metadata",
 }
 
 func (l Location) String() string {
@@ -144,31 +149,64 @@ func ParseLocation(s string) (Location, bool) {
 	return 0, false
 }
 
-// Tool is one API operation exposed (or exposable) as an MCP tool.
+// Tool is one API operation exposed (or exposable) as an MCP tool. The
+// fields above the line are shared by every protocol; exactly one of HTTP,
+// GraphQL, GRPC is set, matching Manifest.Protocol (SPEC §3.4 P2).
 type Tool struct {
 	Key         OpKey    `json:"key"`
 	ID          string   `json:"id"`
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
-	Method      string   `json:"method"`
-	Path        string   `json:"path"`
 	Params      []Param  `json:"params,omitempty"`
-	Body        *Body    `json:"body,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
 	Deprecated  bool     `json:"deprecated,omitempty"`
 	Safety      Safety   `json:"safety"`
+	Idempotent  bool     `json:"idempotent,omitempty"`
 	Issues      []Issue  `json:"issues,omitempty"`
+
+	HTTP    *HTTPOp    `json:"http,omitempty"`
+	GraphQL *GraphQLOp `json:"graphql,omitempty"`
+	GRPC    *GRPCOp    `json:"grpc,omitempty"`
+}
+
+// HTTPOp is everything REST-specific about a tool.
+type HTTPOp struct {
+	Method string `json:"method"`
+	Path   string `json:"path"`
+	Body   *Body  `json:"body,omitempty"`
+}
+
+// GraphQLOp is everything GraphQL-specific about a tool (M8).
+type GraphQLOp struct {
+	Operation string   `json:"operation"`
+	Field     string   `json:"field"`
+	Document  string   `json:"document"`
+	Selection []string `json:"selection,omitempty"`
+}
+
+// GRPCOp is everything gRPC-specific about a tool (M11).
+type GRPCOp struct {
+	Service string `json:"service"`
+	Method  string `json:"method"`
+	Input   string `json:"input"`
+	Output  string `json:"output"`
 }
 
 // Param is one argument of a tool.
 type Param struct {
-	Name         string          `json:"name"`
-	UpstreamName string          `json:"upstreamName"`
-	In           Location        `json:"in"`
-	Required     bool            `json:"required,omitempty"`
-	Schema       json.RawMessage `json:"schema"`
-	Desc         string          `json:"desc,omitempty"`
-	Hidden       bool            `json:"hidden,omitempty"`
+	Name     string          `json:"name"`
+	Bind     Binding         `json:"bind"`
+	Required bool            `json:"required,omitempty"`
+	Schema   json.RawMessage `json:"schema"`
+	Desc     string          `json:"desc,omitempty"`
+	Hidden   bool            `json:"hidden,omitempty"`
+}
+
+// Binding is where a param's value goes on the wire; never guessed at call
+// time (SPEC §3.4). In is a validated location from the per-protocol set.
+type Binding struct {
+	In       Location `json:"in"`
+	Upstream string   `json:"upstream"`
 }
 
 // Body is a tool's request body.
@@ -204,12 +242,19 @@ type Issue struct {
 	Detail string    `json:"detail"`
 }
 
-// Manifest is the result of ingesting one spec.
+// Manifest is the result of ingesting one source (SPEC §3.4 P2).
 type Manifest struct {
-	Title       string   `json:"title"`
-	Version     string   `json:"version"`
-	SpecVersion string   `json:"specVersion"`
-	Servers     []string `json:"servers,omitempty"`
-	Tools       []Tool   `json:"tools"`
-	Warnings    []string `json:"warnings,omitempty"`
+	Protocol    Protocol    `json:"protocol"`
+	Format      string      `json:"format,omitempty"`
+	Title       string      `json:"title"`
+	Version     string      `json:"version"`
+	SpecVersion string      `json:"specVersion"`
+	Endpoints   []string    `json:"endpoints,omitempty"`
+	Tools       []Tool      `json:"tools"`
+	Warnings    []string    `json:"warnings,omitempty"`
+	GRPC        *GRPCSchema `json:"grpc,omitempty"`
 }
+
+// GRPCSchema holds the trimmed descriptor set gRPC tools need (M11); an
+// empty placeholder until then.
+type GRPCSchema struct{}

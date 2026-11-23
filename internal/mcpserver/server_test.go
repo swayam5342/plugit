@@ -29,19 +29,19 @@ const secret = "test-token-123"
 
 func tool(key model.OpKey, name string, params ...model.Param) model.Tool {
 	return schema.Prepare(model.Tool{
-		Key: key, Name: name, Method: key.Method(), Path: key.Path(),
+		Key: key, Name: name, HTTP: &model.HTTPOp{Method: key.Method(), Path: key.Path()},
 		Description: "desc of " + name, Safety: model.SafetyForMethod(key.Method()), Params: params,
 	}, schema.Options{})
 }
 
 func qparam(name string, required bool, s string) model.Param {
-	return model.Param{Name: name, UpstreamName: name, In: model.InQuery, Required: required, Schema: json.RawMessage(s)}
+	return model.Param{Name: name, Bind: model.Binding{Upstream: name, In: model.InQuery}, Required: required, Schema: json.RawMessage(s)}
 }
 
 var (
 	listPets  = tool("GET /pets", "listPets", qparam("limit", false, `{"type":"integer","maximum":100}`))
 	createPet = tool("POST /pets", "createPet")
-	deletePet = tool("DELETE /pets/{id}", "deletePet", model.Param{Name: "id", UpstreamName: "id", In: model.InPath, Required: true, Schema: json.RawMessage(`{"type":"string"}`)})
+	deletePet = tool("DELETE /pets/{id}", "deletePet", model.Param{Name: "id", Bind: model.Binding{Upstream: "id", In: model.InPath}, Required: true, Schema: json.RawMessage(`{"type":"string"}`)})
 	headPets  = tool("HEAD /pets", "headPets")
 )
 

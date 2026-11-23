@@ -153,7 +153,7 @@ func addAPI(ctx context.Context, s addSettings, d addDeps) error {
 	if err != nil {
 		return err
 	}
-	baseURL, err := pinBaseURL(s, m.Servers, d.confirm)
+	baseURL, err := pinBaseURL(s, m.Endpoints, d.confirm)
 	if err != nil {
 		return err
 	}

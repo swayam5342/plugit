@@ -17,7 +17,7 @@ import (
 
 const testSecret = "test-token-123"
 
-var listThings = model.Tool{Key: "GET /things", Name: "listThings", Method: "GET", Path: "/things",
+var listThings = model.Tool{Key: "GET /things", Name: "listThings", HTTP: &model.HTTPOp{Method: "GET", Path: "/things"},
 	Params: []model.Param{param("q", model.InQuery, false)}}
 
 func server(t *testing.T, h http.HandlerFunc) *httptest.Server {
@@ -235,7 +235,7 @@ func TestCallNetworkErrorsAreToolErrors(t *testing.T) {
 func TestCallBadArgumentsAreToolErrors(t *testing.T) {
 	var hits atomic.Int32
 	s := server(t, func(http.ResponseWriter, *http.Request) { hits.Add(1) })
-	tl := model.Tool{Name: "getFile", Method: "GET", Path: "/files/{name}", Params: []model.Param{param("name", model.InPath, true)}}
+	tl := model.Tool{Name: "getFile", HTTP: &model.HTTPOp{Method: "GET", Path: "/files/{name}"}, Params: []model.Param{param("name", model.InPath, true)}}
 	res := call(t, s.URL, tl, `{"name": ".."}`, Target{}, httpx.Options{})
 	if !res.IsError || !strings.HasPrefix(res.Text, "getFile: ") || hits.Load() != 0 {
 		t.Errorf("isError=%v hits=%d text=%q", res.IsError, hits.Load(), res.Text)

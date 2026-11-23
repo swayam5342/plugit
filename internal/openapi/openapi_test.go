@@ -44,7 +44,7 @@ func tool(t *testing.T, m *model.Manifest, key model.OpKey) *model.Tool {
 func param(t *testing.T, tl *model.Tool, name string) *model.Param {
 	t.Helper()
 	for i := range tl.Params {
-		if tl.Params[i].UpstreamName == name {
+		if tl.Params[i].Bind.Upstream == name {
 			return &tl.Params[i]
 		}
 	}
@@ -136,8 +136,8 @@ func TestParse30Basics(t *testing.T) {
 	if m.Title != "Petstore" || m.Version != "1.2.3" || m.SpecVersion != "3.0.3" {
 		t.Errorf("manifest header = %q %q %q", m.Title, m.Version, m.SpecVersion)
 	}
-	if !reflect.DeepEqual(m.Servers, []string{"https://api.example.test/v1"}) {
-		t.Errorf("Servers = %v", m.Servers)
+	if !reflect.DeepEqual(m.Endpoints, []string{"https://api.example.test/v1"}) {
+		t.Errorf("Servers = %v", m.Endpoints)
 	}
 
 	var keys []model.OpKey
@@ -150,14 +150,14 @@ func TestParse30Basics(t *testing.T) {
 	}
 
 	get := tool(t, m, "GET /pets/{petId}")
-	if get.Name != "getPet" || get.Description != "Get a pet" || get.Method != http.MethodGet || get.Path != "/pets/{petId}" {
+	if get.Name != "getPet" || get.Description != "Get a pet" || get.HTTP.Method != http.MethodGet || get.HTTP.Path != "/pets/{petId}" {
 		t.Errorf("getPet = %+v", get)
 	}
 	if get.Safety != model.ReadOnly || !reflect.DeepEqual(get.Tags, []string{"pets"}) || get.ID == "" {
 		t.Errorf("getPet safety/tags/id = %v %v %q", get.Safety, get.Tags, get.ID)
 	}
 	pid := param(t, get, "petId")
-	if pid.In != model.InPath || !pid.Required || pid.Desc != "The pet id" || pid.Name != "petId" {
+	if pid.Bind.In != model.InPath || !pid.Required || pid.Desc != "The pet id" || pid.Name != "petId" {
 		t.Errorf("petId = %+v", pid)
 	}
 	assertJSON(t, "petId schema", pid.Schema, `{"type":"string"}`)
@@ -166,7 +166,7 @@ func TestParse30Basics(t *testing.T) {
 	if verbose.Desc != "overridden" {
 		t.Errorf("verbose desc = %q", verbose.Desc)
 	}
-	if param(t, get, "X-Trace").In != model.InHeader {
+	if param(t, get, "X-Trace").Bind.In != model.InHeader {
 		t.Error("X-Trace should be a header param")
 	}
 	if len(get.Params) != 3 {
@@ -196,13 +196,13 @@ func TestParse30RequestBody(t *testing.T) {
 	if post.Safety != model.Write {
 		t.Errorf("safety = %v", post.Safety)
 	}
-	if post.Body == nil {
+	if post.HTTP.Body == nil {
 		t.Fatal("Body is nil")
 	}
-	if post.Body.ContentType != "application/json" || !post.Body.Required {
-		t.Errorf("body = %q required=%v", post.Body.ContentType, post.Body.Required)
+	if post.HTTP.Body.ContentType != "application/json" || !post.HTTP.Body.Required {
+		t.Errorf("body = %q required=%v", post.HTTP.Body.ContentType, post.HTTP.Body.Required)
 	}
-	assertJSON(t, "body", post.Body.Schema, `{
+	assertJSON(t, "body", post.HTTP.Body.Schema, `{
 		"type":"object",
 		"required":["name"],
 		"properties":{
@@ -305,7 +305,7 @@ paths:
 `
 	m := parse(t, src, Options{})
 	up := tool(t, m, "POST /upload")
-	if up.Body != nil {
+	if up.HTTP.Body != nil {
 		t.Error("a body whose required field is a file should not be modelled")
 	}
 	if !hasIssue(up, model.IssueUnsupported, "file") {
@@ -314,12 +314,12 @@ paths:
 	if hasIssue(up, model.IssueUnsupported, "cookie") {
 		t.Errorf("cookie still flagged unsupported: %+v", up.Issues)
 	}
-	if p := param(t, up, "session"); p.In != model.InCookie {
+	if p := param(t, up, "session"); p.Bind.In != model.InCookie {
 		t.Errorf("session = %+v", p)
 	}
 
 	for _, tl := range m.Tools {
-		if tl.Method == http.MethodTrace {
+		if tl.HTTP.Method == http.MethodTrace {
 			t.Errorf("TRACE operation was not skipped: %s", tl.Key)
 		}
 	}
@@ -362,7 +362,7 @@ components:
 	if !hasIssue(tl, model.IssueSchemaDegraded, "depth") {
 		t.Errorf("missing depth issue: %+v", tl.Issues)
 	}
-	depth := jsonDepth(t, tl.Body.Schema)
+	depth := jsonDepth(t, tl.HTTP.Body.Schema)
 	if depth > 2*(MaxSchemaDepth+1)+1 {
 		t.Errorf("schema JSON depth %d exceeds the cap", depth)
 	}
@@ -408,8 +408,8 @@ func TestParseWideSchemaHitsNodeBudget(t *testing.T) {
 	if !hasIssue(tl, model.IssueSchemaDegraded, "too large") {
 		t.Errorf("missing node budget issue: %+v", tl.Issues)
 	}
-	if len(tl.Body.Schema) > 2_000_000 {
-		t.Errorf("schema is %d bytes; budget did not bound it", len(tl.Body.Schema))
+	if len(tl.HTTP.Body.Schema) > 2_000_000 {
+		t.Errorf("schema is %d bytes; budget did not bound it", len(tl.HTTP.Body.Schema))
 	}
 }
 
@@ -545,7 +545,7 @@ func TestParseSkipsInvalidPaths(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			src := "openapi: 3.0.3\ninfo: {title: t, version: '1'}\npaths:\n  " + path + ":\n    get:\n      responses: {}\n  /ok:\n    get:\n      responses: {}\n"
 			m := parse(t, src, Options{})
-			if len(m.Tools) != 1 || m.Tools[0].Path != "/ok" {
+			if len(m.Tools) != 1 || m.Tools[0].HTTP.Path != "/ok" {
 				t.Errorf("tools = %+v, want only /ok", m.Tools)
 			}
 			if !containsWarning(m, "skipped") {
@@ -640,7 +640,7 @@ components:
       x-content: {content: {n: null}}
 `
 	tl := tool(t, parse(t, src, Options{}), "POST /e")
-	if tl.Body == nil {
+	if tl.HTTP.Body == nil {
 		t.Fatal("body missing")
 	}
 }
@@ -702,8 +702,8 @@ func TestParseSwagger2(t *testing.T) {
 	if m.SpecVersion != "2.0" || m.Title != "Legacy" {
 		t.Errorf("header = %q %q", m.SpecVersion, m.Title)
 	}
-	if !reflect.DeepEqual(m.Servers, []string{"https://legacy.example.test/api", "http://legacy.example.test/api"}) {
-		t.Errorf("Servers = %v", m.Servers)
+	if !reflect.DeepEqual(m.Endpoints, []string{"https://legacy.example.test/api", "http://legacy.example.test/api"}) {
+		t.Errorf("Servers = %v", m.Endpoints)
 	}
 
 	get := tool(t, m, "GET /users/{id}")
@@ -714,17 +714,17 @@ func TestParseSwagger2(t *testing.T) {
 	assertJSON(t, "fields", param(t, get, "fields").Schema, `{"type":"array","items":{"type":"string","enum":["a","b"]}}`)
 
 	put := tool(t, m, "PUT /users/{id}")
-	if put.Body == nil || put.Body.ContentType != "application/json" || !put.Body.Required {
-		t.Fatalf("body = %+v", put.Body)
+	if put.HTTP.Body == nil || put.HTTP.Body.ContentType != "application/json" || !put.HTTP.Body.Required {
+		t.Fatalf("body = %+v", put.HTTP.Body)
 	}
-	assertJSON(t, "body", put.Body.Schema, `{"type":"object","properties":{"name":{"type":"string"}}}`)
+	assertJSON(t, "body", put.HTTP.Body.Schema, `{"type":"object","properties":{"name":{"type":"string"}}}`)
 	if len(put.Params) != 1 {
 		t.Errorf("body param must not appear in Params: %+v", put.Params)
 	}
 
 	av := tool(t, m, "POST /avatar")
-	if !hasIssue(av, model.IssueUnsupported, "file") || av.Body != nil {
-		t.Errorf("file-only formData: body %+v, issues %+v", av.Body, av.Issues)
+	if !hasIssue(av, model.IssueUnsupported, "file") || av.HTTP.Body != nil {
+		t.Errorf("file-only formData: body %+v, issues %+v", av.HTTP.Body, av.Issues)
 	}
 }
 
@@ -825,36 +825,36 @@ paths:
 `
 	m := parse(t, src, Options{})
 	c := tool(t, m, "POST /customers")
-	if c.Body == nil || c.Body.ContentType != "application/x-www-form-urlencoded" || !c.Body.Required {
-		t.Fatalf("form body = %+v", c.Body)
+	if c.HTTP.Body == nil || c.HTTP.Body.ContentType != "application/x-www-form-urlencoded" || !c.HTTP.Body.Required {
+		t.Fatalf("form body = %+v", c.HTTP.Body)
 	}
 	want := map[string]model.Encoding{"metadata": {Style: "deepObject", Explode: true}, "tags": {Style: "form", Explode: false}}
-	if !reflect.DeepEqual(c.Body.Encoding, want) {
-		t.Errorf("encoding = %+v", c.Body.Encoding)
+	if !reflect.DeepEqual(c.HTTP.Body.Encoding, want) {
+		t.Errorf("encoding = %+v", c.HTTP.Body.Encoding)
 	}
 	if hasIssue(c, model.IssueUnsupported, "") {
 		t.Errorf("form body flagged unsupported: %+v", c.Issues)
 	}
 
 	n := tool(t, m, "POST /notes")
-	if n.Body == nil || n.Body.ContentType != "multipart/form-data" {
-		t.Fatalf("multipart body = %+v", n.Body)
+	if n.HTTP.Body == nil || n.HTTP.Body.ContentType != "multipart/form-data" {
+		t.Fatalf("multipart body = %+v", n.HTTP.Body)
 	}
-	if strings.Contains(string(n.Body.Schema), "attachment") || !strings.Contains(string(n.Body.Schema), "title") {
-		t.Errorf("binary field kept: %s", n.Body.Schema)
+	if strings.Contains(string(n.HTTP.Body.Schema), "attachment") || !strings.Contains(string(n.HTTP.Body.Schema), "title") {
+		t.Errorf("binary field kept: %s", n.HTTP.Body.Schema)
 	}
 	if !hasIssue(n, model.IssueUnsupported, "attachment") {
 		t.Errorf("dropped field not reported: %+v", n.Issues)
 	}
 
-	if b := tool(t, m, "POST /both"); b.Body == nil || b.Body.ContentType != "application/json" {
-		t.Errorf("JSON should win: %+v", b.Body)
+	if b := tool(t, m, "POST /both"); b.HTTP.Body == nil || b.HTTP.Body.ContentType != "application/json" {
+		t.Errorf("JSON should win: %+v", b.HTTP.Body)
 	}
-	if e := tool(t, m, "GET /empty"); e.Body != nil || len(e.Issues) != 0 {
-		t.Errorf("empty form body: %+v, %+v", e.Body, e.Issues)
+	if e := tool(t, m, "GET /empty"); e.HTTP.Body != nil || len(e.Issues) != 0 {
+		t.Errorf("empty form body: %+v, %+v", e.HTTP.Body, e.Issues)
 	}
-	if sc := tool(t, m, "POST /scalar"); sc.Body != nil || !hasIssue(sc, model.IssueUnsupported, "object") {
-		t.Errorf("non-object form body: %+v, %+v", sc.Body, sc.Issues)
+	if sc := tool(t, m, "POST /scalar"); sc.HTTP.Body != nil || !hasIssue(sc, model.IssueUnsupported, "object") {
+		t.Errorf("non-object form body: %+v, %+v", sc.HTTP.Body, sc.Issues)
 	}
 }
 
@@ -884,16 +884,16 @@ paths:
 `
 	m := parse(t, src, Options{})
 	up := tool(t, m, "POST /pets/{id}")
-	if up.Body == nil || up.Body.ContentType != "application/x-www-form-urlencoded" || !up.Body.Required {
-		t.Fatalf("body = %+v", up.Body)
+	if up.HTTP.Body == nil || up.HTTP.Body.ContentType != "application/x-www-form-urlencoded" || !up.HTTP.Body.Required {
+		t.Fatalf("body = %+v", up.HTTP.Body)
 	}
-	assertJSON(t, "form schema", up.Body.Schema, `{"type":"object","required":["name"],"properties":{"name":{"type":"string","description":"New name"},"status":{"type":"string","enum":["available","sold"]},"tags":{"type":"array","items":{"type":"string"}}}}`)
+	assertJSON(t, "form schema", up.HTTP.Body.Schema, `{"type":"object","required":["name"],"properties":{"name":{"type":"string","description":"New name"},"status":{"type":"string","enum":["available","sold"]},"tags":{"type":"array","items":{"type":"string"}}}}`)
 	if len(up.Params) != 1 || up.Params[0].Name != "id" {
 		t.Errorf("params = %+v", up.Params)
 	}
 	ph := tool(t, m, "POST /pets/{id}/photo")
-	if ph.Body == nil || ph.Body.ContentType != "multipart/form-data" || strings.Contains(string(ph.Body.Schema), `"file"`) {
-		t.Errorf("multipart body = %+v", ph.Body)
+	if ph.HTTP.Body == nil || ph.HTTP.Body.ContentType != "multipart/form-data" || strings.Contains(string(ph.HTTP.Body.Schema), `"file"`) {
+		t.Errorf("multipart body = %+v", ph.HTTP.Body)
 	}
 	if !hasIssue(ph, model.IssueUnsupported, "file") {
 		t.Errorf("file field not reported: %+v", ph.Issues)
@@ -940,13 +940,13 @@ paths:
 `
 	m := parse(t, src, Options{})
 	me := tool(t, m, "GET /me")
-	if p := param(t, me, "session_id"); p.In != model.InCookie || !p.Required || p.Desc != "The session" {
+	if p := param(t, me, "session_id"); p.Bind.In != model.InCookie || !p.Required || p.Desc != "The session" {
 		t.Errorf("session_id = %+v", p)
 	}
 	param(t, me, "theme")
 	for _, p := range me.Params {
-		if strings.ContainsAny(p.UpstreamName, "; ") {
-			t.Errorf("invalid cookie name kept: %q", p.UpstreamName)
+		if strings.ContainsAny(p.Bind.Upstream, "; ") {
+			t.Errorf("invalid cookie name kept: %q", p.Bind.Upstream)
 		}
 	}
 	if !hasIssue(me, model.IssueUnsupported, "cookie name") {

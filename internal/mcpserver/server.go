@@ -115,7 +115,7 @@ func annotations(t model.Tool) *mcp.ToolAnnotations {
 	if t.Safety == model.Destructive {
 		a.DestructiveHint = &tr
 	}
-	switch strings.ToUpper(t.Method) {
+	switch strings.ToUpper(t.Key.Method()) {
 	case "GET", "HEAD", "OPTIONS", "PUT", "DELETE":
 		a.IdempotentHint = true
 	}
@@ -288,7 +288,7 @@ func (h *handler) confirm(req *mcp.CallToolRequest, args map[string]any, reason 
 		shown = shown[:maxShownArgs] + "\n… (truncated)"
 	}
 	msg := fmt.Sprintf("%s wants to call %s (%s %s, a %s tool).\n\nArguments:\n%s\n\nAllow this call?",
-		h.cfg.Name, t.Name, t.Method, t.Path, t.Safety, shown)
+		h.cfg.Name, t.Name, t.Key.Method(), t.Key.Path(), t.Safety, shown)
 	return &mcp.CallToolResult{
 		InputRequests: mcp.InputRequestMap{confirmID: &mcp.ElicitParams{Mode: "form", Message: msg, RequestedSchema: confirmSchema}},
 		RequestState:  h.state(now(), args),

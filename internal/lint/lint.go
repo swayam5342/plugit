@@ -165,7 +165,7 @@ func toolset(in Input, name string) (kept []Finding, n int) {
 			squashed[squash(t.Name)] = t
 		}
 
-		if t.Description == t.Method+" "+t.Path {
+		if t.Description == t.Key.Method()+" "+t.Key.Path() {
 			l.add("L001", Warn, "no description in the spec; add one with `plugit edit`")
 		}
 		if o := ts.Tools[string(t.Key)]; utf8.RuneCountInString(o.Description) > maxDescription {
@@ -202,8 +202,8 @@ func toolset(in Input, name string) (kept []Finding, n int) {
 		if st.Override == policy.OverrideAllow && t.Safety == model.Destructive && mode != policy.Full {
 			l.add("L009", Error, "destructive tool set to allow has no effect under policy mode %s (it stays %s); remove the override or use mode full", mode, policy.Check(t.Safety, mode, policy.None).Decision)
 		}
-		if w := writeLike(strings.TrimPrefix(t.Name, in.API.Prefix+"_"), t.Path); w != "" && t.Safety == model.ReadOnly && st.Override == policy.None {
-			l.add("L015", Warn, "%s is treated as read-only but looks like it changes something (%q); if it does, set its policy to confirm or deny", t.Method, w)
+		if w := writeLike(strings.TrimPrefix(t.Name, in.API.Prefix+"_"), t.Key.Path()); w != "" && t.Safety == model.ReadOnly && st.Override == policy.None {
+			l.add("L015", Warn, "%s is treated as read-only but looks like it changes something (%q); if it does, set its policy to confirm or deny", t.Key.Method(), w)
 		}
 		if mode == policy.Full && t.Safety == model.Destructive && st.Override != policy.OverrideConfirm && st.Override != policy.OverrideDeny {
 			unconfirmed = append(unconfirmed, t.Name)
@@ -295,10 +295,10 @@ func (l *linter) add(rule string, sev Severity, format string, a ...any) {
 func (l *linter) param(p model.Param) {
 	where := fmt.Sprintf("parameter %q", p.Name)
 	l.text(where+" description", p.Desc)
-	if p.In != model.InPath && credentialName.MatchString(strings.Join(words(p.UpstreamName), "_")) {
+	if p.Bind.In != model.InPath && credentialName.MatchString(strings.Join(words(p.Bind.Upstream), "_")) {
 		l.add("L016", Warn, "%s looks like a credential the model would have to supply; make it a fixed value so it stays hidden", where)
 	}
-	switch riskyParam(p.UpstreamName) {
+	switch riskyParam(p.Bind.Upstream) {
 	case "command":
 		l.add("L017", Warn, "%s looks like a command or query the API will run: whatever the model writes there is executed upstream", where)
 	case "target":

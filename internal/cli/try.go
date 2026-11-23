@@ -130,7 +130,7 @@ func tryTool(ctx context.Context, s serveSettings, toolName string, f tryFlags, 
 			return fmt.Errorf("%s: %s and needs confirmation: run it from a terminal, or pass --yes", t.Name, dec.Reason)
 		}
 		if !ok {
-			if ok, err = d.confirm(fmt.Sprintf("%s (%s %s) %s. Make this call?", t.Name, t.Method, t.Path, dec.Reason)); err != nil {
+			if ok, err = d.confirm(fmt.Sprintf("%s (%s %s) %s. Make this call?", t.Name, t.Key.Method(), t.Key.Path(), dec.Reason)); err != nil {
 				return err
 			}
 		}

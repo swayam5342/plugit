@@ -69,7 +69,7 @@ func prepare(m *model.Manifest) prepared {
 // compact renders one line per tool: key, name, safety, params, issues.
 func compact(p prepared) []byte {
 	var b strings.Builder
-	fmt.Fprintf(&b, "title: %s\nversion: %s\nspec: %s\nservers: %v\ntools: %d\n", p.Title, p.Version, p.SpecVersion, p.Servers, len(p.Tools))
+	fmt.Fprintf(&b, "title: %s\nversion: %s\nspec: %s\nservers: %v\ntools: %d\n", p.Title, p.Version, p.SpecVersion, p.Endpoints, len(p.Tools))
 	for _, w := range p.Warnings {
 		fmt.Fprintf(&b, "warning: %s\n", w)
 	}
@@ -77,9 +77,9 @@ func compact(p prepared) []byte {
 	for _, tl := range p.Tools {
 		var params []string
 		for _, pr := range tl.Params {
-			s := pr.Name + "@" + pr.In.String()
-			if pr.Name != pr.UpstreamName && pr.UpstreamName != "" {
-				s += "(" + pr.UpstreamName + ")"
+			s := pr.Name + "@" + pr.Bind.In.String()
+			if pr.Name != pr.Bind.Upstream && pr.Bind.Upstream != "" {
+				s += "(" + pr.Bind.Upstream + ")"
 			}
 			if pr.Required {
 				s += "*"

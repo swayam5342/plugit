@@ -128,6 +128,7 @@ func parsePostman(data []byte, opts Options) (*model.Manifest, error) {
 		return nil, fmt.Errorf("parsing Postman collection: %w", err)
 	}
 	b := &builder{opts: opts}
+	b.m.Format = "postman"
 	switch {
 	case strings.Contains(col.Info.Schema, "v2.1"):
 		b.m.SpecVersion = "postman-2.1"
@@ -163,8 +164,8 @@ func parsePostman(data []byte, opts Options) (*model.Manifest, error) {
 }
 
 func (b *builder) addServer(s string) {
-	if !slices.Contains(b.m.Servers, s) {
-		b.m.Servers = append(b.m.Servers, s)
+	if !slices.Contains(b.m.Endpoints, s) {
+		b.m.Endpoints = append(b.m.Endpoints, s)
 	}
 }
 
@@ -337,7 +338,7 @@ func (p *pmWalk) splitURL(raw string) (path string, query []pmKV, pathVars []str
 
 func (p *pmWalk) matchesServer(u string) string {
 	best := ""
-	for _, s := range p.b.m.Servers {
+	for _, s := range p.b.m.Endpoints {
 		if (u == s || strings.HasPrefix(u, s+"/")) && len(s) > len(best) {
 			best = s
 		}
@@ -371,7 +372,7 @@ func (p *pmWalk) body(t *model.Tool, c *converter, body *pmBody) {
 			}
 			return
 		}
-		t.Body = &model.Body{ContentType: "application/json", Schema: mustJSON(inferSchema(v, 1))}
+		t.HTTP.Body = &model.Body{ContentType: "application/json", Schema: mustJSON(inferSchema(v, 1))}
 	case "urlencoded", "formdata":
 		props := map[string]any{}
 		for _, f := range slices.Concat(body.URLEncoded, body.FormData) {
@@ -391,7 +392,7 @@ func (p *pmWalk) body(t *model.Tool, c *converter, body *pmBody) {
 		if body.Mode == "formdata" {
 			ct = ctMultipart
 		}
-		t.Body = formBody(c, ct, mustJSON(map[string]any{"type": "object", "properties": props}), nil, false)
+		t.HTTP.Body = formBody(c, ct, mustJSON(map[string]any{"type": "object", "properties": props}), nil, false)
 	case "":
 	default:
 		c.issue(model.IssueUnsupported, "%s request body not supported", naming.CleanText(body.Mode, 20))

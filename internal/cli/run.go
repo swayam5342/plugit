@@ -313,10 +313,10 @@ func selectTools(all []model.Tool, mode policy.Mode, tags, methods, paths []stri
 		}) {
 			continue
 		}
-		if len(methods) > 0 && !slices.ContainsFunc(methods, func(m string) bool { return strings.EqualFold(m, t.Method) }) {
+		if len(methods) > 0 && !slices.ContainsFunc(methods, func(m string) bool { return strings.EqualFold(m, t.Key.Method()) }) {
 			continue
 		}
-		if len(paths) > 0 && !slices.ContainsFunc(paths, func(p string) bool { return pathMatches(p, t.Path) }) {
+		if len(paths) > 0 && !slices.ContainsFunc(paths, func(p string) bool { return pathMatches(p, t.Key.Path()) }) {
 			continue
 		}
 		out = append(out, t)
@@ -451,7 +451,7 @@ func runServe(ctx context.Context, s runSettings, d runDeps) error {
 	if err != nil {
 		return err
 	}
-	baseURL, err := chooseBaseURL(s.baseURL, m.Servers, credentials)
+	baseURL, err := chooseBaseURL(s.baseURL, m.Endpoints, credentials)
 	if err != nil {
 		return err
 	}

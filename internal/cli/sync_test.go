@@ -252,8 +252,8 @@ func TestSyncFailures(t *testing.T) {
 }
 
 func TestSyncDiffFlagsAutoServedOperations(t *testing.T) {
-	added := model.Tool{Key: "POST /pets/{id}/photos", Name: "addPhoto", Method: "POST", Path: "/pets/{id}/photos"}
-	quiet := model.Tool{Key: "GET /owners", Name: "listOwners", Method: "GET", Path: "/owners"}
+	added := model.Tool{Key: "POST /pets/{id}/photos", Name: "addPhoto", HTTP: &model.HTTPOp{Method: "POST", Path: "/pets/{id}/photos"}}
+	quiet := model.Tool{Key: "GET /owners", Name: "listOwners", HTTP: &model.HTTPOp{Method: "GET", Path: "/owners"}}
 	d := curate.SyncDiff{Added: []curate.OpChange{
 		{Key: added.Key, New: &added, AutoSelected: []string{"by-tag", "posts"}},
 		{Key: quiet.Key, New: &quiet},
@@ -272,7 +272,7 @@ func TestSyncDiffFlagsAutoServedOperations(t *testing.T) {
 }
 
 func TestSyncDiffSanitizesKeys(t *testing.T) {
-	evil := model.Tool{Key: "GET /pets\x1b]0;owned\a", Name: "listPets", Method: "GET", Path: "/pets"}
+	evil := model.Tool{Key: "GET /pets\x1b]0;owned\a", Name: "listPets", HTTP: &model.HTTPOp{Method: "GET", Path: "/pets"}}
 	d := curate.SyncDiff{
 		Added:   []curate.OpChange{{Key: evil.Key, New: &evil}},
 		Changed: []curate.OpChange{{Key: evil.Key, Old: &evil, New: &evil, What: []string{"description"}}},

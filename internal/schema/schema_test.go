@@ -9,11 +9,11 @@ import (
 )
 
 func p(name string, in model.Location, required bool, schema string) model.Param {
-	return model.Param{Name: name, UpstreamName: name, In: in, Required: required, Schema: json.RawMessage(schema)}
+	return model.Param{Name: name, Bind: model.Binding{Upstream: name, In: in}, Required: required, Schema: json.RawMessage(schema)}
 }
 
-func body(required bool, schema string) *model.Body {
-	return &model.Body{ContentType: "application/json", Required: required, Schema: json.RawMessage(schema)}
+func body(required bool, schema string) *model.HTTPOp {
+	return &model.HTTPOp{Body: &model.Body{ContentType: "application/json", Required: required, Schema: json.RawMessage(schema)}}
 }
 
 func find(t *testing.T, tl model.Tool, name string) model.Param {
@@ -61,8 +61,8 @@ func hasIssue(tl model.Tool, kind model.IssueKind) bool {
 func TestInputSchemaSimple(t *testing.T) {
 	in := model.Tool{Key: "GET /pets/{petId}", Params: []model.Param{
 		p("petId", model.InPath, true, `{"type":"string"}`),
-		{Name: "limit", UpstreamName: "limit", In: model.InQuery, Schema: json.RawMessage(`{"type":"integer"}`), Desc: "Max items"},
-		{Name: "q", UpstreamName: "q", In: model.InQuery, Schema: json.RawMessage(`{"type":"string","description":"own"}`), Desc: "param desc"},
+		{Name: "limit", Bind: model.Binding{Upstream: "limit", In: model.InQuery}, Schema: json.RawMessage(`{"type":"integer"}`), Desc: "Max items"},
+		{Name: "q", Bind: model.Binding{Upstream: "q", In: model.InQuery}, Schema: json.RawMessage(`{"type":"string","description":"own"}`), Desc: "param desc"},
 	}}
 	out := Prepare(in, Options{})
 	assertJSON(t, "input schema", InputSchema(out), `{
@@ -83,7 +83,7 @@ func TestInputSchemaNoParams(t *testing.T) {
 }
 
 func TestFlattenObjectBody(t *testing.T) {
-	in := model.Tool{Key: "POST /pets", Body: body(true, `{
+	in := model.Tool{Key: "POST /pets", HTTP: body(true, `{
 		"type":"object","required":["name"],
 		"properties":{"name":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}}}}`)}
 	out := Prepare(in, Options{})
@@ -92,13 +92,13 @@ func TestFlattenObjectBody(t *testing.T) {
 		t.Fatalf("names = %v", names(out))
 	}
 	name := find(t, out, "name")
-	if name.In != model.InBody || name.UpstreamName != "name" || !name.Required {
+	if name.Bind.In != model.InBody || name.Bind.Upstream != "name" || !name.Required {
 		t.Errorf("name = %+v", name)
 	}
 	if find(t, out, "tags").Required {
 		t.Error("tags should be optional")
 	}
-	if out.Body == nil || out.Body.ContentType != "application/json" {
+	if out.HTTP.Body == nil || out.HTTP.Body.ContentType != "application/json" {
 		t.Error("Body must be kept for the content type")
 	}
 	if hasIssue(out, model.IssueBodyNested) {
@@ -107,7 +107,7 @@ func TestFlattenObjectBody(t *testing.T) {
 }
 
 func TestFlattenOptionalBodyMakesFieldsOptional(t *testing.T) {
-	in := model.Tool{Key: "PATCH /pets", Body: body(false, `{"type":"object","required":["name"],"properties":{"name":{"type":"string"}}}`)}
+	in := model.Tool{Key: "PATCH /pets", HTTP: body(false, `{"type":"object","required":["name"],"properties":{"name":{"type":"string"}}}`)}
 	if find(t, Prepare(in, Options{}), "name").Required {
 		t.Error("a field of an optional body must not be required")
 	}
@@ -116,13 +116,13 @@ func TestFlattenOptionalBodyMakesFieldsOptional(t *testing.T) {
 func TestFlattenCollisionRenamesBodyField(t *testing.T) {
 	in := model.Tool{Key: "PUT /pets/{id}",
 		Params: []model.Param{p("id", model.InPath, true, `{"type":"string"}`)},
-		Body:   body(true, `{"type":"object","properties":{"id":{"type":"integer"},"name":{"type":"string"}}}`)}
+		HTTP:   body(true, `{"type":"object","properties":{"id":{"type":"integer"},"name":{"type":"string"}}}`)}
 	out := Prepare(in, Options{})
 	bid := find(t, out, "body_id")
-	if bid.UpstreamName != "id" || bid.In != model.InBody {
+	if bid.Bind.Upstream != "id" || bid.Bind.In != model.InBody {
 		t.Errorf("body_id = %+v", bid)
 	}
-	if find(t, out, "id").In != model.InPath {
+	if find(t, out, "id").Bind.In != model.InPath {
 		t.Error("path id must keep its name")
 	}
 }
@@ -130,13 +130,13 @@ func TestFlattenCollisionRenamesBodyField(t *testing.T) {
 func TestFlattenDoubleCollisionNestsBody(t *testing.T) {
 	in := model.Tool{Key: "PUT /pets/{id}",
 		Params: []model.Param{p("id", model.InPath, true, `{"type":"string"}`)},
-		Body:   body(true, `{"type":"object","properties":{"id":{"type":"integer"},"body_id":{"type":"string"}}}`)}
+		HTTP:   body(true, `{"type":"object","properties":{"id":{"type":"integer"},"body_id":{"type":"string"}}}`)}
 	out := Prepare(in, Options{})
 	if !reflect.DeepEqual(names(out), []string{"id", "body"}) {
 		t.Fatalf("names = %v, want [id body]", names(out))
 	}
 	b := find(t, out, "body")
-	if b.In != model.InBodyRoot || !b.Required {
+	if b.Bind.In != model.InBodyRoot || !b.Required {
 		t.Errorf("body = %+v", b)
 	}
 	assertJSON(t, "nested body schema", b.Schema, `{"type":"object","properties":{"id":{"type":"integer"},"body_id":{"type":"string"}}}`)
@@ -146,18 +146,18 @@ func TestFlattenDoubleCollisionNestsBody(t *testing.T) {
 }
 
 func TestNonObjectBodies(t *testing.T) {
-	arr := model.Tool{Key: "POST /batch", Body: body(true, `{"type":"array","items":{"type":"string"}}`)}
+	arr := model.Tool{Key: "POST /batch", HTTP: body(true, `{"type":"array","items":{"type":"string"}}`)}
 	out := Prepare(arr, Options{})
 	b := find(t, out, "body")
-	if b.In != model.InBodyRoot || b.UpstreamName != "" || !b.Required {
+	if b.Bind.In != model.InBodyRoot || b.Bind.Upstream != "" || !b.Required {
 		t.Errorf("array body = %+v", b)
 	}
 
 	taken := model.Tool{Key: "POST /batch",
 		Params: []model.Param{p("body", model.InQuery, false, `{"type":"string"}`)},
-		Body:   body(false, `{"type":"string"}`)}
+		HTTP:   body(false, `{"type":"string"}`)}
 	out = Prepare(taken, Options{})
-	if find(t, out, "body_payload").In != model.InBodyRoot {
+	if find(t, out, "body_payload").Bind.In != model.InBodyRoot {
 		t.Error("body_payload should hold the body when 'body' is taken")
 	}
 }
@@ -170,8 +170,8 @@ func TestObjectBodiesThatCannotBeFlattened(t *testing.T) {
 		"degraded":             `{}`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			out := Prepare(model.Tool{Key: "POST /x", Body: body(true, s)}, Options{})
-			if !reflect.DeepEqual(names(out), []string{"body"}) || find(t, out, "body").In != model.InBodyRoot {
+			out := Prepare(model.Tool{Key: "POST /x", HTTP: body(true, s)}, Options{})
+			if !reflect.DeepEqual(names(out), []string{"body"}) || find(t, out, "body").Bind.In != model.InBodyRoot {
 				t.Errorf("params = %+v, want a single bodyRoot param", out.Params)
 			}
 		})
@@ -202,7 +202,7 @@ func TestFixedParamsAreHidden(t *testing.T) {
 			p("X-Api-Version", model.InHeader, true, `{"type":"string"}`),
 			p("q", model.InQuery, false, `{"type":"string"}`),
 		},
-		Body: body(true, `{"type":"object","required":["tenant"],"properties":{"tenant":{"type":"string"},"name":{"type":"string"}}}`)}
+		HTTP: body(true, `{"type":"object","required":["tenant"],"properties":{"tenant":{"type":"string"},"name":{"type":"string"}}}`)}
 	out := Prepare(in, Options{Fixed: []string{"api_key", "x-api-version", "tenant"}})
 
 	for _, n := range []string{"api_key", "X-Api-Version", "tenant"} {
@@ -237,7 +237,7 @@ func TestNamesAreSanitizedAndUnique(t *testing.T) {
 	if !reflect.DeepEqual(names(out), want) {
 		t.Fatalf("names = %v, want %v", names(out), want)
 	}
-	if find(t, out, "filter_status").UpstreamName != "filter[status]" {
+	if find(t, out, "filter_status").Bind.Upstream != "filter[status]" {
 		t.Error("UpstreamName must keep the original name")
 	}
 }
@@ -245,7 +245,7 @@ func TestNamesAreSanitizedAndUnique(t *testing.T) {
 func TestPrepareDoesNotMutateInput(t *testing.T) {
 	in := model.Tool{Key: "PUT /pets/{id}",
 		Params: []model.Param{p("id", model.InPath, true, `{}`), p("Authorization", model.InHeader, false, `{}`)},
-		Body:   body(true, `{"type":"object","properties":{"id":{}}}`)}
+		HTTP:   body(true, `{"type":"object","properties":{"id":{}}}`)}
 	before, _ := json.Marshal(in)
 	_ = Prepare(in, Options{Fixed: []string{"id"}})
 	after, _ := json.Marshal(in)
@@ -255,7 +255,7 @@ func TestPrepareDoesNotMutateInput(t *testing.T) {
 }
 
 func TestPrepareIsDeterministic(t *testing.T) {
-	in := model.Tool{Key: "POST /x", Body: body(true, `{"type":"object","properties":{"z":{},"a":{},"m":{},"b":{}}}`)}
+	in := model.Tool{Key: "POST /x", HTTP: body(true, `{"type":"object","properties":{"z":{},"a":{},"m":{},"b":{}}}`)}
 	first := names(Prepare(in, Options{}))
 	if !reflect.DeepEqual(first, []string{"a", "b", "m", "z"}) {
 		t.Errorf("body fields = %v, want sorted", first)
