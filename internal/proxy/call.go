@@ -51,14 +51,14 @@ func Call(ctx context.Context, doer httpx.Doer, t model.Tool, args map[string]an
 	}
 	resp, err := doer.Do(req)
 	if err != nil {
-		return failure(t, red, describeTransportError(ctx, err))
+		return failure(t, red, DescribeTransportError(ctx, err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	truncated := errors.Is(err, httpx.ErrResponseTruncated)
 	if err != nil && !truncated {
-		return failure(t, red, describeTransportError(ctx, fmt.Errorf("reading response: %w", err)))
+		return failure(t, red, DescribeTransportError(ctx, fmt.Errorf("reading response: %w", err)))
 	}
 
 	res := Result{Status: resp.StatusCode, Bytes: len(body), Truncated: truncated, IsError: resp.StatusCode >= 400}
@@ -80,9 +80,9 @@ func failure(t model.Tool, red *redact.Redactor, msg string) Result {
 	return Result{Text: red.String(t.Name + ": " + msg), IsError: true}
 }
 
-// describeTransportError explains a failed exchange without repeating the
+// DescribeTransportError explains a failed exchange without repeating the
 // request URL, which may carry a credential in its query.
-func describeTransportError(ctx context.Context, err error) string {
+func DescribeTransportError(ctx context.Context, err error) string {
 	var nerr net.Error
 	switch {
 	case errors.Is(err, httpx.ErrBlockedAddress):

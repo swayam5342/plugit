@@ -30,7 +30,8 @@ const secret = "test-token-123"
 func tool(key model.OpKey, name string, params ...model.Param) model.Tool {
 	return schema.Prepare(model.Tool{
 		Key: key, Name: name, HTTP: &model.HTTPOp{Method: key.Method(), Path: key.Path()},
-		Description: "desc of " + name, Safety: model.SafetyForMethod(key.Method()), Params: params,
+		Description: "desc of " + name, Safety: model.SafetyForMethod(key.Method()),
+		Idempotent: model.IdempotentForMethod(key.Method()), Params: params,
 	}, schema.Options{})
 }
 

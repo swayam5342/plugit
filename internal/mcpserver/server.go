@@ -28,9 +28,12 @@ import (
 
 	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/httpx"
+	"github.com/swayam5342/plugit/internal/invoke"
 	"github.com/swayam5342/plugit/internal/jsonpick"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/policy"
+	"github.com/swayam5342/plugit/internal/protocol"
+	"github.com/swayam5342/plugit/internal/protocol/rest"
 	"github.com/swayam5342/plugit/internal/proxy"
 	"github.com/swayam5342/plugit/internal/redact"
 	"github.com/swayam5342/plugit/internal/schema"
@@ -53,6 +56,7 @@ type Config struct {
 	Tools    []Tool
 	Mode     policy.Mode
 	Target   proxy.Target
+	Proto    protocol.Protocol // the protocol that serves these tools; defaults to REST
 	Doer     httpx.Doer
 	Redactor *redact.Redactor
 	Logger   *slog.Logger
@@ -78,6 +82,9 @@ func New(cfg Config) *mcp.Server {
 	}
 	if cfg.Redactor == nil {
 		cfg.Redactor = redact.New(redact.Options{Secrets: cfg.Target.SecretValues()})
+	}
+	if cfg.Proto == nil {
+		cfg.Proto = rest.REST{Target: cfg.Target}
 	}
 	srv := mcp.NewServer(
 		&mcp.Implementation{Name: cfg.Name, Version: cfg.Version},
@@ -115,10 +122,7 @@ func annotations(t model.Tool) *mcp.ToolAnnotations {
 	if t.Safety == model.Destructive {
 		a.DestructiveHint = &tr
 	}
-	switch strings.ToUpper(t.Key.Method()) {
-	case "GET", "HEAD", "OPTIONS", "PUT", "DELETE":
-		a.IdempotentHint = true
-	}
+	a.IdempotentHint = t.Idempotent
 	return a
 }
 
@@ -198,7 +202,10 @@ func (h *handler) handle(ctx context.Context, req *mcp.CallToolRequest) (res *mc
 		}
 	}
 
-	r := proxy.Call(ctx, h.cfg.Doer, h.tool.Tool, args, h.cfg.Target, h.cfg.Redactor, h.tool.Fields)
+	r := invoke.Perform(ctx, invoke.Deps{
+		Proto: h.cfg.Proto, Doer: h.cfg.Doer, Target: h.cfg.Target,
+		Endpoint: h.cfg.Target.BaseURL, Redactor: h.cfg.Redactor,
+	}, h.tool.Tool, args, h.tool.Fields)
 	h.log(name, start, r.Status, r.IsError, "", "bytes", r.Bytes, "truncated", r.Truncated)
 	rec.Status, rec.Bytes = r.Status, r.Bytes
 	switch {

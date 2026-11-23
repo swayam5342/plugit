@@ -18,10 +18,12 @@ import (
 	"golang.org/x/term"
 
 	"github.com/swayam5342/plugit/internal/httpx"
+	"github.com/swayam5342/plugit/internal/invoke"
 	"github.com/swayam5342/plugit/internal/isolate"
 	"github.com/swayam5342/plugit/internal/mcpserver"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/policy"
+	"github.com/swayam5342/plugit/internal/protocol/rest"
 	"github.com/swayam5342/plugit/internal/proxy"
 	"github.com/swayam5342/plugit/internal/redact"
 	"github.com/swayam5342/plugit/internal/schema"
@@ -172,7 +174,11 @@ func callTool(ctx context.Context, a *active, st mcpserver.Tool, kv []string, re
 		return proxy.Result{}, fmt.Errorf("%s: %w", t.Name, err)
 	}
 	rec := &printingDoer{next: a.doer, out: reqOut, red: a.red}
-	r := proxy.Call(ctx, rec, t, decoded, a.target, a.red, st.Fields)
+	ir := invoke.Perform(ctx, invoke.Deps{
+		Proto: rest.REST{Target: a.target}, Doer: rec, Target: a.target,
+		Endpoint: a.target.BaseURL, Redactor: a.red,
+	}, t, decoded, st.Fields)
+	r := proxy.Result{Text: ir.Text, IsError: ir.IsError, Status: ir.Status, Bytes: ir.Bytes, Truncated: ir.Truncated}
 	if !rec.printed {
 		if _, err := fmt.Fprintln(reqOut, "→ (no request sent)"); err != nil {
 			return r, err
