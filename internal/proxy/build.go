@@ -112,7 +112,23 @@ var placeholderRe = regexp.MustCompile(`\{[^{}/]*\}`)
 // Build creates the request for one call. args are decoded arguments (see
 // schema.DecodeArgs) and should already have passed schema validation; Build
 // re-checks everything it relies on.
+// Build routes arguments and fixed params into a request and attaches the
+// credential (origin-bound, T8). It is Encode followed by AttachAuth.
 func Build(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*http.Request, error) {
+	req, err := Encode(ctx, t, args, tg)
+	if err != nil {
+		return nil, err
+	}
+	if err := AttachAuth(req, tg); err != nil {
+		return nil, err
+	}
+	return req, nil
+}
+
+// Encode routes arguments and fixed params into an *http.Request WITHOUT any
+// credential (SPEC §3.7 P5: a protocol's Encode never attaches credentials;
+// invoke calls AttachAuth afterwards).
+func Encode(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*http.Request, error) {
 	if err := checkBase(tg.BaseURL); err != nil {
 		return nil, err
 	}
@@ -257,9 +273,6 @@ func Build(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*
 	req.Header.Set("Accept", "application/json, */*;q=0.8")
 	if tg.UserAgent != "" {
 		req.Header.Set("User-Agent", tg.UserAgent)
-	}
-	if err := attachAuth(req, tg); err != nil {
-		return nil, err
 	}
 	return req, nil
 }
@@ -410,7 +423,9 @@ func hasControl(s string) bool {
 	return strings.IndexFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0
 }
 
-func attachAuth(req *http.Request, tg Target) error {
+// AttachAuth attaches the resolved credential, only when the request origin
+// matches the pinned base URL (T8).
+func AttachAuth(req *http.Request, tg Target) error {
 	a := tg.Auth
 	if a.Type == "" || a.Type == AuthNone {
 		return nil
