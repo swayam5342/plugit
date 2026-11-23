@@ -18,16 +18,29 @@ func NewOpKey(method, path string) OpKey {
 	return OpKey(strings.ToUpper(method) + " " + path)
 }
 
-// Method returns the HTTP method part of k.
+// Method returns the HTTP method part of a REST key, or "" for a non-REST
+// key (callers use Tool.HTTP once the protocol is known).
 func (k OpKey) Method() string {
-	m, _, _ := strings.Cut(string(k), " ")
+	m, p, ok := strings.Cut(string(k), " ")
+	if !ok || !isRESTForm(m, p) {
+		return ""
+	}
 	return m
 }
 
-// Path returns the path template part of k.
+// Path returns the path-template part of a REST key, or "" for a non-REST key.
 func (k OpKey) Path() string {
-	_, p, _ := strings.Cut(string(k), " ")
+	m, p, ok := strings.Cut(string(k), " ")
+	if !ok || !isRESTForm(m, p) {
+		return ""
+	}
 	return p
+}
+
+// isRESTForm reports whether "<m> <p>" is a REST key: an upper-case method
+// and a path starting with "/" (SPEC §8.1.4).
+func isRESTForm(m, p string) bool {
+	return m != "" && m == strings.ToUpper(m) && strings.HasPrefix(p, "/")
 }
 
 // Safety classifies what calling a tool can do.
