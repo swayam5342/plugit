@@ -103,8 +103,8 @@ type pmCollection struct {
 	Auth     json.RawMessage `json:"auth"`
 }
 
-// isPostman reports whether data looks like a Postman v2 collection.
-func isPostman(data []byte) bool {
+// IsPostman reports whether data looks like a Postman v2 collection.
+func IsPostman(data []byte) bool {
 	if !bytes.Contains(data, []byte(postmanSchemaURL)) {
 		return false
 	}
@@ -118,11 +118,11 @@ func isPostman(data []byte) bool {
 
 var postmanMethods = []string{"GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE"}
 
-// parsePostman converts a Postman v2.0/v2.1 collection into a manifest.
+// ParsePostman converts a Postman v2.0/v2.1 collection into a manifest.
 // Requests become tools, top-level folders become tags, and the
 // collection's base URL variables are offered as servers (the user still
 // pins base_url, T3). Collection auth is ignored: plugit's auth applies.
-func parsePostman(data []byte, opts Options) (*model.Manifest, error) {
+func ParsePostman(data []byte, opts Options) (*model.Manifest, error) {
 	var col pmCollection
 	if err := json.Unmarshal(data, &col); err != nil {
 		return nil, fmt.Errorf("parsing Postman collection: %w", err)

@@ -59,7 +59,7 @@ const petsCollection = `{
 }`
 
 func TestParsePostman(t *testing.T) {
-	m := parse(t, petsCollection, Options{})
+	m := parsePM(t, petsCollection, Options{})
 	if m.SpecVersion != "postman-2.1" || m.Title != "Pets API" {
 		t.Errorf("header = %q %q", m.SpecVersion, m.Title)
 	}
@@ -129,7 +129,7 @@ func TestParsePostman(t *testing.T) {
 func TestParsePostman20(t *testing.T) {
 	src := `{"info": {"name": "Old", "schema": "https://schema.getpostman.com/json/collection/v2.0.0/collection.json"},
 	  "item": [{"name": "Find", "request": {"method": "get", "url": "https://api.example.test/things/:id/parts?q=x"}}]}`
-	m := parse(t, src, Options{})
+	m := parsePM(t, src, Options{})
 	if m.SpecVersion != "postman-2.0" || !reflect.DeepEqual(m.Endpoints, []string{"https://api.example.test"}) {
 		t.Errorf("version %q servers %v", m.SpecVersion, m.Endpoints)
 	}
@@ -146,7 +146,7 @@ func TestParsePostmanLimits(t *testing.T) {
 		deep = `{"name":"f","item":[` + deep + `]}`
 	}
 	src := `{"info":{"name":"D","schema":"https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},"item":[` + deep + `]}`
-	m := parse(t, src, Options{})
+	m := parsePM(t, src, Options{})
 	if len(m.Tools) != 0 || !containsWarning(m, "nested") {
 		t.Errorf("deep nesting: %d tools, warnings %v", len(m.Tools), m.Warnings)
 	}
@@ -156,7 +156,7 @@ func TestParsePostmanLimits(t *testing.T) {
 		items = append(items, `{"name":"r","request":{"method":"GET","url":"https://x.example.test/r`+strings.Repeat("a", i%7)+`/`+itoa(i)+`"}}`)
 	}
 	src = `{"info":{"name":"W","schema":"https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},"item":[` + strings.Join(items, ",") + `]}`
-	m = parse(t, src, Options{})
+	m = parsePM(t, src, Options{})
 	if len(m.Tools) > maxPostmanItems || !containsWarning(m, "requests") {
 		t.Errorf("item cap: %d tools, warnings %v", len(m.Tools), m.Warnings)
 	}
@@ -165,4 +165,21 @@ func TestParsePostmanLimits(t *testing.T) {
 func itoa(i int) string {
 	b, _ := json.Marshal(i)
 	return string(b)
+}
+
+func parsePM(t *testing.T, src string, opts Options) *model.Manifest {
+	t.Helper()
+	m, err := ParsePostman([]byte(src), opts)
+	if err != nil {
+		t.Fatalf("ParsePostman: %v", err)
+	}
+	return m
+}
+
+func TestOpenAPIParseRejectsPostman(t *testing.T) {
+	// The Postman sniff moved to the ingest dispatcher, so the OpenAPI parser
+	// no longer special-cases a collection: it just fails to build a document.
+	if _, err := Parse([]byte(petsCollection), Options{}); err == nil {
+		t.Error("Parse on a Postman collection should error now that the sniff moved to ingest")
+	}
 }

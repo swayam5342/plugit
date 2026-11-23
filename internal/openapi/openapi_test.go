@@ -17,11 +17,17 @@ import (
 	"github.com/swayam5342/plugit/internal/model"
 )
 
+// parse mimics the ingest dispatcher for tests: a Postman collection goes to
+// ParsePostman, everything else to Parse.
 func parse(t *testing.T, src string, opts Options) *model.Manifest {
 	t.Helper()
-	m, err := Parse([]byte(src), opts)
+	p := Parse
+	if IsPostman([]byte(src)) {
+		p = ParsePostman
+	}
+	m, err := p([]byte(src), opts)
 	if err != nil {
-		t.Fatalf("Parse: %v", err)
+		t.Fatalf("parse: %v", err)
 	}
 	return m
 }
