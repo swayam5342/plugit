@@ -64,6 +64,17 @@ func typeInto(m *TryIt, s string) {
 
 func ctrlS() tea.KeyPressMsg { return tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl} }
 
+func TestTryItUsesProtocolDescribe(t *testing.T) {
+	m := NewTryIt(TryInput{
+		API: "pets", Tool: tryTool(), Mode: policy.ReadOnly,
+		Describe: func(model.Tool) (string, string) { return "QRY", "svc.v1/Get" },
+	})
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if v := tryView(m); !strings.Contains(v, "QRY") || !strings.Contains(v, "svc.v1/Get") {
+		t.Errorf("try-it subtitle should show the protocol badge/target from Describe:\n%s", v)
+	}
+}
+
 func TestTryItForm(t *testing.T) {
 	m, _ := newTryTest("", TryResult{})
 	v := tryView(m)

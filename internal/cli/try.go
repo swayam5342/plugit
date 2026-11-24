@@ -119,7 +119,8 @@ func tryTool(ctx context.Context, s serveSettings, toolName string, f tryFlags, 
 			}
 		}
 		return d.form(ctx, tui.TryInput{API: a.cfg.Name, Tool: t, Mode: a.cfg.PolicyMode(), Confirm: confirm,
-			Send: func(ctx context.Context, values map[string]string) tui.TryResult { return formSend(ctx, a, st, values) }})
+			Describe: protoDescribe(model.Protocol(a.cfg.Protocol)),
+			Send:     func(ctx context.Context, values map[string]string) tui.TryResult { return formSend(ctx, a, st, values) }})
 	}
 
 	switch dec.Decision {

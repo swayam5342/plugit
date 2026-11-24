@@ -54,6 +54,7 @@ type pickInput struct {
 	mode     policy.Mode
 	selected config.Toolset
 	lint     func(config.Toolset) []lint.Finding
+	proto    model.Protocol
 }
 
 type addDeps struct {
@@ -174,7 +175,7 @@ func addAPI(ctx context.Context, s addSettings, d addDeps) error {
 	} else {
 		draft := config.API{Name: s.name, Endpoint: baseURL, Prefix: s.prefix, Auth: auth, Fixed: fixed, Policy: config.Policy{Mode: string(s.mode)}}
 		res, err := d.pick(ctx, pickInput{api: s.name, tools: prepared, prefix: s.prefix, mode: s.mode, selected: initialSelection(prepared, s.mode),
-			lint: pickerLint(draft, defaultToolset, m.Tools)})
+			lint: pickerLint(draft, defaultToolset, m.Tools), proto: m.Protocol})
 		if errors.Is(err, tui.ErrCancelled) {
 			_, err := fmt.Fprintln(d.out, "Cancelled; nothing saved.")
 			return err

@@ -23,6 +23,10 @@ type TryInput struct {
 	Mode    policy.Mode
 	Confirm string
 	Send    func(ctx context.Context, args map[string]string) TryResult
+	// Describe returns the tool's per-protocol badge and target for the
+	// subtitle (SPEC §2.3). When nil it falls back to the REST method and
+	// path; the cli layer injects protocol.For(..).Describe.
+	Describe func(model.Tool) (badge, target string)
 }
 
 // TryResult is one call's outcome, already redacted.
@@ -214,7 +218,8 @@ func (m *TryIt) View() tea.View {
 	w := max(m.width, 20)
 	t := m.in.Tool
 	title := th.Accent.Render("✦ ") + th.Title.Render("plugit") + th.Dim.Render(" · try · ") + th.Title.Render(safe(t.Name))
-	sub := th.method(t.Key.Method()).Render(safe(t.Key.Method())) + " " + safe(t.Key.Path()) + th.Dim.Render("  "+safe(t.Description))
+	badge, target := describe(m.in.Describe, t)
+	sub := th.method(badge).Render(safe(badge)) + " " + safe(target) + th.Dim.Render("  "+safe(t.Description))
 	lines := th.box(w, th.Border, spread(title, th.pill(m.in.Mode), w-4), sub)
 	lines = append(lines, "")
 

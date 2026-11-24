@@ -168,7 +168,8 @@ func (p *Picker) detailView() tea.View {
 	w := max(p.width, 20)
 	t := p.finalTool(p.detail.tool)
 	title := th.Accent.Render("✦ ") + th.Title.Render("plugit") + th.Dim.Render(" · tool · ") + th.Title.Render(safe(t.Name))
-	sub := th.method(t.Key.Method()).Render(safe(t.Key.Method())) + " " + safe(t.Key.Path())
+	badge, target := describe(p.in.Describe, t)
+	sub := th.method(badge).Render(safe(badge)) + " " + safe(target)
 	lines := th.box(w, th.Border, spread(title, th.pill(p.policyMode), w-4), sub)
 
 	body := p.detailBody(w)
