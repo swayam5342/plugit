@@ -174,8 +174,8 @@ func callTool(ctx context.Context, a *active, st mcpserver.Tool, kv []string, re
 	}
 	rec := &printingDoer{next: a.doer, out: reqOut, red: a.red}
 	ir := invoke.Perform(ctx, invoke.Deps{
-		Proto: a.proto, Doer: rec, Target: a.target,
-		Endpoint: a.target.BaseURL, Redactor: a.red,
+		Proto: a.proto, Doer: rec, Cred: a.cred,
+		Endpoint: a.endpoint, Redactor: a.red,
 	}, t, decoded, st.Fields)
 	r := ir
 	if !rec.printed {

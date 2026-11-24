@@ -293,10 +293,12 @@ func TestBuildTargetFixedCookieLocation(t *testing.T) {
 		return "", false
 	}}}
 	u, _ := url.Parse("https://api.example.test")
-	tg, _, err := buildTarget(cfg, u, d, "ua")
+	fx, _, err := buildFixedTarget(cfg, d.resolver)
 	if err != nil {
-		t.Fatalf("buildTarget: %v", err)
+		t.Fatalf("buildFixedTarget: %v", err)
 	}
+	fx.userAgent = "ua"
+	tg := restTargetFrom(fx, u)
 	if len(tg.Fixed) != 1 || tg.Fixed[0].In != model.InCookie {
 		t.Errorf("fixed cookie location = %+v, want In=InCookie", tg.Fixed)
 	}
@@ -480,4 +482,28 @@ func (b bearerRT) RoundTrip(r *http.Request) (*http.Response, error) {
 	r = r.Clone(r.Context())
 	r.Header.Set("Authorization", "Bearer "+b.token)
 	return http.DefaultTransport.RoundTrip(r)
+}
+
+// A configured credential resolves to a protocol-neutral invoke.Credential,
+// and its hidden name is reported; oauth2 resolves to a bearer token source
+// whose client secret is redacted.
+func TestBuildCredential(t *testing.T) {
+	d := runDeps{resolver: &secrets.Resolver{LookupEnv: func(k string) (string, bool) {
+		if k == "PETS_KEY" {
+			return "test-token-123", true
+		}
+		return "", false
+	}}}
+	cfg := &config.API{Name: "pets", Protocol: "rest",
+		Auth: config.Auth{Type: config.AuthHeader, Header: "X-Api-Key", Secret: "env:PETS_KEY"}}
+	cred, hidden, err := buildCredential(cfg, d.resolver, d)
+	if err != nil {
+		t.Fatalf("buildCredential: %v", err)
+	}
+	if cred.Type != "header" || cred.Header != "X-Api-Key" || cred.Secret != "test-token-123" {
+		t.Errorf("cred = %+v", cred)
+	}
+	if len(hidden) != 1 || hidden[0] != "X-Api-Key" {
+		t.Errorf("hidden = %v", hidden)
+	}
 }

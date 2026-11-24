@@ -21,7 +21,6 @@ import (
 	"github.com/swayam5342/plugit/internal/jsonpick"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/protocol"
-	"github.com/swayam5342/plugit/internal/protocol/rest"
 	"github.com/swayam5342/plugit/internal/redact"
 )
 
@@ -30,8 +29,8 @@ import (
 type Deps struct {
 	Proto    protocol.Protocol
 	Doer     httpx.Doer
-	Target   rest.Target // credential + fixed params for AttachAuth
-	Endpoint *url.URL    // pinned
+	Cred     Credential // attached only to requests for Endpoint's origin
+	Endpoint *url.URL   // pinned
 	Redactor *redact.Redactor
 	Timeout  time.Duration
 }
@@ -47,19 +46,19 @@ type Result struct {
 }
 
 // Perform runs steps 5–10 of the call lifecycle for one validated call: inject
-// nothing more (args are already validated and fixed values live in Target),
+// nothing more (args are already validated and fixed values live in the protocol),
 // Encode (no credential), AttachAuth, httpx.Do, Decode, then shape + redact.
 // It never returns a Go error; every failure is an isError Result whose text
 // starts with the tool name.
 func Perform(ctx context.Context, d Deps, t model.Tool, args map[string]any, pick *jsonpick.Picker) Result {
 	red := d.Redactor
-	tg := d.Target
-	if tg.Auth.Token != nil {
-		tok, err := tg.Auth.Token(ctx)
+	cred := d.Cred
+	if cred.Token != nil {
+		tok, err := cred.Token(ctx)
 		if err != nil {
 			return failure(t, red, transportCode, "couldn't get an access token: "+err.Error())
 		}
-		tg.Auth.Secret = tok
+		cred.Secret = tok
 		red = red.With(tok)
 	}
 
@@ -67,7 +66,7 @@ func Perform(ctx context.Context, d Deps, t model.Tool, args map[string]any, pic
 	if err != nil {
 		return failure(t, red, "", "invalid arguments: "+err.Error())
 	}
-	if err := attachAuth(req, tg); err != nil {
+	if err := attachAuth(req, cred, d.Endpoint); err != nil {
 		return failure(t, red, transportCode, describeTransportError(ctx, err))
 	}
 
@@ -82,8 +81,8 @@ func Perform(ctx context.Context, d Deps, t model.Tool, args map[string]any, pic
 	if err != nil && !truncated {
 		return failure(t, red, transportCode, describeTransportError(ctx, fmt.Errorf("reading response: %w", err)))
 	}
-	if resp.StatusCode == http.StatusUnauthorized && tg.Auth.Unauthorized != nil {
-		tg.Auth.Unauthorized()
+	if resp.StatusCode == http.StatusUnauthorized && cred.Unauthorized != nil {
+		cred.Unauthorized()
 	}
 
 	res := d.Proto.Decode(protocol.Call{Tool: t}, resp, body, truncated)

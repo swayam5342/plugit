@@ -17,6 +17,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/swayam5342/plugit/internal/invoke"
+
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
@@ -109,7 +111,7 @@ func serveAPI(ctx context.Context, s serveSettings, d runDeps) error {
 	}
 	logger.Info("plugit serve serving",
 		"api", a.cfg.Name, "toolset", a.toolset, "selected", len(a.tools), "listed", listed, "mode", a.cfg.Policy.Mode,
-		"endpoint", a.target.BaseURL.String())
+		"endpoint", a.endpoint.String())
 	var apiLimit *policy.Limiter
 	if r, err := policy.ParseRate(a.cfg.Policy.RateLimit); err == nil {
 		apiLimit = policy.NewLimiter(r, nil)
@@ -124,7 +126,8 @@ func serveAPI(ctx context.Context, s serveSettings, d runDeps) error {
 		Version:  d.info.withDefaults().Version,
 		Tools:    a.tools,
 		Mode:     a.cfg.PolicyMode(),
-		Target:   a.target,
+		Cred:     a.cred,
+		Endpoint: a.endpoint,
 		Proto:    a.proto,
 		Doer:     a.doer,
 		Redactor: a.red,
@@ -207,13 +210,14 @@ func openCallLog(ctx context.Context, p config.Paths, a *active, logger *slog.Lo
 }
 
 type active struct {
-	cfg     *config.API
-	toolset string
-	tools   []mcpserver.Tool
-	target  rest.Target
-	proto   protocol.Protocol
-	red     *redact.Redactor
-	doer    httpx.Doer
+	cfg      *config.API
+	toolset  string
+	tools    []mcpserver.Tool
+	cred     invoke.Credential
+	endpoint *url.URL
+	proto    protocol.Protocol
+	red      *redact.Redactor
+	doer     httpx.Doer
 }
 
 // resolveProto picks the serving protocol from the registry (SPEC §3.7 P5) and
@@ -273,11 +277,18 @@ func loadActive(ctx context.Context, s serveSettings, d runDeps, logger *slog.Lo
 	if err != nil {
 		return nil, fmt.Errorf("endpoint: %w", err)
 	}
-	target, hidden, err := buildTarget(cfg, baseURL, d, "plugit/"+d.info.withDefaults().Version)
+	cred, credHidden, err := buildCredential(cfg, d.resolver, d)
 	if err != nil {
 		return nil, err
 	}
-	proto, err := resolveProto(m.Protocol, target)
+	fx, fixedHidden, err := buildFixedTarget(cfg, d.resolver)
+	if err != nil {
+		return nil, err
+	}
+	fx.userAgent = "plugit/" + d.info.withDefaults().Version
+	tg := restTargetFrom(fx, baseURL)
+	hidden := append(credHidden, fixedHidden...)
+	proto, err := resolveProto(m.Protocol, tg)
 	if err != nil {
 		return nil, err
 	}
@@ -293,13 +304,14 @@ func loadActive(ctx context.Context, s serveSettings, d runDeps, logger *slog.Lo
 		tools = append(tools, mt)
 	}
 	return &active{
-		cfg:     cfg,
-		toolset: tsName,
-		tools:   tools,
-		target:  target,
-		proto:   proto,
+		cfg:      cfg,
+		toolset:  tsName,
+		tools:    tools,
+		cred:     cred,
+		endpoint: baseURL,
+		proto:    proto,
 		red: redact.New(redact.Options{
-			Secrets:           target.SecretValues(),
+			Secrets:           append(cred.SecretValues(), tg.SecretValues()...),
 			SecretHeaders:     hidden,
 			SecretQueryParams: hidden,
 		}),
@@ -379,35 +391,62 @@ func parserID(info BuildInfo) string {
 	return id
 }
 
-// buildTarget resolves the credential and fixed params. It returns the
-// names to hide from the model and to redact by name.
-func buildTarget(cfg *config.API, baseURL *url.URL, d runDeps, userAgent string) (rest.Target, []string, error) {
-	res := d.resolver
-	tg := rest.Target{BaseURL: baseURL, UserAgent: userAgent}
-	var hidden []string
+// resolvedFixed is the protocol-neutral result of resolving the configured
+// fixed params: values are resolved, locations are the config strings
+// ("query", "header", "cookie"), and a protocol maps them to its own Target.
+type resolvedFixed struct {
+	items     []fixedItem
+	userAgent string
+}
 
+// fixedItem is one resolved fixed parameter. In is the P3 location string.
+type fixedItem struct {
+	Name, In, Value string
+	Secret          bool
+}
+
+// restTargetFrom maps resolved fixed params to a REST target pinned to baseURL.
+func restTargetFrom(fx resolvedFixed, baseURL *url.URL) rest.Target {
+	tg := rest.Target{BaseURL: baseURL, UserAgent: fx.userAgent}
+	for _, it := range fx.items {
+		in := model.InQuery
+		switch it.In {
+		case "header":
+			in = model.InHeader
+		case "cookie":
+			in = model.InCookie
+		}
+		tg.Fixed = append(tg.Fixed, rest.Fixed{Name: it.Name, In: in, Value: it.Value, Secret: it.Secret})
+	}
+	return tg
+}
+
+// buildCredential resolves the configured credential. It returns the names to
+// hide from the model and to redact by name.
+func buildCredential(cfg *config.API, res *secrets.Resolver, d runDeps) (invoke.Credential, []string, error) {
+	var cred invoke.Credential
+	var hidden []string
 	a := cfg.Auth
 	switch a.Type {
 	case config.AuthNone:
 	case config.AuthOAuth2:
 		oc, err := oauthConfig(cfg, res)
 		if err != nil {
-			return tg, nil, err
+			return cred, nil, err
 		}
 		store := keyringStore{get: res.Keyring, set: d.keyring, api: cfg.Name}
 		src := oauth.NewSource(oc, oauthDoer(cfg), store, nil)
-		tg.Auth = rest.Auth{Type: rest.AuthBearer, Token: src.Token, Unauthorized: src.Invalidate}
-		tg.Extra = append(tg.Extra, oc.ClientSecret)
+		cred = invoke.Credential{Type: "bearer", Token: src.Token, Unauthorized: src.Invalidate, Extra: []string{oc.ClientSecret}}
 	default:
 		ref, err := secrets.ParseSecretRef(a.Secret)
 		if err != nil {
-			return tg, nil, fmt.Errorf("auth.secret: %w", err)
+			return cred, nil, fmt.Errorf("auth.secret: %w", err)
 		}
 		v, err := res.Resolve(ref)
 		if err != nil {
-			return tg, nil, fmt.Errorf("auth.secret: %w", err)
+			return cred, nil, fmt.Errorf("auth.secret: %w", err)
 		}
-		tg.Auth = rest.Auth{Type: rest.AuthType(a.Type), Header: a.Header, Param: a.Param, Secret: v}
+		cred = invoke.Credential{Type: string(a.Type), Header: a.Header, Param: a.Param, Secret: v}
 		switch a.Type {
 		case config.AuthHeader:
 			hidden = append(hidden, a.Header)
@@ -415,24 +454,25 @@ func buildTarget(cfg *config.API, baseURL *url.URL, d runDeps, userAgent string)
 			hidden = append(hidden, a.Param)
 		}
 	}
+	return cred, hidden, nil
+}
+
+// buildFixedTarget resolves the configured fixed params. It returns the names
+// to hide from the model and to redact by name.
+func buildFixedTarget(cfg *config.API, res *secrets.Resolver) (resolvedFixed, []string, error) {
+	var fx resolvedFixed
+	var hidden []string
 	for i, f := range cfg.Fixed {
 		ref, err := secrets.ParseRef(f.Value)
 		if err != nil {
-			return tg, nil, fmt.Errorf("fixed[%d].value: %w", i, err)
+			return fx, nil, fmt.Errorf("fixed[%d].value: %w", i, err)
 		}
 		v, err := res.Resolve(ref)
 		if err != nil {
-			return tg, nil, fmt.Errorf("fixed %s: %w", f.Name, err)
+			return fx, nil, fmt.Errorf("fixed %s: %w", f.Name, err)
 		}
-		in := model.InQuery
-		switch f.In {
-		case "header":
-			in = model.InHeader
-		case "cookie":
-			in = model.InCookie
-		}
-		tg.Fixed = append(tg.Fixed, rest.Fixed{Name: f.Name, In: in, Value: v, Secret: ref.IsSecret()})
+		fx.items = append(fx.items, fixedItem{Name: f.Name, In: f.In, Value: v, Secret: ref.IsSecret()})
 		hidden = append(hidden, f.Name)
 	}
-	return tg, hidden, nil
+	return fx, hidden, nil
 }

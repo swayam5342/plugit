@@ -27,7 +27,6 @@ import (
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/naming"
 	"github.com/swayam5342/plugit/internal/policy"
-	"github.com/swayam5342/plugit/internal/protocol/rest"
 	"github.com/swayam5342/plugit/internal/redact"
 	"github.com/swayam5342/plugit/internal/schema"
 	"github.com/swayam5342/plugit/internal/secrets"
@@ -465,14 +464,14 @@ func runServe(ctx context.Context, s runSettings, d runDeps) error {
 		return err
 	}
 
-	var fixed []rest.Fixed
+	var fixed resolvedFixed
 	var hidden []string
 	for _, h := range headers {
 		v, err := d.resolver.Resolve(h.ref)
 		if err != nil {
 			return fmt.Errorf("--header %s: %w", h.name, err)
 		}
-		fixed = append(fixed, rest.Fixed{Name: h.name, In: model.InHeader, Value: v, Secret: true})
+		fixed.items = append(fixed.items, fixedItem{Name: h.name, In: "header", Value: v, Secret: true})
 		hidden = append(hidden, h.name)
 	}
 	for _, f := range fixedFlags {
@@ -480,7 +479,7 @@ func runServe(ctx context.Context, s runSettings, d runDeps) error {
 		if err != nil {
 			return fmt.Errorf("--fixed %s: %w", f.name, err)
 		}
-		fixed = append(fixed, rest.Fixed{Name: f.name, In: model.InQuery, Value: v, Secret: f.ref.IsSecret()})
+		fixed.items = append(fixed.items, fixedItem{Name: f.name, In: "query", Value: v, Secret: f.ref.IsSecret()})
 		hidden = append(hidden, f.name)
 	}
 
@@ -489,7 +488,8 @@ func runServe(ctx context.Context, s runSettings, d runDeps) error {
 		tools = append(tools, mcpserver.Tool{Tool: schema.Prepare(t, schema.Options{Fixed: hidden})})
 	}
 
-	target := rest.Target{BaseURL: baseURL, Fixed: fixed, UserAgent: "plugit/" + d.info.withDefaults().Version}
+	fixed.userAgent = "plugit/" + d.info.withDefaults().Version
+	target := restTargetFrom(fixed, baseURL)
 	proto, err := resolveProto(m.Protocol, target)
 	if err != nil {
 		return err
@@ -509,7 +509,7 @@ func runServe(ctx context.Context, s runSettings, d runDeps) error {
 		Version:  d.info.withDefaults().Version,
 		Tools:    tools,
 		Mode:     s.mode,
-		Target:   target,
+		Endpoint: baseURL,
 		Proto:    proto,
 		Doer:     httpx.NewClient(httpx.Options{AllowPrivate: s.allowPrivate, Timeout: s.timeout}),
 		Redactor: red,

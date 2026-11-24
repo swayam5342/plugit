@@ -288,7 +288,7 @@ func TestBuildRejectsBaseURLWithUserinfoOrQuery(t *testing.T) {
 
 func TestBuildErrorsNeverContainSecrets(t *testing.T) {
 	tl := model.Tool{HTTP: &model.HTTPOp{Method: "GET", Path: "/pets/{petId}"}, Params: []model.Param{param("petId", model.InPath, true)}}
-	_, err := build(t, tl, `{"petId": ".."}`, Target{Auth: Auth{Type: AuthBearer, Secret: "test-token-123"}, Fixed: []Fixed{{Name: "k", Value: "fixed-secret-456"}}})
+	_, err := build(t, tl, `{"petId": ".."}`, Target{Fixed: []Fixed{{Name: "k", Value: "fixed-secret-456"}}})
 	if err == nil {
 		t.Fatal("expected an error")
 	}

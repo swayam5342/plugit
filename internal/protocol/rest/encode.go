@@ -35,28 +35,6 @@ var (
 	ErrBuild       = errors.New("cannot build request")
 )
 
-// AuthType is how the credential is attached.
-type AuthType string
-
-// Auth types (SPEC §3.6).
-const (
-	AuthNone   AuthType = "none"
-	AuthBearer AuthType = "bearer"
-	AuthHeader AuthType = "header"
-	AuthQuery  AuthType = "query"
-	AuthBasic  AuthType = "basic"
-)
-
-// Auth is a resolved credential.
-type Auth struct {
-	Type         AuthType
-	Header       string
-	Param        string
-	Secret       string
-	Token        func(context.Context) (string, error)
-	Unauthorized func()
-}
-
 // Fixed is a resolved fixed parameter. If the tool declares a parameter with
 // this name, the spec's location wins; otherwise In is used (query when
 // unset).
@@ -70,29 +48,20 @@ type Fixed struct {
 // Target is everything about the upstream that isn't per call.
 type Target struct {
 	BaseURL   *url.URL
-	Auth      Auth
 	Fixed     []Fixed
 	UserAgent string
 	Extra     []string
 }
 
-// SecretValues lists every value that must be redacted wherever it appears
-// (SPEC T11): the credential, the password part of a Basic credential on its
-// own (an upstream may echo just that), and secret fixed values. literal:
+// SecretValues lists the target's values that must be redacted wherever they
+// appear (SPEC T11): secret fixed values and Extra. The credential's own values
+// come from invoke.Credential.SecretValues. literal:
 // fixed values are not secrets.
 func (tg Target) SecretValues() []string {
 	var out []string
 	add := func(s string) {
 		if s != "" {
 			out = append(out, s)
-		}
-	}
-	if tg.Auth.Type != AuthNone && tg.Auth.Type != "" {
-		add(tg.Auth.Secret)
-		if tg.Auth.Type == AuthBasic {
-			if _, pass, ok := strings.Cut(tg.Auth.Secret, ":"); ok {
-				add(pass)
-			}
 		}
 	}
 	for _, f := range tg.Fixed {
@@ -233,9 +202,6 @@ func Encode(ctx context.Context, t model.Tool, args map[string]any, tg Target) (
 	}
 
 	u := joinURL(tg.BaseURL, path)
-	if tg.Auth.Type == AuthQuery && tg.Auth.Param != "" {
-		query.Del(tg.Auth.Param)
-	}
 	u.RawQuery = query.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, strings.ToUpper(t.HTTP.Method), u.String(), bytesReader(body))
