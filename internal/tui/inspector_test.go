@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -18,7 +19,7 @@ var ti0 = time.Date(2026, 11, 12, 18, 0, 0, 0, time.UTC)
 func logCall(id int64, tool string, outcome store.Outcome, status int, ms int) store.Call {
 	return store.Call{
 		ID: id, Time: ti0.Add(time.Duration(id) * time.Second), API: "pets", Toolset: "default",
-		Tool: tool, Op: "GET /" + tool, Outcome: outcome, Status: status,
+		Tool: tool, Op: "GET /" + tool, Outcome: outcome, Code: fmt.Sprintf("HTTP %d", status),
 		Duration: time.Duration(ms) * time.Millisecond, Bytes: 1200,
 	}
 }
@@ -40,7 +41,7 @@ func TestInspectorShowsCalls(t *testing.T) {
 	}
 	_, cmd := in.Update(CallsMsg{Calls: []store.Call{
 		logCall(1, "pp_list_pets", store.OK, 200, 42),
-		logCall(2, "pp_get_pet", store.HTTPError, 404, 7),
+		logCall(2, "pp_get_pet", store.UpstreamError, 404, 7),
 	}})
 	if cmd == nil {
 		t.Error("no poll scheduled after new calls")
@@ -74,7 +75,7 @@ func TestInspectorFollows(t *testing.T) {
 
 func TestInspectorExpand(t *testing.T) {
 	in := newInspectorTest()
-	c := logCall(1, "pp_get_pet", store.HTTPError, 404, 7)
+	c := logCall(1, "pp_get_pet", store.UpstreamError, 404, 7)
 	c.Args = json.RawMessage(`{"id":"42"}`)
 	c.Error = "pp_get_pet: HTTP 404 Not Found"
 	c.Preview = `{"message":"no such pet"}`

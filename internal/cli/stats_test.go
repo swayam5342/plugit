@@ -15,7 +15,7 @@ import (
 
 func TestStatsPlain(t *testing.T) {
 	p := config.NewPaths(t.TempDir())
-	bad := lcall("pets", "pp_get_pet", store.HTTPError, 404)
+	bad := lcall("pets", "pp_get_pet", store.UpstreamError, 404)
 	seedLog(t, p, lcall("pets", "pp_list_pets", store.OK, 200), lcall("pets", "pp_list_pets", store.OK, 200), bad, lcall("other", "o_x", store.OK, 200))
 	out := &bytes.Buffer{}
 	if err := showStats(t.Context(), p, statsSettings{name: "pets", out: out, since: 24 * time.Hour}); err != nil {

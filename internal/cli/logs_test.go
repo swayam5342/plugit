@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -47,12 +48,12 @@ func seedLog(t *testing.T, p config.Paths, calls ...store.Call) *store.DB {
 
 func lcall(api, tool string, outcome store.Outcome, status int) store.Call {
 	return store.Call{Time: time.Now(), API: api, Toolset: "default", Tool: tool, Op: "GET /x",
-		Outcome: outcome, Status: status, Duration: 42 * time.Millisecond, Bytes: 1200}
+		Outcome: outcome, Code: fmt.Sprintf("HTTP %d", status), Duration: 42 * time.Millisecond, Bytes: 1200}
 }
 
 func TestLogsPlain(t *testing.T) {
 	p := config.NewPaths(t.TempDir())
-	bad := lcall("pets", "pp_get_pet", store.HTTPError, 404)
+	bad := lcall("pets", "pp_get_pet", store.UpstreamError, 404)
 	bad.Error = "pp_get_pet: HTTP 404\x1b[2J"
 	seedLog(t, p, lcall("pets", "pp_list_pets", store.OK, 200), bad, lcall("other", "o_x", store.OK, 200))
 	out := &bytes.Buffer{}
@@ -60,7 +61,7 @@ func TestLogsPlain(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := out.String()
-	for _, want := range []string{"pp_list_pets", "pp_get_pet", "http_error", "404", "42ms", "1.2 KB", "HTTP 404"} {
+	for _, want := range []string{"pp_list_pets", "pp_get_pet", "upstream_error", "404", "42ms", "1.2 KB", "HTTP 404"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("output missing %q:\n%s", want, s)
 		}

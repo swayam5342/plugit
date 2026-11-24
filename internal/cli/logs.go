@@ -170,8 +170,8 @@ func printCall(w io.Writer, c store.Call, asJSON, showAPI bool) error {
 		return err
 	}
 	status := "-"
-	if c.Status > 0 {
-		status = fmt.Sprint(c.Status)
+	if c.Code != "" {
+		status = c.Code
 	}
 	api := ""
 	if showAPI {

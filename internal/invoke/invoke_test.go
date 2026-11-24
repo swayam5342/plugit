@@ -2,6 +2,7 @@ package invoke
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -79,3 +80,15 @@ func TestInvokeBadArgsIsError(t *testing.T) {
 }
 
 func mustU(s string) *url.URL { u, _ := url.Parse(s); return u }
+
+type errDoer struct{}
+
+func (errDoer) Do(*http.Request) (*http.Response, error) { return nil, errors.New("dial tcp: refused") }
+
+func TestInvokeTransportErrorCode(t *testing.T) {
+	d := Deps{Proto: rest.REST{Target: proxy.Target{BaseURL: mustU("https://api.example.test")}}, Doer: errDoer{}, Endpoint: mustU("https://api.example.test"), Redactor: redact.New(redact.Options{})}
+	res := Perform(context.Background(), d, getThing, map[string]any{"id": "42"}, nil)
+	if !res.IsError || res.Code != "transport error" {
+		t.Errorf("IsError=%v Code=%q, want transport error", res.IsError, res.Code)
+	}
+}

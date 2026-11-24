@@ -207,10 +207,10 @@ func (h *handler) handle(ctx context.Context, req *mcp.CallToolRequest) (res *mc
 		Endpoint: h.cfg.Target.BaseURL, Redactor: h.cfg.Redactor,
 	}, h.tool.Tool, args, h.tool.Fields)
 	h.log(name, start, r.Status, r.IsError, "", "bytes", r.Bytes, "truncated", r.Truncated)
-	rec.Status, rec.Bytes = r.Status, r.Bytes
+	rec.Code, rec.Bytes = r.Code, r.Bytes
 	switch {
 	case r.Status >= 400:
-		rec.Outcome = store.HTTPError
+		rec.Outcome = store.UpstreamError
 	case r.IsError:
 		rec.Outcome = store.Failed
 	}

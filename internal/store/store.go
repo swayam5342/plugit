@@ -28,8 +28,11 @@ import (
 	"github.com/swayam5342/plugit/internal/config"
 )
 
-// SchemaVersion is the call log's schema version (PRAGMA user_version).
-const SchemaVersion = 1
+// SchemaVersion is the call log's schema version (PRAGMA user_version). It
+// restarts at 2 for the protocol-core rebuild: the numeric status column
+// became a protocol-neutral code (SPEC §8.1.6 break 5). A pre-rebuild log is
+// moved aside, not migrated.
+const SchemaVersion = 2
 
 // Caps on stored text, so one huge call can't bloat the log.
 const (
@@ -43,12 +46,12 @@ type Outcome string
 
 // Call outcomes.
 const (
-	OK          Outcome = "ok"
-	HTTPError   Outcome = "http_error"
-	Denied      Outcome = "denied"
-	Invalid     Outcome = "invalid"
-	RateLimited Outcome = "rate_limited"
-	Failed      Outcome = "error"
+	OK            Outcome = "ok"
+	UpstreamError Outcome = "upstream_error"
+	Denied        Outcome = "denied"
+	Invalid       Outcome = "invalid"
+	RateLimited   Outcome = "rate_limited"
+	Failed        Outcome = "error"
 )
 
 // Call is one logged tool call. Every text field is already redacted.
@@ -60,7 +63,7 @@ type Call struct {
 	Tool     string          `json:"tool"`
 	Op       string          `json:"op"`
 	Outcome  Outcome         `json:"outcome"`
-	Status   int             `json:"status,omitempty"`
+	Code     string          `json:"code,omitempty"`
 	Duration time.Duration   `json:"duration_ns"`
 	Bytes    int             `json:"bytes,omitempty"`
 	Args     json.RawMessage `json:"args,omitempty"`
@@ -82,7 +85,7 @@ CREATE TABLE IF NOT EXISTS calls (
 	tool        TEXT    NOT NULL,
 	op          TEXT    NOT NULL,
 	outcome     TEXT    NOT NULL,
-	status      INTEGER NOT NULL DEFAULT 0,
+	code        TEXT    NOT NULL DEFAULT '',
 	duration_us INTEGER NOT NULL,
 	bytes       INTEGER NOT NULL DEFAULT 0,
 	args        TEXT,
@@ -113,9 +116,32 @@ func Open(ctx context.Context, path string) (*DB, error) {
 	db := &DB{sql: sqlDB}
 	if err := db.migrate(ctx); err != nil {
 		_ = sqlDB.Close()
+		if errors.Is(err, errOldSchema) {
+			// A pre-rebuild log is incompatible (no additive migration before
+			// 1.0). Move it aside, with its WAL/SHM, and start fresh.
+			if mErr := moveAside(path); mErr != nil {
+				return nil, mErr
+			}
+			return Open(ctx, path)
+		}
 		return nil, err
 	}
 	return db, nil
+}
+
+var errOldSchema = errors.New("call log predates the protocol-core rebuild")
+
+func moveAside(path string) error {
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		src := path + suffix
+		if _, err := os.Stat(src); err != nil {
+			continue
+		}
+		if err := os.Rename(src, path+".bak"+suffix); err != nil {
+			return fmt.Errorf("moving the old call log aside: %w", err)
+		}
+	}
+	return nil
 }
 
 func (db *DB) migrate(ctx context.Context) error {
@@ -128,6 +154,8 @@ func (db *DB) migrate(ctx context.Context) error {
 		return fmt.Errorf("the call log was written by a newer plugit (schema %d, this build knows %d); upgrade plugit", v, SchemaVersion)
 	case v == SchemaVersion:
 		return nil
+	case v != 0:
+		return errOldSchema
 	}
 	if _, err := db.sql.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("creating call log: %w", err)
@@ -148,9 +176,9 @@ func (db *DB) Insert(ctx context.Context, c Call) (int64, error) {
 		args = json.RawMessage(`{"truncated":true}`)
 	}
 	res, err := db.sql.ExecContext(ctx,
-		`INSERT INTO calls (ts, api, toolset, tool, op, outcome, status, duration_us, bytes, args, preview, error)
+		`INSERT INTO calls (ts, api, toolset, tool, op, outcome, code, duration_us, bytes, args, preview, error)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		c.Time.UnixMicro(), c.API, c.Toolset, c.Tool, c.Op, string(c.Outcome), c.Status,
+		c.Time.UnixMicro(), c.API, c.Toolset, c.Tool, c.Op, string(c.Outcome), c.Code,
 		c.Duration.Microseconds(), c.Bytes, nullable(string(args)),
 		nullable(capText(c.Preview, MaxPreviewBytes)), nullable(capText(c.Error, MaxErrorBytes)))
 	if err != nil {
@@ -198,7 +226,7 @@ type Filter struct {
 
 const (
 	filterSQL = ` WHERE id > ?1 AND (?2 = '' OR api = ?2) AND ts >= ?3`
-	listCols  = `SELECT id, ts, api, toolset, tool, op, outcome, status, duration_us, bytes,
+	listCols  = `SELECT id, ts, api, toolset, tool, op, outcome, code, duration_us, bytes,
 	        COALESCE(args, ''), COALESCE(preview, ''), COALESCE(error, '') FROM calls`
 	listOldestSQL = listCols + filterSQL + ` ORDER BY id ASC LIMIT ?4`
 	listNewestSQL = listCols + filterSQL + ` ORDER BY id DESC LIMIT ?4`
@@ -229,7 +257,7 @@ func (db *DB) List(ctx context.Context, f Filter) ([]Call, error) {
 		var c Call
 		var ts, us int64
 		var outcome, argText string
-		if err := rows.Scan(&c.ID, &ts, &c.API, &c.Toolset, &c.Tool, &c.Op, &outcome, &c.Status, &us, &c.Bytes,
+		if err := rows.Scan(&c.ID, &ts, &c.API, &c.Toolset, &c.Tool, &c.Op, &outcome, &c.Code, &us, &c.Bytes,
 			&argText, &c.Preview, &c.Error); err != nil {
 			return nil, fmt.Errorf("reading call log: %w", err)
 		}

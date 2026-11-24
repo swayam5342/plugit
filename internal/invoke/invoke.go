@@ -57,7 +57,7 @@ func Perform(ctx context.Context, d Deps, t model.Tool, args map[string]any, pic
 	if tg.Auth.Token != nil {
 		tok, err := tg.Auth.Token(ctx)
 		if err != nil {
-			return failure(t, red, "couldn't get an access token: "+err.Error())
+			return failure(t, red, transportCode, "couldn't get an access token: "+err.Error())
 		}
 		tg.Auth.Secret = tok
 		red = red.With(tok)
@@ -65,22 +65,22 @@ func Perform(ctx context.Context, d Deps, t model.Tool, args map[string]any, pic
 
 	req, err := d.Proto.Encode(ctx, protocol.Call{Tool: t, Args: args, Endpoint: d.Endpoint, Timeout: d.Timeout})
 	if err != nil {
-		return failure(t, red, "invalid arguments: "+err.Error())
+		return failure(t, red, "", "invalid arguments: "+err.Error())
 	}
 	if err := proxy.AttachAuth(req, tg); err != nil {
-		return failure(t, red, proxy.DescribeTransportError(ctx, err))
+		return failure(t, red, transportCode, proxy.DescribeTransportError(ctx, err))
 	}
 
 	resp, err := d.Doer.Do(req)
 	if err != nil {
-		return failure(t, red, proxy.DescribeTransportError(ctx, err))
+		return failure(t, red, transportCode, proxy.DescribeTransportError(ctx, err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	truncated := errors.Is(err, httpx.ErrResponseTruncated)
 	if err != nil && !truncated {
-		return failure(t, red, proxy.DescribeTransportError(ctx, fmt.Errorf("reading response: %w", err)))
+		return failure(t, red, transportCode, proxy.DescribeTransportError(ctx, fmt.Errorf("reading response: %w", err)))
 	}
 	if resp.StatusCode == http.StatusUnauthorized && tg.Auth.Unauthorized != nil {
 		tg.Auth.Unauthorized()
@@ -94,8 +94,12 @@ func Perform(ctx context.Context, d Deps, t model.Tool, args map[string]any, pic
 	return Result{Text: red.String(text), IsError: res.IsError, Code: res.Code, Status: resp.StatusCode, Bytes: len(body), Truncated: truncated}
 }
 
-func failure(t model.Tool, red *redact.Redactor, msg string) Result {
-	return Result{Text: red.String(t.Name + ": " + msg), IsError: true}
+// transportCode is the call-log code for a failure before any response
+// (timeout, SSRF refusal, connection error), the same across protocols.
+const transportCode = "transport error"
+
+func failure(t model.Tool, red *redact.Redactor, code, msg string) Result {
+	return Result{Text: red.String(t.Name + ": " + msg), IsError: true, Code: code}
 }
 
 func shape(res protocol.Result, pick *jsonpick.Picker, truncated bool, bodyLen int) string {

@@ -47,7 +47,7 @@ func TestCallsAreRecorded(t *testing.T) {
 	}
 	c := rec.last(t)
 	if c.API != "pets" || c.Toolset != "default" || c.Tool != "listPets" || c.Op != "GET /pets" ||
-		c.Outcome != store.OK || c.Status != 200 || c.Bytes == 0 || c.Time.IsZero() || c.Duration < 0 {
+		c.Outcome != store.OK || c.Code != "HTTP 200" || c.Bytes == 0 || c.Time.IsZero() || c.Duration < 0 {
 		t.Errorf("record = %+v", c)
 	}
 	if string(c.Args) != `{"limit":5}` || c.Preview != "" || c.Error != "" {
@@ -70,7 +70,7 @@ func TestRecordsAreRedacted(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := rec.last(t)
-	if c.Outcome != store.HTTPError || c.Status != 401 || c.Error == "" || c.Preview == "" {
+	if c.Outcome != store.UpstreamError || c.Code != "HTTP 401" || c.Error == "" || c.Preview == "" {
 		t.Errorf("record = %+v", c)
 	}
 	all, _ := json.Marshal(c)

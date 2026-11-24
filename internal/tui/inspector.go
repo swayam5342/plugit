@@ -200,8 +200,8 @@ func (m *Inspector) row(c store.Call, cursor bool) string {
 		bar, name = th.Accent.Render("› "), th.Accent.Bold(true)
 	}
 	status := "   "
-	if c.Status > 0 {
-		status = fmt.Sprintf("%3d", c.Status)
+	if c.Code != "" {
+		status = fmt.Sprintf("%-8s", c.Code)
 	}
 	line := bar + th.Dim.Render(c.Time.Local().Format("15:04:05")) + "  "
 	if m.in.AllAPIs {
