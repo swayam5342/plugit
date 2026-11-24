@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/protocol"
 	"github.com/swayam5342/plugit/internal/protocol/rest"
@@ -50,5 +51,26 @@ func TestServeUnknownProtocolRefused(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "grpc") {
 		t.Errorf("the refusal should name the protocol: %v", err)
+	}
+}
+
+// A config whose protocol disagrees with the manifest it is paired with (a hand
+// edit, or a sync whose source changed format) is refused at load, naming both
+// protocols and pointing at `plugit sync` — never silently reinterpreted.
+func TestProtocolMustMatchManifest(t *testing.T) {
+	cfg := &config.API{Name: "pets", Protocol: "graphql"}
+	m := &model.Manifest{Protocol: model.REST}
+	if _, err := checkProtocol(cfg, m); err == nil {
+		t.Fatal("a config/manifest protocol mismatch must be refused")
+	} else {
+		for _, want := range []string{"graphql", string(model.REST), "plugit sync"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("refusal should mention %q: %v", want, err)
+			}
+		}
+	}
+	// The matching case is accepted.
+	if _, err := checkProtocol(&config.API{Name: "pets", Protocol: string(model.REST)}, &model.Manifest{Protocol: model.REST}); err != nil {
+		t.Errorf("matching protocols should load: %v", err)
 	}
 }
