@@ -109,7 +109,7 @@ func serveAPI(ctx context.Context, s serveSettings, d runDeps) error {
 	}
 	logger.Info("plugit serve serving",
 		"api", a.cfg.Name, "toolset", a.toolset, "selected", len(a.tools), "listed", listed, "mode", a.cfg.Policy.Mode,
-		"base_url", a.target.BaseURL.String())
+		"endpoint", a.target.BaseURL.String())
 	var apiLimit *policy.Limiter
 	if r, err := policy.ParseRate(a.cfg.Policy.RateLimit); err == nil {
 		apiLimit = policy.NewLimiter(r, nil)
@@ -271,7 +271,7 @@ func loadActive(ctx context.Context, s serveSettings, d runDeps, logger *slog.Lo
 
 	baseURL, err := url.Parse(cfg.Endpoint)
 	if err != nil {
-		return nil, fmt.Errorf("base_url: %w", err)
+		return nil, fmt.Errorf("endpoint: %w", err)
 	}
 	target, hidden, err := buildTarget(cfg, baseURL, d, "plugit/"+d.info.withDefaults().Version)
 	if err != nil {

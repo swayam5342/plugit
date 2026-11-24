@@ -501,7 +501,7 @@ func runServe(ctx context.Context, s runSettings, d runDeps) error {
 	})
 	logger := slog.New(slog.NewTextHandler(d.stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	logger.Info("plugit run serving",
-		"tools", len(tools), "mode", string(s.mode), "base_url", baseURL.String(),
+		"tools", len(tools), "mode", string(s.mode), "endpoint", baseURL.String(),
 		"spec", red.String(safeLocation(s.spec)), "warnings", len(m.Warnings))
 
 	return mcpserver.Serve(ctx, mcpserver.Config{
