@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"runtime"
 	"slices"
@@ -273,6 +274,31 @@ func TestServeSetupFailures(t *testing.T) {
 				t.Errorf("error leaks the secret: %v", err)
 			}
 		})
+	}
+}
+
+// A fixed param declared with in: cookie must resolve to model.InCookie,
+// not be silently collapsed to the query string, where a secret would leak
+// into access/proxy logs. Config accepts cookie via the P3 table.
+func TestBuildTargetFixedCookieLocation(t *testing.T) {
+	cfg := &config.API{Name: "pets", Protocol: "rest",
+		Auth: config.Auth{Type: config.AuthNone},
+		Fixed: []config.Fixed{
+			{Name: "sid", In: "cookie", Value: "env:PETS_SID"},
+		}}
+	d := runDeps{resolver: &secrets.Resolver{LookupEnv: func(k string) (string, bool) {
+		if k == "PETS_SID" {
+			return "s3cr3t", true
+		}
+		return "", false
+	}}}
+	u, _ := url.Parse("https://api.example.test")
+	tg, _, err := buildTarget(cfg, u, d, "ua")
+	if err != nil {
+		t.Fatalf("buildTarget: %v", err)
+	}
+	if len(tg.Fixed) != 1 || tg.Fixed[0].In != model.InCookie {
+		t.Errorf("fixed cookie location = %+v, want In=InCookie", tg.Fixed)
 	}
 }
 

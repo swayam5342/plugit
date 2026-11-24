@@ -186,7 +186,7 @@ func Encode(ctx context.Context, t model.Tool, args map[string]any, tg Target) (
 		upstream := f.Name
 		if p := declaredFixed(t, f.Name); p != nil {
 			in, upstream = p.Bind.In, p.Bind.Upstream
-		} else if in != model.InHeader {
+		} else if in != model.InHeader && in != model.InCookie {
 			in = model.InQuery
 		}
 		switch in {

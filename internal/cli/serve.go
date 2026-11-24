@@ -425,8 +425,11 @@ func buildTarget(cfg *config.API, baseURL *url.URL, d runDeps, userAgent string)
 			return tg, nil, fmt.Errorf("fixed %s: %w", f.Name, err)
 		}
 		in := model.InQuery
-		if f.In == "header" {
+		switch f.In {
+		case "header":
 			in = model.InHeader
+		case "cookie":
+			in = model.InCookie
 		}
 		tg.Fixed = append(tg.Fixed, rest.Fixed{Name: f.Name, In: in, Value: v, Secret: ref.IsSecret()})
 		hidden = append(hidden, f.Name)

@@ -260,6 +260,23 @@ func TestBuildFixedParams(t *testing.T) {
 	assertBody(t, req, `{"tenant": "t-9", "name": "n"}`)
 }
 
+func TestBuildFixedCookieNotQuery(t *testing.T) {
+	// An undeclared fixed param with In: InCookie (e.g. an injected secret
+	// session cookie) must land in the Cookie header, never the URL query,
+	// where it would leak into access/proxy logs. Regression guard for the
+	// P3 cookie fixed-location.
+	tl := model.Tool{HTTP: &model.HTTPOp{Method: "GET", Path: "/x"}}
+	req := mustBuild(t, tl, `{}`, Target{Fixed: []Fixed{
+		{Name: "sid", In: model.InCookie, Value: "s3cr3t", Secret: true},
+	}})
+	if got := req.Header.Get("Cookie"); got != "sid=s3cr3t" {
+		t.Errorf("Cookie header = %q, want %q", got, "sid=s3cr3t")
+	}
+	if q := req.URL.Query().Get("sid"); q != "" {
+		t.Errorf("secret cookie leaked into query: url=%s", req.URL)
+	}
+}
+
 func TestBuildRejectsBaseURLWithUserinfoOrQuery(t *testing.T) {
 	tl := model.Tool{HTTP: &model.HTTPOp{Method: "GET", Path: "/x"}}
 	for _, b := range []string{"https://user:pw@api.example.test", "https://api.example.test/?a=1", "ftp://api.example.test", "/relative"} {
