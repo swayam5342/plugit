@@ -490,6 +490,10 @@ func runServe(ctx context.Context, s runSettings, d runDeps) error {
 	}
 
 	target := rest.Target{BaseURL: baseURL, Fixed: fixed, UserAgent: "plugit/" + d.info.withDefaults().Version}
+	proto, err := resolveProto(m.Protocol, target)
+	if err != nil {
+		return err
+	}
 	red := redact.New(redact.Options{
 		Secrets:           target.SecretValues(),
 		SecretHeaders:     hidden,
@@ -506,6 +510,7 @@ func runServe(ctx context.Context, s runSettings, d runDeps) error {
 		Tools:    tools,
 		Mode:     s.mode,
 		Target:   target,
+		Proto:    proto,
 		Doer:     httpx.NewClient(httpx.Options{AllowPrivate: s.allowPrivate, Timeout: s.timeout}),
 		Redactor: red,
 		Logger:   logger,

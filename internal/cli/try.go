@@ -23,7 +23,6 @@ import (
 	"github.com/swayam5342/plugit/internal/mcpserver"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/policy"
-	"github.com/swayam5342/plugit/internal/protocol/rest"
 	"github.com/swayam5342/plugit/internal/redact"
 	"github.com/swayam5342/plugit/internal/schema"
 	"github.com/swayam5342/plugit/internal/secrets"
@@ -174,7 +173,7 @@ func callTool(ctx context.Context, a *active, st mcpserver.Tool, kv []string, re
 	}
 	rec := &printingDoer{next: a.doer, out: reqOut, red: a.red}
 	ir := invoke.Perform(ctx, invoke.Deps{
-		Proto: rest.REST{Target: a.target}, Doer: rec, Target: a.target,
+		Proto: a.proto, Doer: rec, Target: a.target,
 		Endpoint: a.target.BaseURL, Redactor: a.red,
 	}, t, decoded, st.Fields)
 	r := ir

@@ -29,6 +29,7 @@ import (
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/oauth"
 	"github.com/swayam5342/plugit/internal/policy"
+	"github.com/swayam5342/plugit/internal/protocol"
 	"github.com/swayam5342/plugit/internal/protocol/rest"
 	"github.com/swayam5342/plugit/internal/protocol/rest/openapi"
 	"github.com/swayam5342/plugit/internal/redact"
@@ -124,6 +125,7 @@ func serveAPI(ctx context.Context, s serveSettings, d runDeps) error {
 		Tools:    a.tools,
 		Mode:     a.cfg.PolicyMode(),
 		Target:   a.target,
+		Proto:    a.proto,
 		Doer:     a.doer,
 		Redactor: a.red,
 		Logger:   logger,
@@ -209,8 +211,29 @@ type active struct {
 	toolset string
 	tools   []mcpserver.Tool
 	target  rest.Target
+	proto   protocol.Protocol
 	red     *redact.Redactor
 	doer    httpx.Doer
+}
+
+// resolveProto picks the serving protocol from the registry (SPEC §3.7 P5) and
+// binds the per-serve target. A protocol with no registered impl is refused —
+// "needs a newer plugit" — never served as REST by accident (T-rules: one serve
+// = one protocol). An empty name is a pre-field manifest, which is REST.
+func resolveProto(name model.Protocol, tg rest.Target) (protocol.Protocol, error) {
+	if name == "" {
+		name = model.REST
+	}
+	p, ok := protocol.For(name)
+	if !ok {
+		return nil, fmt.Errorf("this plugit build can't serve the %q protocol; it may need a newer version of plugit", name)
+	}
+	// REST is the only impl in M7 and carries its config on the value; bind it.
+	if r, isREST := p.(rest.REST); isREST {
+		r.Target = tg
+		return r, nil
+	}
+	return p, nil
 }
 
 // loadActive loads plugit.yaml, the manifest (from cache when fresh), the
@@ -254,6 +277,10 @@ func loadActive(ctx context.Context, s serveSettings, d runDeps, logger *slog.Lo
 	if err != nil {
 		return nil, err
 	}
+	proto, err := resolveProto(m.Protocol, target)
+	if err != nil {
+		return nil, err
+	}
 	tools := make([]mcpserver.Tool, 0, len(sel.Tools))
 	for _, st := range sel.Tools {
 		mt := mcpserver.Tool{Tool: schema.Prepare(st.Tool, schema.Options{Fixed: hidden}), Override: st.Override}
@@ -270,6 +297,7 @@ func loadActive(ctx context.Context, s serveSettings, d runDeps, logger *slog.Lo
 		toolset: tsName,
 		tools:   tools,
 		target:  target,
+		proto:   proto,
 		red: redact.New(redact.Options{
 			Secrets:           target.SecretValues(),
 			SecretHeaders:     hidden,
