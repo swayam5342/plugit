@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/swayam5342/plugit/internal/formats"
 	"github.com/swayam5342/plugit/internal/ingest"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/naming"
@@ -53,6 +54,22 @@ type request struct {
 	Prefix         string `json:"prefix,omitempty"`
 	MaxDescription int    `json:"maxDescription,omitempty"`
 	UnsafePaths    bool   `json:"unsafePaths,omitempty"`
+	SelectionDepth int    `json:"selectionDepth,omitempty"`
+	MaxFields      int    `json:"maxFields,omitempty"`
+}
+
+func newRequest(data []byte, opts ingest.Options) request {
+	return request{
+		Spec: data, Prefix: opts.Prefix, MaxDescription: opts.MaxDescription, UnsafePaths: opts.AllowUnsafePaths,
+		SelectionDepth: opts.SelectionDepth, MaxFields: opts.MaxFields,
+	}
+}
+
+func (r request) options() ingest.Options {
+	return ingest.Options{
+		Prefix: r.Prefix, MaxDescription: r.MaxDescription, AllowUnsafePaths: r.UnsafePaths,
+		SelectionDepth: r.SelectionDepth, MaxFields: r.MaxFields,
+	}
 }
 
 type response struct {
@@ -66,6 +83,7 @@ var errorKinds = []struct {
 	err  error
 }{
 	{"unsupported", openapi.ErrUnsupportedSpec},
+	{"unsupported-format", ingest.ErrUnsupportedFormat},
 	{"ref-too-deep", openapi.ErrRefTooDeep},
 	{"ref-cycle", openapi.ErrRefCycle},
 	{"panic", openapi.ErrParserPanic},
@@ -90,8 +108,8 @@ func NewRunner() (*Runner, error) {
 	return &Runner{Exe: exe, Args: []string{ChildArg}}, nil
 }
 
-// Parse is openapi.Parse in a child process. opts.Logger is not used.
-func Parse(ctx context.Context, data []byte, opts openapi.Options) (*model.Manifest, error) {
+// Parse is a format parse (openapi, postman, …) in a child process. opts.Logger is not used.
+func Parse(ctx context.Context, data []byte, opts ingest.Options) (*model.Manifest, error) {
 	r, err := NewRunner()
 	if err != nil {
 		return nil, err
@@ -100,7 +118,7 @@ func Parse(ctx context.Context, data []byte, opts openapi.Options) (*model.Manif
 }
 
 // Parse runs one parse child.
-func (r *Runner) Parse(ctx context.Context, data []byte, opts openapi.Options) (*model.Manifest, error) {
+func (r *Runner) Parse(ctx context.Context, data []byte, opts ingest.Options) (*model.Manifest, error) {
 	timeout, maxOut := r.Timeout, r.MaxOutput
 	if timeout <= 0 {
 		timeout = DefaultTimeout
@@ -108,7 +126,7 @@ func (r *Runner) Parse(ctx context.Context, data []byte, opts openapi.Options) (
 	if maxOut <= 0 {
 		maxOut = DefaultMaxOutput
 	}
-	req, err := json.Marshal(request{Spec: data, Prefix: opts.Prefix, MaxDescription: opts.MaxDescription, UnsafePaths: opts.AllowUnsafePaths})
+	req, err := json.Marshal(newRequest(data, opts))
 	if err != nil {
 		return nil, fmt.Errorf("encoding parse request: %w", err)
 	}
@@ -162,7 +180,7 @@ func ChildMain(stdin io.Reader, stdout io.Writer) int {
 		return 2
 	}
 
-	m, err := ingest.Dispatch(req.Spec, req.Format, openapi.Options{Prefix: req.Prefix, MaxDescription: req.MaxDescription, AllowUnsafePaths: req.UnsafePaths})
+	m, err := ingest.Dispatch(formats.Ordered(), req.Spec, req.Format, req.options())
 	if err != nil {
 		resp := response{Err: err.Error()}
 		for _, k := range errorKinds {

@@ -18,9 +18,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/swayam5342/plugit/internal/config"
+	"github.com/swayam5342/plugit/internal/ingest"
 	"github.com/swayam5342/plugit/internal/isolate"
 	"github.com/swayam5342/plugit/internal/model"
-	"github.com/swayam5342/plugit/internal/protocol/rest/openapi"
 	"github.com/swayam5342/plugit/internal/secrets"
 	"github.com/swayam5342/plugit/internal/store"
 )
@@ -98,14 +98,14 @@ func writeSnapshot(t *testing.T, p config.Paths, content string) {
 }
 
 // countingParse wraps the real child-process parser and counts calls.
-func countingParse(n *atomic.Int32) func(context.Context, []byte, openapi.Options) (*model.Manifest, error) {
-	return func(ctx context.Context, data []byte, opts openapi.Options) (*model.Manifest, error) {
+func countingParse(n *atomic.Int32) func(context.Context, []byte, ingest.Options) (*model.Manifest, error) {
+	return func(ctx context.Context, data []byte, opts ingest.Options) (*model.Manifest, error) {
 		n.Add(1)
 		return isolate.Parse(ctx, data, opts)
 	}
 }
 
-func serveDeps(parse func(context.Context, []byte, openapi.Options) (*model.Manifest, error)) runDeps {
+func serveDeps(parse func(context.Context, []byte, ingest.Options) (*model.Manifest, error)) runDeps {
 	d := deps(nil, nil, map[string]string{"PETS_KEY": runSecret})
 	d.parse = parse
 	return d
@@ -176,7 +176,7 @@ func TestServeUsesManifestCache(t *testing.T) {
 		t.Fatalf("cold start parsed %d times", parses.Load())
 	}
 
-	noParse := func(context.Context, []byte, openapi.Options) (*model.Manifest, error) {
+	noParse := func(context.Context, []byte, ingest.Options) (*model.Manifest, error) {
 		t.Error("warm start re-parsed the spec")
 		return nil, errors.New("unexpected parse")
 	}

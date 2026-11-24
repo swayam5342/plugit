@@ -16,11 +16,11 @@ import (
 	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/curate"
 	"github.com/swayam5342/plugit/internal/httpx"
+	"github.com/swayam5342/plugit/internal/ingest"
 	"github.com/swayam5342/plugit/internal/isolate"
 	"github.com/swayam5342/plugit/internal/lint"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/policy"
-	"github.com/swayam5342/plugit/internal/protocol/rest/openapi"
 	"github.com/swayam5342/plugit/internal/spec"
 	"github.com/swayam5342/plugit/internal/tokens"
 	"github.com/swayam5342/plugit/internal/tui"
@@ -62,7 +62,7 @@ type addDeps struct {
 	out     io.Writer
 	stderr  io.Writer
 	confirm func(string) (bool, error)
-	parse   func(context.Context, []byte, openapi.Options) (*model.Manifest, error)
+	parse   func(context.Context, []byte, ingest.Options) (*model.Manifest, error)
 	pick    func(context.Context, pickInput) (pickResult, error)
 	info    BuildInfo
 }
@@ -150,7 +150,7 @@ func addAPI(ctx context.Context, s addSettings, d addDeps) error {
 	if err != nil {
 		return err
 	}
-	m, err := d.parse(ctx, sp.Bytes, openapi.Options{Prefix: s.prefix, AllowUnsafePaths: s.allowInsecure})
+	m, err := d.parse(ctx, sp.Bytes, ingest.Options{Prefix: s.prefix, AllowUnsafePaths: s.allowInsecure})
 	if err != nil {
 		return err
 	}

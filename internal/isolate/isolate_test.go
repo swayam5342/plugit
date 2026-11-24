@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/swayam5342/plugit/internal/ingest"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/protocol/rest/openapi"
 )
@@ -73,8 +75,8 @@ paths:
 `
 
 func TestParseMatchesInProcess(t *testing.T) {
-	opts := openapi.Options{Prefix: "pets", MaxDescription: 100}
-	want, err := openapi.Parse([]byte(spec), opts)
+	opts := ingest.Options{Prefix: "pets", MaxDescription: 100}
+	want, err := openapi.Parse([]byte(spec), openapi.Options{Prefix: opts.Prefix, MaxDescription: opts.MaxDescription})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +110,7 @@ func TestParseKeepsSentinelErrors(t *testing.T) {
 		"unsupported": {"asyncapi: 2.6.0\ninfo: {title: t, version: '1'}\nchannels: {}\n", openapi.ErrUnsupportedSpec},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := runner("parse").Parse(t.Context(), []byte(tc.src), openapi.Options{})
+			_, err := runner("parse").Parse(t.Context(), []byte(tc.src), ingest.Options{})
 			if !errors.Is(err, tc.want) {
 				t.Errorf("err = %v, want %v", err, tc.want)
 			}
@@ -129,7 +131,7 @@ paths:
 `
 
 func TestParseKnownLibopenapiCrasherIsRejected(t *testing.T) {
-	_, err := runner("parse").Parse(t.Context(), []byte(libopenapiCrasher), openapi.Options{})
+	_, err := runner("parse").Parse(t.Context(), []byte(libopenapiCrasher), ingest.Options{})
 	if !errors.Is(err, openapi.ErrInvalidSpec) {
 		t.Fatalf("err = %v, want openapi.ErrInvalidSpec", err)
 	}
@@ -174,7 +176,7 @@ func TestParseExternalRefMapEntriesNeverCrash(t *testing.T) {
 	for name, src := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			_, err := runner("parse").Parse(t.Context(), []byte(src), openapi.Options{})
+			_, err := runner("parse").Parse(t.Context(), []byte(src), ingest.Options{})
 			if errors.Is(err, ErrParserCrashed) {
 				t.Errorf("parser crashed: %v", err)
 			}
@@ -191,7 +193,7 @@ func TestParseChildFailures(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			r := runner(mode)
 			r.MaxOutput = 1 << 20
-			_, err := r.Parse(t.Context(), []byte(spec), openapi.Options{})
+			_, err := r.Parse(t.Context(), []byte(spec), ingest.Options{})
 			if !errors.Is(err, want) {
 				t.Errorf("err = %v, want %v", err, want)
 			}
@@ -203,7 +205,7 @@ func TestParseTimeout(t *testing.T) {
 	r := runner("hang")
 	r.Timeout = 500 * time.Millisecond
 	start := time.Now()
-	_, err := r.Parse(t.Context(), []byte(spec), openapi.Options{})
+	_, err := r.Parse(t.Context(), []byte(spec), ingest.Options{})
 	if !errors.Is(err, ErrParseTimeout) {
 		t.Errorf("err = %v, want ErrParseTimeout", err)
 	}
@@ -215,7 +217,7 @@ func TestParseTimeout(t *testing.T) {
 func TestChildGetsNoParentEnvironment(t *testing.T) {
 	t.Setenv("PLUGIT_SECRET_FOR_TEST", "test-token-123")
 	t.Setenv("GITHUB_TOKEN", "test-token-456")
-	_, err := runner("dumpenv").Parse(t.Context(), []byte(spec), openapi.Options{})
+	_, err := runner("dumpenv").Parse(t.Context(), []byte(spec), ingest.Options{})
 	if err == nil {
 		t.Fatal("dumpenv child returns its environment as an error")
 	}
@@ -247,12 +249,27 @@ paths:
   /v1/%2e%2e/secret: {get: {responses: {'200': {description: ok}}}}
 `
 	for on, want := range map[bool]int{false: 1, true: 2} {
-		m, err := runner("parse").Parse(t.Context(), []byte(src), openapi.Options{AllowUnsafePaths: on})
+		m, err := runner("parse").Parse(t.Context(), []byte(src), ingest.Options{AllowUnsafePaths: on})
 		if err != nil {
 			t.Fatalf("Parse: %v", err)
 		}
 		if len(m.Tools) != want {
 			t.Errorf("AllowUnsafePaths=%v: %d tools, want %d", on, len(m.Tools), want)
 		}
+	}
+}
+
+func TestRequestCarriesGraphQLCaps(t *testing.T) {
+	in := ingest.Options{Prefix: "p", MaxDescription: 7, AllowUnsafePaths: true, SelectionDepth: 4, MaxFields: 99}
+	b, err := json.Marshal(newRequest([]byte("x"), in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req request
+	if err := json.Unmarshal(b, &req); err != nil {
+		t.Fatal(err)
+	}
+	if got := req.options(); !reflect.DeepEqual(got, in) {
+		t.Errorf("options after round trip = %+v, want %+v", got, in)
 	}
 }

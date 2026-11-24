@@ -1,10 +1,11 @@
-package ingest
+package ingest_test
 
 import (
 	"testing"
 
+	"github.com/swayam5342/plugit/internal/formats"
+	"github.com/swayam5342/plugit/internal/ingest"
 	"github.com/swayam5342/plugit/internal/model"
-	"github.com/swayam5342/plugit/internal/protocol/rest/openapi"
 )
 
 const openapiDoc = `{"openapi":"3.0.0","info":{"title":"t","version":"1"},
@@ -21,7 +22,7 @@ func TestDispatchDetectsOpenAPIAndPostman(t *testing.T) {
 		{"openapi", openapiDoc, "openapi"},
 		{"postman", postmanDoc, "postman"},
 	} {
-		m, err := Dispatch([]byte(tc.data), "", openapi.Options{})
+		m, err := ingest.Dispatch(formats.Ordered(), []byte(tc.data), "", ingest.Options{})
 		if err != nil {
 			t.Fatalf("%s: Dispatch: %v", tc.name, err)
 		}
@@ -34,27 +35,26 @@ func TestDispatchDetectsOpenAPIAndPostman(t *testing.T) {
 	}
 }
 
-func TestNoFixtureDetectedByTwoFormats(t *testing.T) {
-	for _, data := range []string{openapiDoc, postmanDoc} {
-		n := 0
-		for _, f := range Formats {
-			if f.Detect([]byte(data)) {
-				n++
-			}
-		}
-		if n != 1 {
-			t.Errorf("fixture detected by %d formats, want exactly 1", n)
-		}
+func TestDispatchTakesFormatsAndNeutralOptions(t *testing.T) {
+	m, err := ingest.Dispatch(formats.Ordered(), []byte(openapiDoc), "", ingest.Options{Prefix: "pets"})
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if len(m.Tools) != 1 {
+		t.Fatalf("got %d tools, want 1", len(m.Tools))
+	}
+	if got := m.Tools[0].Name; got != "pets_listPets" {
+		t.Errorf("tool name = %q, want the prefixed listPets tool", got)
 	}
 }
 
 func TestForceFormatSkipsDetection(t *testing.T) {
 	// Force postman on a doc postman would not detect: it must be tried and fail,
 	// not silently fall back to openapi.
-	if _, err := Dispatch([]byte(openapiDoc), "postman", openapi.Options{}); err == nil {
+	if _, err := ingest.Dispatch(formats.Ordered(), []byte(openapiDoc), "postman", ingest.Options{}); err == nil {
 		t.Error("forcing postman on an OpenAPI doc should error, not fall back")
 	}
-	if _, err := Dispatch([]byte(postmanDoc), "nosuchformat", openapi.Options{}); err == nil {
+	if _, err := ingest.Dispatch(formats.Ordered(), []byte(postmanDoc), "nosuchformat", ingest.Options{}); err == nil {
 		t.Error("an unknown --format should error")
 	}
 }
@@ -64,16 +64,13 @@ type echoFormat struct{}
 func (echoFormat) Name() string             { return "echo" }
 func (echoFormat) Protocol() model.Protocol { return model.Protocol("echo") }
 func (echoFormat) Detect(d []byte) bool     { return len(d) > 0 && d[0] == '!' }
-func (echoFormat) Parse(_ []byte, _ openapi.Options) (*model.Manifest, error) {
+func (echoFormat) Parse(_ []byte, _ ingest.Options) (*model.Manifest, error) {
 	return &model.Manifest{Protocol: "echo", Format: "echo"}, nil
 }
 
 func TestSecondFormat(t *testing.T) {
-	saved := Formats
-	Formats = append([]Format{echoFormat{}}, Formats...)
-	defer func() { Formats = saved }()
-
-	m, err := Dispatch([]byte("!x"), "", openapi.Options{})
+	fs := append([]ingest.Format{echoFormat{}}, formats.Ordered()...)
+	m, err := ingest.Dispatch(fs, []byte("!x"), "", ingest.Options{})
 	if err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}

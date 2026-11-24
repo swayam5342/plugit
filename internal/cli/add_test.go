@@ -10,10 +10,10 @@ import (
 	"testing"
 
 	"github.com/swayam5342/plugit/internal/config"
+	"github.com/swayam5342/plugit/internal/ingest"
 	"github.com/swayam5342/plugit/internal/isolate"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/policy"
-	"github.com/swayam5342/plugit/internal/protocol/rest/openapi"
 )
 
 func addEnv(t *testing.T) (config.Paths, addDeps, *bytes.Buffer) {
@@ -127,7 +127,7 @@ func TestAddWithPicker(t *testing.T) {
 		}
 	}
 
-	cs, _ := startServe(t, serveSettings{paths: p, name: "pets"}, serveDeps(func(context.Context, []byte, openapi.Options) (*model.Manifest, error) {
+	cs, _ := startServe(t, serveSettings{paths: p, name: "pets"}, serveDeps(func(context.Context, []byte, ingest.Options) (*model.Manifest, error) {
 		t.Error("serve re-parsed right after add")
 		return nil, fmt.Errorf("unexpected")
 	}))

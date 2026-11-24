@@ -21,13 +21,13 @@ import (
 
 	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/httpx"
+	"github.com/swayam5342/plugit/internal/ingest"
 	"github.com/swayam5342/plugit/internal/isolate"
 	"github.com/swayam5342/plugit/internal/mcpserver"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/naming"
 	"github.com/swayam5342/plugit/internal/policy"
 	"github.com/swayam5342/plugit/internal/protocol/rest"
-	"github.com/swayam5342/plugit/internal/protocol/rest/openapi"
 	"github.com/swayam5342/plugit/internal/redact"
 	"github.com/swayam5342/plugit/internal/schema"
 	"github.com/swayam5342/plugit/internal/secrets"
@@ -371,7 +371,7 @@ type runDeps struct {
 	stderr    io.Writer
 	resolver  *secrets.Resolver
 	keyring   keyringSetter
-	parse     func(ctx context.Context, data []byte, opts openapi.Options) (*model.Manifest, error)
+	parse     func(ctx context.Context, data []byte, opts ingest.Options) (*model.Manifest, error)
 	info      BuildInfo
 }
 
@@ -447,7 +447,7 @@ func runServe(ctx context.Context, s runSettings, d runDeps) error {
 	if err != nil {
 		return err
 	}
-	m, err := d.parse(ctx, sp.Bytes, openapi.Options{Prefix: s.prefix, AllowUnsafePaths: s.allowInsecure})
+	m, err := d.parse(ctx, sp.Bytes, ingest.Options{Prefix: s.prefix, AllowUnsafePaths: s.allowInsecure})
 	if err != nil {
 		return err
 	}

@@ -16,10 +16,10 @@ import (
 
 	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/curate"
+	"github.com/swayam5342/plugit/internal/ingest"
 	"github.com/swayam5342/plugit/internal/isolate"
 	"github.com/swayam5342/plugit/internal/lint"
 	"github.com/swayam5342/plugit/internal/model"
-	"github.com/swayam5342/plugit/internal/protocol/rest/openapi"
 	"github.com/swayam5342/plugit/internal/spec"
 	"github.com/swayam5342/plugit/internal/tui"
 )
@@ -31,7 +31,7 @@ type syncSettings struct {
 	addNew  bool
 	out     io.Writer
 	stderr  io.Writer
-	parse   func(context.Context, []byte, openapi.Options) (*model.Manifest, error)
+	parse   func(context.Context, []byte, ingest.Options) (*model.Manifest, error)
 	info    BuildInfo
 	review  func(ctx context.Context, in tui.SyncInput) ([]model.OpKey, error)
 }
@@ -103,7 +103,7 @@ func syncAPI(ctx context.Context, p config.Paths, name string, s syncSettings) e
 		_, err := fmt.Fprintf(s.out, "%s is up to date: the spec hasn't changed.\n", name)
 		return err
 	}
-	updated, err := s.parse(ctx, sp.Bytes, openapi.Options{Prefix: cfg.Prefix, AllowUnsafePaths: cfg.Network.AllowInsecure})
+	updated, err := s.parse(ctx, sp.Bytes, ingest.Options{Prefix: cfg.Prefix, AllowUnsafePaths: cfg.Network.AllowInsecure})
 	if err != nil {
 		return err
 	}
