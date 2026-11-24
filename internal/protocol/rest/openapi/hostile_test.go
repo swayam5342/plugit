@@ -15,7 +15,7 @@ import (
 	"github.com/swayam5342/plugit/internal/schema"
 )
 
-const hostileDir = "../../testdata/hostile"
+const hostileDir = "../../../../testdata/hostile"
 
 var hostileCases = map[string]func(t *testing.T, data []byte){
 	"remote-ref.yaml": func(t *testing.T, data []byte) {

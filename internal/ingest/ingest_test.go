@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/swayam5342/plugit/internal/model"
-	"github.com/swayam5342/plugit/internal/openapi"
+	"github.com/swayam5342/plugit/internal/protocol/rest/openapi"
 )
 
 const openapiDoc = `{"openapi":"3.0.0","info":{"title":"t","version":"1"},

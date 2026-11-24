@@ -12,8 +12,8 @@ import (
 	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/isolate"
 	"github.com/swayam5342/plugit/internal/model"
-	"github.com/swayam5342/plugit/internal/openapi"
 	"github.com/swayam5342/plugit/internal/policy"
+	"github.com/swayam5342/plugit/internal/protocol/rest/openapi"
 )
 
 func addEnv(t *testing.T) (config.Paths, addDeps, *bytes.Buffer) {

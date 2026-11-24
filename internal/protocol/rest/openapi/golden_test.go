@@ -21,7 +21,7 @@ import (
 
 var update = flag.Bool("update", false, "rewrite golden files")
 
-const specsDir = "../../testdata/specs"
+const specsDir = "../../../../testdata/specs"
 
 // loadSpec reads a pinned spec, gunzipping *.gz, and checks its SHA-256
 // against SOURCES.md.

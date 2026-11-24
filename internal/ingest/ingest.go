@@ -8,7 +8,7 @@ import (
 	"fmt"
 
 	"github.com/swayam5342/plugit/internal/model"
-	"github.com/swayam5342/plugit/internal/openapi"
+	"github.com/swayam5342/plugit/internal/protocol/rest/openapi"
 )
 
 // Format turns source bytes of one format into a Manifest.

@@ -1,18 +1,18 @@
-// Package proxy turns validated tool arguments into an HTTP request and the
-// upstream response into a tool result (SPEC §3.7 steps 5-8).
+// Package rest is the REST Protocol (SPEC §3.5 P4/§3.7 P5): it encodes a
+// validated call into an HTTP request and decodes the response into a neutral
+// Result. It never attaches a credential, opens a connection or calls httpx —
+// invoke owns every network step (T17).
 //
 // Every argument is routed by the location the spec declares, under its
 // upstream name; nothing is guessed. The host always comes from the pinned
 // base URL. Path values are percent-encoded and may not be empty, ".", ".."
 // or contain a slash (even percent-encoded); header values may not contain
-// CR, LF or other control characters. Credentials are attached last, only
-// for the pinned origin, and replace anything with the same name.
-package proxy
+// CR, LF or other control characters.
+package rest
 
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,7 +25,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/swayam5342/plugit/internal/httpx"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/schema"
 )
@@ -108,22 +107,6 @@ func (tg Target) SecretValues() []string {
 }
 
 var placeholderRe = regexp.MustCompile(`\{[^{}/]*\}`)
-
-// Build creates the request for one call. args are decoded arguments (see
-// schema.DecodeArgs) and should already have passed schema validation; Build
-// re-checks everything it relies on.
-// Build routes arguments and fixed params into a request and attaches the
-// credential (origin-bound, T8). It is Encode followed by AttachAuth.
-func Build(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*http.Request, error) {
-	req, err := Encode(ctx, t, args, tg)
-	if err != nil {
-		return nil, err
-	}
-	if err := AttachAuth(req, tg); err != nil {
-		return nil, err
-	}
-	return req, nil
-}
 
 // Encode routes arguments and fixed params into an *http.Request WITHOUT any
 // credential (SPEC §3.7 P5: a protocol's Encode never attaches credentials;
@@ -421,46 +404,6 @@ func scalar(v any) (string, bool) {
 
 func hasControl(s string) bool {
 	return strings.IndexFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0
-}
-
-// AttachAuth attaches the resolved credential, only when the request origin
-// matches the pinned base URL (T8).
-func AttachAuth(req *http.Request, tg Target) error {
-	a := tg.Auth
-	if a.Type == "" || a.Type == AuthNone {
-		return nil
-	}
-	if !httpx.SameOrigin(req.URL, tg.BaseURL) {
-		return fmt.Errorf("%w: request origin differs from the pinned base URL", ErrBuild)
-	}
-	if hasControl(a.Secret) {
-		return fmt.Errorf("%w: the credential contains control characters", ErrBuild)
-	}
-	switch a.Type {
-	case AuthBearer:
-		req.Header.Set("Authorization", "Bearer "+a.Secret)
-	case AuthHeader:
-		if a.Header == "" {
-			return fmt.Errorf("%w: auth.header is required for header auth", ErrBuild)
-		}
-		req.Header.Del(a.Header)
-		req.Header.Set(a.Header, a.Secret)
-	case AuthQuery:
-		if a.Param == "" {
-			return fmt.Errorf("%w: auth.param is required for query auth", ErrBuild)
-		}
-		q := req.URL.Query()
-		q.Set(a.Param, a.Secret)
-		req.URL.RawQuery = q.Encode()
-	case AuthBasic:
-		if !strings.Contains(a.Secret, ":") {
-			return fmt.Errorf("%w: basic auth secrets must look like user:password", ErrBuild)
-		}
-		req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(a.Secret)))
-	default:
-		return fmt.Errorf("%w: unknown auth type %q", ErrBuild, a.Type)
-	}
-	return nil
 }
 
 var cookieNameRe = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$")

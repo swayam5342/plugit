@@ -1,6 +1,6 @@
 // Package mcpserver serves tools over MCP (SPEC §3.7).
 //
-// Each call runs: policy check, argument validation, then proxy.Call. Every
+// Each call runs: policy check, argument validation, then invoke.Perform. Every
 // failure after the tool lookup is an isError result; only malformed
 // JSON-RPC and unknown tools are protocol errors (the SDK handles those).
 // Handlers recover panics. Nothing here writes to stdout: in serve and run,
@@ -34,7 +34,6 @@ import (
 	"github.com/swayam5342/plugit/internal/policy"
 	"github.com/swayam5342/plugit/internal/protocol"
 	"github.com/swayam5342/plugit/internal/protocol/rest"
-	"github.com/swayam5342/plugit/internal/proxy"
 	"github.com/swayam5342/plugit/internal/redact"
 	"github.com/swayam5342/plugit/internal/schema"
 	"github.com/swayam5342/plugit/internal/store"
@@ -55,7 +54,7 @@ type Config struct {
 	Version  string
 	Tools    []Tool
 	Mode     policy.Mode
-	Target   proxy.Target
+	Target   rest.Target
 	Proto    protocol.Protocol // the protocol that serves these tools; defaults to REST
 	Doer     httpx.Doer
 	Redactor *redact.Redactor

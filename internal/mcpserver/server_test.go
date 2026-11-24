@@ -20,7 +20,7 @@ import (
 	"github.com/swayam5342/plugit/internal/httpx"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/policy"
-	"github.com/swayam5342/plugit/internal/proxy"
+	"github.com/swayam5342/plugit/internal/protocol/rest"
 	"github.com/swayam5342/plugit/internal/redact"
 	"github.com/swayam5342/plugit/internal/schema"
 )
@@ -312,7 +312,7 @@ func (p *panicDoer) Do(req *http.Request) (*http.Response, error) {
 
 func TestPanicIsRecoveredAsToolError(t *testing.T) {
 	r := setup(t, Config{Tools: served(listPets), Mode: policy.ReadOnly, Doer: &panicDoer{},
-		Target: proxy.Target{Auth: proxy.Auth{Type: proxy.AuthBearer, Secret: secret}}}, nil)
+		Target: rest.Target{Auth: rest.Auth{Type: rest.AuthBearer, Secret: secret}}}, nil)
 	res, err := r.call(t, "listPets", map[string]any{})
 	if err != nil {
 		t.Fatal(err)
@@ -335,7 +335,7 @@ func TestSecretsNeverReachResultsOrLogs(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":"bad token ` + r.Header.Get("Authorization") + `"}`))
 	}
 	r := setup(t, Config{Tools: served(listPets), Mode: policy.ReadOnly,
-		Target: proxy.Target{Auth: proxy.Auth{Type: proxy.AuthBearer, Secret: secret}}}, echo)
+		Target: rest.Target{Auth: rest.Auth{Type: rest.AuthBearer, Secret: secret}}}, echo)
 	res, err := r.call(t, "listPets", map[string]any{"limit": 1})
 	if err != nil {
 		t.Fatal(err)

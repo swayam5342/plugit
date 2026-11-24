@@ -1,7 +1,6 @@
-package proxy
+package rest
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -42,7 +41,9 @@ func build(t *testing.T, tl model.Tool, rawArgs string, tg Target) (*http.Reques
 	if tg.BaseURL == nil {
 		tg.BaseURL = base(t, "https://api.example.test/v1")
 	}
-	return Build(t.Context(), tl, args(t, rawArgs), tg)
+	// Encode is credential-free (T17); auth attachment is invoke's job and is
+	// tested there (TestAttachAuth*).
+	return Encode(t.Context(), tl, args(t, rawArgs), tg)
 }
 
 func mustBuild(t *testing.T, tl model.Tool, rawArgs string, tg Target) *http.Request {
@@ -257,57 +258,6 @@ func TestBuildFixedParams(t *testing.T) {
 		t.Errorf("fixed headers/query: headers=%v url=%s", req.Header, req.URL)
 	}
 	assertBody(t, req, `{"tenant": "t-9", "name": "n"}`)
-}
-
-func TestBuildAuth(t *testing.T) {
-	tl := model.Tool{HTTP: &model.HTTPOp{Method: "GET", Path: "/me"}}
-	const secret = "test-token-123"
-	cases := map[AuthType]func(t *testing.T, r *http.Request){
-		AuthBearer: func(t *testing.T, r *http.Request) {
-			if r.Header.Get("Authorization") != "Bearer "+secret {
-				t.Errorf("Authorization = %q", r.Header.Get("Authorization"))
-			}
-		},
-		AuthHeader: func(t *testing.T, r *http.Request) {
-			if r.Header.Get("X-Api-Key") != secret {
-				t.Errorf("X-Api-Key = %q", r.Header.Get("X-Api-Key"))
-			}
-		},
-		AuthQuery: func(t *testing.T, r *http.Request) {
-			if r.URL.Query().Get("key") != secret {
-				t.Errorf("query = %s", r.URL.RawQuery)
-			}
-		},
-		AuthBasic: func(t *testing.T, r *http.Request) {
-			want := "Basic " + base64.StdEncoding.EncodeToString([]byte("alice:"+secret))
-			if r.Header.Get("Authorization") != want {
-				t.Errorf("Authorization = %q, want %q", r.Header.Get("Authorization"), want)
-			}
-		},
-		AuthNone: func(t *testing.T, r *http.Request) {
-			if r.Header.Get("Authorization") != "" || r.URL.RawQuery != "" {
-				t.Error("no credentials expected")
-			}
-		},
-	}
-	for typ, check := range cases {
-		t.Run(string(typ), func(t *testing.T) {
-			s := secret
-			if typ == AuthBasic {
-				s = "alice:" + secret
-			}
-			req := mustBuild(t, tl, `{}`, Target{Auth: Auth{Type: typ, Header: "X-Api-Key", Param: "key", Secret: s}})
-			check(t, req)
-		})
-	}
-}
-
-func TestBuildAuthOverridesModelSuppliedHeaders(t *testing.T) {
-	tl := model.Tool{HTTP: &model.HTTPOp{Method: "GET", Path: "/me"}, Params: []model.Param{param("X-Api-Key", model.InHeader, false)}}
-	req := mustBuild(t, tl, `{"X-Api-Key": "attacker"}`, Target{Auth: Auth{Type: AuthHeader, Header: "X-Api-Key", Secret: "test-token-123"}})
-	if got := req.Header.Values("X-Api-Key"); !reflect.DeepEqual(got, []string{"test-token-123"}) {
-		t.Errorf("X-Api-Key = %v", got)
-	}
 }
 
 func TestBuildRejectsBaseURLWithUserinfoOrQuery(t *testing.T) {

@@ -24,7 +24,6 @@ import (
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/policy"
 	"github.com/swayam5342/plugit/internal/protocol/rest"
-	"github.com/swayam5342/plugit/internal/proxy"
 	"github.com/swayam5342/plugit/internal/redact"
 	"github.com/swayam5342/plugit/internal/schema"
 	"github.com/swayam5342/plugit/internal/secrets"
@@ -156,29 +155,29 @@ func tryTool(ctx context.Context, s serveSettings, toolName string, f tryFlags, 
 
 // callTool validates name=value arguments and makes the call, writing the
 // redacted request to reqOut. Policy has already been checked.
-func callTool(ctx context.Context, a *active, st mcpserver.Tool, kv []string, reqOut io.Writer) (proxy.Result, error) {
+func callTool(ctx context.Context, a *active, st mcpserver.Tool, kv []string, reqOut io.Writer) (invoke.Result, error) {
 	t := st.Tool
 	args, err := parseTryArgs(t, kv)
 	if err != nil {
-		return proxy.Result{}, fmt.Errorf("%s: %w", t.Name, err)
+		return invoke.Result{}, fmt.Errorf("%s: %w", t.Name, err)
 	}
 	raw, err := json.Marshal(args)
 	if err != nil {
-		return proxy.Result{}, fmt.Errorf("%s: %w", t.Name, err)
+		return invoke.Result{}, fmt.Errorf("%s: %w", t.Name, err)
 	}
 	if err := schema.NewValidator(t).Validate(raw); err != nil {
-		return proxy.Result{}, errors.New(a.red.String(t.Name + ": " + err.Error()))
+		return invoke.Result{}, errors.New(a.red.String(t.Name + ": " + err.Error()))
 	}
 	decoded, err := schema.DecodeArgs(raw)
 	if err != nil {
-		return proxy.Result{}, fmt.Errorf("%s: %w", t.Name, err)
+		return invoke.Result{}, fmt.Errorf("%s: %w", t.Name, err)
 	}
 	rec := &printingDoer{next: a.doer, out: reqOut, red: a.red}
 	ir := invoke.Perform(ctx, invoke.Deps{
 		Proto: rest.REST{Target: a.target}, Doer: rec, Target: a.target,
 		Endpoint: a.target.BaseURL, Redactor: a.red,
 	}, t, decoded, st.Fields)
-	r := proxy.Result{Text: ir.Text, IsError: ir.IsError, Status: ir.Status, Bytes: ir.Bytes, Truncated: ir.Truncated}
+	r := ir
 	if !rec.printed {
 		if _, err := fmt.Fprintln(reqOut, "→ (no request sent)"); err != nil {
 			return r, err

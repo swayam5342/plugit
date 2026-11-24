@@ -8,7 +8,6 @@ import (
 
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/protocol"
-	"github.com/swayam5342/plugit/internal/proxy"
 )
 
 func mustURL(t *testing.T, s string) *url.URL {
@@ -24,7 +23,7 @@ var getThing = model.Tool{Key: "GET /things/{id}", Name: "getThing", HTTP: &mode
 	Params: []model.Param{{Name: "id", Bind: model.Binding{Upstream: "id", In: model.InPath}, Required: true, Schema: []byte(`{"type":"string"}`)}}}
 
 func TestRESTEncodeNoCredentials(t *testing.T) {
-	r := REST{Target: proxy.Target{Auth: proxy.Auth{Type: proxy.AuthBearer, Secret: "test-token-123"}}}
+	r := REST{Target: Target{Auth: Auth{Type: AuthBearer, Secret: "test-token-123"}}}
 	req, err := r.Encode(context.Background(), protocol.Call{
 		Tool: getThing, Args: map[string]any{"id": "42"}, Endpoint: mustURL(t, "https://api.example.test"),
 	})

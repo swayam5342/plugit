@@ -25,9 +25,9 @@ import (
 	"github.com/swayam5342/plugit/internal/mcpserver"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/naming"
-	"github.com/swayam5342/plugit/internal/openapi"
 	"github.com/swayam5342/plugit/internal/policy"
-	"github.com/swayam5342/plugit/internal/proxy"
+	"github.com/swayam5342/plugit/internal/protocol/rest"
+	"github.com/swayam5342/plugit/internal/protocol/rest/openapi"
 	"github.com/swayam5342/plugit/internal/redact"
 	"github.com/swayam5342/plugit/internal/schema"
 	"github.com/swayam5342/plugit/internal/secrets"
@@ -465,14 +465,14 @@ func runServe(ctx context.Context, s runSettings, d runDeps) error {
 		return err
 	}
 
-	var fixed []proxy.Fixed
+	var fixed []rest.Fixed
 	var hidden []string
 	for _, h := range headers {
 		v, err := d.resolver.Resolve(h.ref)
 		if err != nil {
 			return fmt.Errorf("--header %s: %w", h.name, err)
 		}
-		fixed = append(fixed, proxy.Fixed{Name: h.name, In: model.InHeader, Value: v, Secret: true})
+		fixed = append(fixed, rest.Fixed{Name: h.name, In: model.InHeader, Value: v, Secret: true})
 		hidden = append(hidden, h.name)
 	}
 	for _, f := range fixedFlags {
@@ -480,7 +480,7 @@ func runServe(ctx context.Context, s runSettings, d runDeps) error {
 		if err != nil {
 			return fmt.Errorf("--fixed %s: %w", f.name, err)
 		}
-		fixed = append(fixed, proxy.Fixed{Name: f.name, In: model.InQuery, Value: v, Secret: f.ref.IsSecret()})
+		fixed = append(fixed, rest.Fixed{Name: f.name, In: model.InQuery, Value: v, Secret: f.ref.IsSecret()})
 		hidden = append(hidden, f.name)
 	}
 
@@ -489,7 +489,7 @@ func runServe(ctx context.Context, s runSettings, d runDeps) error {
 		tools = append(tools, mcpserver.Tool{Tool: schema.Prepare(t, schema.Options{Fixed: hidden})})
 	}
 
-	target := proxy.Target{BaseURL: baseURL, Fixed: fixed, UserAgent: "plugit/" + d.info.withDefaults().Version}
+	target := rest.Target{BaseURL: baseURL, Fixed: fixed, UserAgent: "plugit/" + d.info.withDefaults().Version}
 	red := redact.New(redact.Options{
 		Secrets:           target.SecretValues(),
 		SecretHeaders:     hidden,

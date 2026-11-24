@@ -21,7 +21,7 @@ import (
 	"github.com/swayam5342/plugit/internal/jsonpick"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/protocol"
-	"github.com/swayam5342/plugit/internal/proxy"
+	"github.com/swayam5342/plugit/internal/protocol/rest"
 	"github.com/swayam5342/plugit/internal/redact"
 )
 
@@ -30,8 +30,8 @@ import (
 type Deps struct {
 	Proto    protocol.Protocol
 	Doer     httpx.Doer
-	Target   proxy.Target // credential + fixed params for AttachAuth
-	Endpoint *url.URL     // pinned
+	Target   rest.Target // credential + fixed params for AttachAuth
+	Endpoint *url.URL    // pinned
 	Redactor *redact.Redactor
 	Timeout  time.Duration
 }
@@ -67,20 +67,20 @@ func Perform(ctx context.Context, d Deps, t model.Tool, args map[string]any, pic
 	if err != nil {
 		return failure(t, red, "", "invalid arguments: "+err.Error())
 	}
-	if err := proxy.AttachAuth(req, tg); err != nil {
-		return failure(t, red, transportCode, proxy.DescribeTransportError(ctx, err))
+	if err := attachAuth(req, tg); err != nil {
+		return failure(t, red, transportCode, describeTransportError(ctx, err))
 	}
 
 	resp, err := d.Doer.Do(req)
 	if err != nil {
-		return failure(t, red, transportCode, proxy.DescribeTransportError(ctx, err))
+		return failure(t, red, transportCode, describeTransportError(ctx, err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	truncated := errors.Is(err, httpx.ErrResponseTruncated)
 	if err != nil && !truncated {
-		return failure(t, red, transportCode, proxy.DescribeTransportError(ctx, fmt.Errorf("reading response: %w", err)))
+		return failure(t, red, transportCode, describeTransportError(ctx, fmt.Errorf("reading response: %w", err)))
 	}
 	if resp.StatusCode == http.StatusUnauthorized && tg.Auth.Unauthorized != nil {
 		tg.Auth.Unauthorized()

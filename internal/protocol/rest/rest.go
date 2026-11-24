@@ -1,6 +1,3 @@
-// Package rest is the REST Protocol: it encodes a call into an HTTP request
-// (via internal/proxy, credential-free) and decodes the response into a
-// neutral Result (SPEC §3.5 P4/§3.7 P5).
 package rest
 
 import (
@@ -14,13 +11,12 @@ import (
 
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/protocol"
-	"github.com/swayam5342/plugit/internal/proxy"
 )
 
 // REST serves REST tools. Target carries the fixed params and user agent;
 // the credential is attached by invoke (AttachAuth), not here (T17).
 type REST struct {
-	Target proxy.Target
+	Target Target
 }
 
 // Name reports the protocol.
@@ -31,7 +27,7 @@ func (REST) Name() model.Protocol { return model.REST }
 func (r REST) Encode(ctx context.Context, c protocol.Call) (*http.Request, error) {
 	tg := r.Target
 	tg.BaseURL = c.Endpoint
-	return proxy.Encode(ctx, c.Tool, c.Args, tg)
+	return Encode(ctx, c.Tool, c.Args, tg)
 }
 
 // Describe returns the REST method and path for the TUI and `try`.

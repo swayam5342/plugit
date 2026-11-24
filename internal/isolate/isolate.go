@@ -28,7 +28,7 @@ import (
 	"github.com/swayam5342/plugit/internal/ingest"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/naming"
-	"github.com/swayam5342/plugit/internal/openapi"
+	"github.com/swayam5342/plugit/internal/protocol/rest/openapi"
 )
 
 // ChildArg is the hidden first argument that turns plugit into a parse child.

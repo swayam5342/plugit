@@ -28,9 +28,9 @@ import (
 	"github.com/swayam5342/plugit/internal/mcpserver"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/oauth"
-	"github.com/swayam5342/plugit/internal/openapi"
 	"github.com/swayam5342/plugit/internal/policy"
-	"github.com/swayam5342/plugit/internal/proxy"
+	"github.com/swayam5342/plugit/internal/protocol/rest"
+	"github.com/swayam5342/plugit/internal/protocol/rest/openapi"
 	"github.com/swayam5342/plugit/internal/redact"
 	"github.com/swayam5342/plugit/internal/schema"
 	"github.com/swayam5342/plugit/internal/secrets"
@@ -208,7 +208,7 @@ type active struct {
 	cfg     *config.API
 	toolset string
 	tools   []mcpserver.Tool
-	target  proxy.Target
+	target  rest.Target
 	red     *redact.Redactor
 	doer    httpx.Doer
 }
@@ -353,9 +353,9 @@ func parserID(info BuildInfo) string {
 
 // buildTarget resolves the credential and fixed params. It returns the
 // names to hide from the model and to redact by name.
-func buildTarget(cfg *config.API, baseURL *url.URL, d runDeps, userAgent string) (proxy.Target, []string, error) {
+func buildTarget(cfg *config.API, baseURL *url.URL, d runDeps, userAgent string) (rest.Target, []string, error) {
 	res := d.resolver
-	tg := proxy.Target{BaseURL: baseURL, UserAgent: userAgent}
+	tg := rest.Target{BaseURL: baseURL, UserAgent: userAgent}
 	var hidden []string
 
 	a := cfg.Auth
@@ -368,7 +368,7 @@ func buildTarget(cfg *config.API, baseURL *url.URL, d runDeps, userAgent string)
 		}
 		store := keyringStore{get: res.Keyring, set: d.keyring, api: cfg.Name}
 		src := oauth.NewSource(oc, oauthDoer(cfg), store, nil)
-		tg.Auth = proxy.Auth{Type: proxy.AuthBearer, Token: src.Token, Unauthorized: src.Invalidate}
+		tg.Auth = rest.Auth{Type: rest.AuthBearer, Token: src.Token, Unauthorized: src.Invalidate}
 		tg.Extra = append(tg.Extra, oc.ClientSecret)
 	default:
 		ref, err := secrets.ParseSecretRef(a.Secret)
@@ -379,7 +379,7 @@ func buildTarget(cfg *config.API, baseURL *url.URL, d runDeps, userAgent string)
 		if err != nil {
 			return tg, nil, fmt.Errorf("auth.secret: %w", err)
 		}
-		tg.Auth = proxy.Auth{Type: proxy.AuthType(a.Type), Header: a.Header, Param: a.Param, Secret: v}
+		tg.Auth = rest.Auth{Type: rest.AuthType(a.Type), Header: a.Header, Param: a.Param, Secret: v}
 		switch a.Type {
 		case config.AuthHeader:
 			hidden = append(hidden, a.Header)
@@ -400,7 +400,7 @@ func buildTarget(cfg *config.API, baseURL *url.URL, d runDeps, userAgent string)
 		if f.In == "header" {
 			in = model.InHeader
 		}
-		tg.Fixed = append(tg.Fixed, proxy.Fixed{Name: f.Name, In: in, Value: v, Secret: ref.IsSecret()})
+		tg.Fixed = append(tg.Fixed, rest.Fixed{Name: f.Name, In: in, Value: v, Secret: ref.IsSecret()})
 		hidden = append(hidden, f.Name)
 	}
 	return tg, hidden, nil

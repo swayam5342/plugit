@@ -10,7 +10,7 @@ import (
 
 	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/model"
-	"github.com/swayam5342/plugit/internal/openapi"
+	"github.com/swayam5342/plugit/internal/protocol/rest/openapi"
 )
 
 func tl(method, path, name, desc string) model.Tool {

@@ -12,7 +12,6 @@ import (
 	"github.com/swayam5342/plugit/internal/jsonpick"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/protocol/rest"
-	"github.com/swayam5342/plugit/internal/proxy"
 	"github.com/swayam5342/plugit/internal/redact"
 )
 
@@ -22,7 +21,7 @@ var getThing = model.Tool{Key: "GET /things/{id}", Name: "getThing", HTTP: &mode
 func deps(t *testing.T, srv *httptest.Server) (Deps, model.Tool) {
 	t.Helper()
 	u, _ := url.Parse(srv.URL)
-	tg := proxy.Target{BaseURL: u, Auth: proxy.Auth{Type: proxy.AuthBearer, Secret: "test-token-123"}}
+	tg := rest.Target{BaseURL: u, Auth: rest.Auth{Type: rest.AuthBearer, Secret: "test-token-123"}}
 	red := redact.New(redact.Options{Secrets: tg.SecretValues()})
 	return Deps{Proto: rest.REST{Target: tg}, Doer: srv.Client(), Target: tg, Endpoint: u, Redactor: red}, getThing
 }
@@ -72,7 +71,7 @@ func TestInvokeResponseFieldsFilter(t *testing.T) {
 }
 
 func TestInvokeBadArgsIsError(t *testing.T) {
-	d := Deps{Proto: rest.REST{Target: proxy.Target{BaseURL: mustU("https://api.example.test")}}, Endpoint: mustU("https://api.example.test"), Redactor: redact.New(redact.Options{})}
+	d := Deps{Proto: rest.REST{Target: rest.Target{BaseURL: mustU("https://api.example.test")}}, Endpoint: mustU("https://api.example.test"), Redactor: redact.New(redact.Options{})}
 	res := Perform(context.Background(), d, getThing, map[string]any{}, nil) // missing required path param
 	if !res.IsError {
 		t.Error("a missing path param should yield an isError result, not a panic")
@@ -86,7 +85,7 @@ type errDoer struct{}
 func (errDoer) Do(*http.Request) (*http.Response, error) { return nil, errors.New("dial tcp: refused") }
 
 func TestInvokeTransportErrorCode(t *testing.T) {
-	d := Deps{Proto: rest.REST{Target: proxy.Target{BaseURL: mustU("https://api.example.test")}}, Doer: errDoer{}, Endpoint: mustU("https://api.example.test"), Redactor: redact.New(redact.Options{})}
+	d := Deps{Proto: rest.REST{Target: rest.Target{BaseURL: mustU("https://api.example.test")}}, Doer: errDoer{}, Endpoint: mustU("https://api.example.test"), Redactor: redact.New(redact.Options{})}
 	res := Perform(context.Background(), d, getThing, map[string]any{"id": "42"}, nil)
 	if !res.IsError || res.Code != "transport error" {
 		t.Errorf("IsError=%v Code=%q, want transport error", res.IsError, res.Code)
