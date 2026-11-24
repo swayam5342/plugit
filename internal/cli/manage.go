@@ -58,7 +58,7 @@ func listAPIs(p config.Paths, asJSON bool, w io.Writer) error {
 		if err != nil {
 			s.Error = err.Error()
 		} else {
-			s.BaseURL, s.Mode, s.Toolsets = cfg.BaseURL, cfg.Policy.Mode, map[string]int{}
+			s.BaseURL, s.Mode, s.Toolsets = cfg.Endpoint, cfg.Policy.Mode, map[string]int{}
 			for tn, ts := range cfg.Toolsets {
 				s.Toolsets[tn] = len(ts.Tools)
 			}
@@ -275,7 +275,7 @@ func doctorAPI(d doctorDeps, r *report, name string) {
 		r.fail("plugit.yaml: %s", strings.ReplaceAll(err.Error(), "\n", "; "))
 		return
 	}
-	r.ok("plugit.yaml valid, base URL %s, %d toolset(s)", cfg.BaseURL, len(cfg.Toolsets))
+	r.ok("plugit.yaml valid, base URL %s, %d toolset(s)", cfg.Endpoint, len(cfg.Toolsets))
 
 	snap, _ := d.paths.SpecSnapshot(name)
 	if _, sum, err := config.ReadSnapshot(snap); err != nil {
@@ -301,7 +301,7 @@ func doctorAPI(d doctorDeps, r *report, name string) {
 	if cfg.Log.ResponsePreview {
 		r.warn("log.response_preview is true")
 	}
-	if strings.HasPrefix(cfg.BaseURL, "http://") {
+	if strings.HasPrefix(cfg.Endpoint, "http://") {
 		r.warn("base_url uses http: credentials and data travel unencrypted")
 	}
 

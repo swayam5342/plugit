@@ -246,7 +246,7 @@ func loadActive(ctx context.Context, s serveSettings, d runDeps, logger *slog.Lo
 		return nil, fmt.Errorf("toolset %q selects no tools: add operations with `plugit edit %s`", tsName, cfg.Name)
 	}
 
-	baseURL, err := url.Parse(cfg.BaseURL)
+	baseURL, err := url.Parse(cfg.Endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("base_url: %w", err)
 	}
@@ -305,7 +305,7 @@ func loadManifest(ctx context.Context, p config.Paths, cfg *config.API, d runDep
 	key := config.CacheKey{SpecSHA256: sum, Prefix: cfg.Prefix, Parser: parserID(d.info), UnsafePaths: cfg.Network.AllowInsecure}
 	m, err := config.ReadManifest(cachePath, key)
 	if err == nil {
-		return m, nil
+		return checkProtocol(cfg, m)
 	}
 	if !errors.Is(err, os.ErrNotExist) {
 		logger.Info("re-parsing the spec snapshot", "reason", err.Error())
@@ -316,6 +316,23 @@ func loadManifest(ctx context.Context, p config.Paths, cfg *config.API, d runDep
 	}
 	if err := config.WriteManifest(cachePath, key, m); err != nil {
 		logger.Warn("could not write the manifest cache; the next start will parse again", "error", err.Error())
+	}
+	return checkProtocol(cfg, m)
+}
+
+// checkProtocol rejects a config whose protocol disagrees with the manifest
+// it is paired with (a hand edit, or a sync whose source changed format).
+func checkProtocol(cfg *config.API, m *model.Manifest) (*model.Manifest, error) {
+	want := cfg.Protocol
+	if want == "" {
+		want = string(model.REST)
+	}
+	got := string(m.Protocol)
+	if got == "" {
+		got = string(model.REST) // a manifest with no protocol predates the field; it is REST
+	}
+	if want != got {
+		return nil, fmt.Errorf("config protocol %q does not match the %q manifest; re-run `plugit sync %s`", want, got, cfg.Name)
 	}
 	return m, nil
 }

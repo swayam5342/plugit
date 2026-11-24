@@ -35,10 +35,10 @@ func (k *fakeKeyring) Get(service, key string) (string, error) {
 	return v, nil
 }
 
-const oauthYAML = `version: 4
+const oauthYAML = `version: 1
 name: pets
 source: {url: https://example.test/openapi.yaml}
-base_url: %s
+endpoint: %s
 prefix: pp
 network: {allow_private: true}
 auth: %s

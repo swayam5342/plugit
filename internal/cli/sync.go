@@ -49,7 +49,7 @@ arriving through an update is shown before it's adopted.
 Adopting the new spec never removes or edits a toolset entry: every rename,
 description, policy and rate limit stays, including those for operations
 the spec dropped (they're reported as missing until you remove them with
-plugit edit). The pinned base_url is never changed, whatever the new spec's
+plugit edit). The pinned endpoint is never changed, whatever the new spec's
 servers say (SPEC T3).
 
 On a terminal a review screen lets you pick which new operations to add.
@@ -119,7 +119,7 @@ func syncAPI(ctx context.Context, p config.Paths, name string, s syncSettings) e
 	switch {
 	case diff.Empty():
 	case s.review != nil:
-		add, err = s.review(ctx, tui.SyncInput{API: name, Diff: diff, BaseURL: cfg.BaseURL, Toolset: tsName, LintNote: lintNote})
+		add, err = s.review(ctx, tui.SyncInput{API: name, Diff: diff, BaseURL: cfg.Endpoint, Toolset: tsName, LintNote: lintNote})
 		if errors.Is(err, tui.ErrCancelled) {
 			_, err := fmt.Fprintln(s.out, "Cancelled; nothing changed.")
 			return err
@@ -128,7 +128,7 @@ func syncAPI(ctx context.Context, p config.Paths, name string, s syncSettings) e
 			return err
 		}
 	default:
-		if err := printSyncDiff(s.out, cfg.BaseURL, diff, lintNote, findings); err != nil {
+		if err := printSyncDiff(s.out, cfg.Endpoint, diff, lintNote, findings); err != nil {
 			return err
 		}
 		if !s.yes {
@@ -176,10 +176,10 @@ func sourceLocation(loc string) string {
 func printSyncDiff(w io.Writer, baseURL string, d curate.SyncDiff, lintNote string, findings []lint.Finding) error {
 	var b strings.Builder
 	if d.ServersChanged {
-		fmt.Fprintf(&b, "! The spec's servers changed: %s -> %s\n  base_url stays %s (sync never changes it; edit plugit.yaml if you trust the new server)\n",
+		fmt.Fprintf(&b, "! The spec's servers changed: %s -> %s\n  endpoint stays %s (sync never changes it; edit plugit.yaml if you trust the new server)\n",
 			tui.Safe(cmp.Or(strings.Join(d.ServersBefore, ", "), "(none)")), tui.Safe(cmp.Or(strings.Join(d.ServersAfter, ", "), "(none)")), baseURL)
 		if !d.BaseURLListed {
-			b.WriteString("  The new spec no longer lists your base_url.\n")
+			b.WriteString("  The new spec no longer lists your endpoint.\n")
 		}
 	}
 	served := func(c curate.OpChange) string {

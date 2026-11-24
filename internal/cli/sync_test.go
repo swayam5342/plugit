@@ -45,10 +45,10 @@ paths:
       responses: {'200': {description: ok}}
 `
 
-const richYAML = `version: 2
+const richYAML = `version: 1
 name: pets
 source: {url: https://example.test/openapi.yaml}
-base_url: %s
+endpoint: %s
 prefix: pp
 network: {allow_private: true}
 auth: {type: header, header: X-Api-Key, secret: env:PETS_KEY}
@@ -105,8 +105,8 @@ func TestSyncKeepsEveryOverride(t *testing.T) {
 	}
 
 	cfg, _ := config.LoadAPI(p, "pets")
-	if cfg.BaseURL != up.URL || !strings.HasSuffix(cfg.Source.URL, "spec.yaml") || cfg.Source.SHA256 == "" {
-		t.Errorf("config after sync: base=%s source=%s sha=%s", cfg.BaseURL, cfg.Source.URL, cfg.Source.SHA256)
+	if cfg.Endpoint != up.URL || !strings.HasSuffix(cfg.Source.URL, "spec.yaml") || cfg.Source.SHA256 == "" {
+		t.Errorf("config after sync: base=%s source=%s sha=%s", cfg.Endpoint, cfg.Source.URL, cfg.Source.SHA256)
 	}
 	snap, _ := p.SpecSnapshot("pets")
 	data, sum, err := config.ReadSnapshot(snap)
@@ -121,7 +121,7 @@ func TestSyncKeepsEveryOverride(t *testing.T) {
 
 	o := out.String()
 	for _, want := range []string{"+ GET /owners", "- POST /pets", "~ GET /pets/{id}", "description", "parameters",
-		"servers changed", "new-home.example.test", "base_url stays " + up.URL, "overrides kept"} {
+		"servers changed", "new-home.example.test", "endpoint stays " + up.URL, "overrides kept"} {
 		if !strings.Contains(o, want) {
 			t.Errorf("output missing %q:\n%s", want, o)
 		}

@@ -80,7 +80,7 @@ func resolveRunSettings(f runFlags, changed map[string]bool, lookup func(string)
 
 	s := runSettings{
 		spec:    str("", f.spec, "PLUGIT_SPEC", ""),
-		baseURL: str("base-url", f.baseURL, "PLUGIT_BASE_URL", ""),
+		baseURL: str("endpoint", f.baseURL, "PLUGIT_ENDPOINT", ""),
 		prefix:  str("prefix", f.prefix, "PLUGIT_PREFIX", ""),
 		headers: list("header", f.headers, "PLUGIT_HEADER"),
 		fixed:   list("fixed", f.fixed, "PLUGIT_FIXED"),
@@ -220,28 +220,28 @@ func safeName(s string) string {
 	return s
 }
 
-// chooseBaseURL picks the pinned base URL. --base-url always wins. Otherwise
+// chooseBaseURL picks the pinned base URL. --endpoint always wins. Otherwise
 // the spec must declare exactly one absolute server, and no credentials may
 // be configured: a spec's servers[ ] is untrusted, so credentials only ever
 // go to a URL the user typed (SPEC T3).
 func chooseBaseURL(flag string, servers []string, credentials bool) (*url.URL, error) {
 	if flag != "" {
-		return validateBaseURL(flag, "--base-url")
+		return validateBaseURL(flag, "--endpoint")
 	}
 	servers = collapseSchemeVariants(servers)
 	switch {
 	case len(servers) == 0:
-		return nil, errors.New("the spec declares no server; pass --base-url")
+		return nil, errors.New("the spec declares no server; pass --endpoint")
 	case len(servers) > 1:
-		return nil, fmt.Errorf("the spec declares %d servers (%s); pass --base-url to choose one", len(servers), listServers(servers))
+		return nil, fmt.Errorf("the spec declares %d servers (%s); pass --endpoint to choose one", len(servers), listServers(servers))
 	}
 	s := servers[0]
 	u, err := validateBaseURL(s, "the spec's server")
 	if err != nil {
-		return nil, fmt.Errorf("%w; pass --base-url", err)
+		return nil, fmt.Errorf("%w; pass --endpoint", err)
 	}
 	if credentials {
-		return nil, fmt.Errorf("credentials are configured, so pass --base-url explicitly: the spec's server (%s) is not trusted to receive them", listServers(servers))
+		return nil, fmt.Errorf("credentials are configured, so pass --endpoint explicitly: the spec's server (%s) is not trusted to receive them", listServers(servers))
 	}
 	return u, nil
 }
@@ -390,14 +390,14 @@ PLUGIT_HEADER, PLUGIT_FIXED), then defaults.
 
 Secrets in --header and --fixed must be env: or keyring: references; put the
 real value in the MCP client's env block. When any credential is configured,
---base-url is required: a spec's servers entry is never trusted with it.`,
+--endpoint is required: a spec's servers entry is never trusted with it.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 {
 				f.spec = args[0]
 			}
 			changed := map[string]bool{}
-			for _, n := range []string{"base-url", "prefix", "mode", "header", "fixed", "tags", "methods", "paths", "max-tools", "timeout", "allow-private", "allow-insecure"} {
+			for _, n := range []string{"endpoint", "prefix", "mode", "header", "fixed", "tags", "methods", "paths", "max-tools", "timeout", "allow-private", "allow-insecure"} {
 				changed[n] = cmd.Flags().Changed(n)
 			}
 			s, err := resolveRunSettings(f, changed, os.LookupEnv)
@@ -415,7 +415,7 @@ real value in the MCP client's env block. When any credential is configured,
 		},
 	}
 	fl := cmd.Flags()
-	fl.StringVar(&f.baseURL, "base-url", "", "pinned API base URL (required when the spec has no single absolute server, or when credentials are set)")
+	fl.StringVar(&f.baseURL, "endpoint", "", "pinned API base URL (required when the spec has no single absolute server, or when credentials are set)")
 	fl.StringVar(&f.prefix, "prefix", "", "tool name prefix, e.g. pets -> pets_listPets")
 	fl.StringVar(&f.mode, "mode", string(policy.ReadOnly), "policy mode: read-only, confirm-writes or full")
 	fl.StringArrayVar(&f.headers, "header", nil, "credential header Name=env:VAR or Name=keyring:service/key (repeatable)")
@@ -457,7 +457,7 @@ func runServe(ctx context.Context, s runSettings, d runDeps) error {
 	}
 	if credentials {
 		if err := config.CheckCredentialTransport(baseURL.String(), s.allowInsecure); err != nil {
-			return fmt.Errorf("--base-url %w; to send it over http anyway, pass --allow-insecure", err)
+			return fmt.Errorf("--endpoint %w; to send it over http anyway, pass --allow-insecure", err)
 		}
 	}
 	selected := selectTools(m.Tools, s.mode, s.tags, s.methods, s.paths)

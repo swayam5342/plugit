@@ -241,7 +241,7 @@ func toolset(in Input, name string) (kept []Finding, n int) {
 // apiFindings are the API-wide rules.
 func apiFindings(a config.API) []Finding {
 	var out []Finding
-	if u, err := url.Parse(a.BaseURL); err == nil && u.Scheme == "http" && !loopback(u.Hostname()) && sendsSecrets(a) {
+	if u, err := url.Parse(a.Endpoint); err == nil && u.Scheme == "http" && !loopback(u.Hostname()) && sendsSecrets(a) {
 		f := Finding{Rule: "L011", Severity: Error,
 			Message: fmt.Sprintf("base_url %s is plain http to a remote host, and credentials are sent: use https", u.Redacted())}
 		if a.Network.AllowInsecure {

@@ -46,7 +46,7 @@ func TestList(t *testing.T) {
 	}
 	var got []struct {
 		Name     string         `json:"name"`
-		BaseURL  string         `json:"base_url"`
+		BaseURL  string         `json:"endpoint"`
 		Mode     string         `json:"mode"`
 		Toolsets map[string]int `json:"toolsets"`
 		Error    string         `json:"error"`

@@ -23,7 +23,7 @@ func tl(method, path, name, desc string) model.Tool {
 
 func api(tools map[string]config.ToolOverride) config.API {
 	return config.API{
-		Version: 1, Name: "pets", BaseURL: "https://pets.example.test",
+		Version: 1, Name: "pets", Endpoint: "https://pets.example.test",
 		Policy:   config.Policy{Mode: "read-only"},
 		Toolsets: map[string]config.Toolset{"default": {Tools: tools}},
 	}
@@ -131,13 +131,13 @@ func TestRules(t *testing.T) {
 		}},
 		{"L011", Error, func() Input {
 			a := api(all("GET /pets"))
-			a.BaseURL = "http://pets.example.test"
+			a.Endpoint = "http://pets.example.test"
 			a.Auth = config.Auth{Type: config.AuthBearer, Secret: "env:PETS_TOKEN"}
 			return Input{API: a, Tools: []model.Tool{tl("GET", "/pets", "listPets", "List pets.")}}
 		}},
 		{"L011", Error, func() Input {
 			a := api(all("GET /pets"))
-			a.BaseURL = "http://pets.example.test"
+			a.Endpoint = "http://pets.example.test"
 			a.Fixed = []config.Fixed{{Name: "X-Key", Value: "keyring:plugit/pets"}}
 			return Input{API: a, Tools: []model.Tool{tl("GET", "/pets", "listPets", "List pets.")}}
 		}},
@@ -171,14 +171,14 @@ func TestRules(t *testing.T) {
 func TestL011Exceptions(t *testing.T) {
 	for _, base := range []string{"http://localhost:8080", "http://127.0.0.1", "http://[::1]:9000"} {
 		a := api(all("GET /pets"))
-		a.BaseURL = base
+		a.Endpoint = base
 		a.Auth = config.Auth{Type: config.AuthBearer, Secret: "env:T"}
 		if f := find(Run(Input{API: a, Tools: []model.Tool{tl("GET", "/pets", "listPets", "List pets.")}}), "L011"); f != nil {
 			t.Errorf("%s: %+v", base, *f)
 		}
 	}
 	a := api(all("GET /pets"))
-	a.BaseURL = "http://pets.example.test"
+	a.Endpoint = "http://pets.example.test"
 	if f := find(Run(Input{API: a, Tools: []model.Tool{tl("GET", "/pets", "listPets", "List pets.")}}), "L011"); f != nil {
 		t.Errorf("no credentials: %+v", *f)
 	}
@@ -338,7 +338,7 @@ func TestSummaryAndOrder(t *testing.T) {
 func TestL011AndTheInsecureSwitch(t *testing.T) {
 	lint := func(mut func(*config.API)) *Finding {
 		a := api(all("GET /pets"))
-		a.BaseURL = "http://intranet.example.test"
+		a.Endpoint = "http://intranet.example.test"
 		a.Auth = config.Auth{Type: config.AuthBearer, Secret: "env:T"}
 		mut(&a)
 		return find(Run(Input{API: a, Tools: []model.Tool{tl("GET", "/pets", "listPets", "List pets.")}}), "L011")

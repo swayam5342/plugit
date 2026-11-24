@@ -27,7 +27,7 @@ import (
 const petsYAML = `version: 1
 name: pets
 source: {url: https://example.test/openapi.yaml}
-base_url: %s
+endpoint: %s
 prefix: pp
 network: {allow_private: true}
 auth: {type: header, header: X-Api-Key, secret: env:PETS_KEY}
@@ -49,7 +49,7 @@ toolsets:
 `
 
 // setupAPI writes apis/pets/{plugit.yaml,spec.snapshot.json}. The spec's
-// own server is an attacker host: serve must only ever use base_url.
+// own server is an attacker host: serve must only ever use endpoint.
 func setupAPI(t *testing.T, baseURL string) config.Paths {
 	t.Helper()
 	p := config.NewPaths(t.TempDir())

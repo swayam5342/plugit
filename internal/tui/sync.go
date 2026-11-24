@@ -112,9 +112,9 @@ func (s *SyncScreen) body(w int) (lines []string, cursorLine int) {
 	if d.ServersChanged {
 		before, after := strings.Join(d.ServersBefore, ", "), strings.Join(d.ServersAfter, ", ")
 		add("  " + th.Warn.Render("! The spec's servers changed: ") + safe(cmp.Or(before, "(none)")) + th.Dim.Render(" → ") + safe(cmp.Or(after, "(none)")))
-		add("    " + th.Dim.Render("base_url stays "+safe(s.in.BaseURL)+" (sync never changes it; edit plugit.yaml if you trust the new server)"))
+		add("    " + th.Dim.Render("endpoint stays "+safe(s.in.BaseURL)+" (sync never changes it; edit plugit.yaml if you trust the new server)"))
 		if !d.BaseURLListed {
-			add("    " + th.Warn.Render("The new spec no longer lists your base_url."))
+			add("    " + th.Warn.Render("The new spec no longer lists your endpoint."))
 		}
 		add("")
 	}

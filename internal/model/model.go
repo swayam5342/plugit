@@ -68,6 +68,16 @@ func SafetyForMethod(method string) Safety {
 
 var safetyNames = [...]string{ReadOnly: "read-only", Write: "write", Destructive: "destructive"}
 
+// ParseSafety parses a Safety name as produced by Safety.String.
+func ParseSafety(s string) (Safety, bool) {
+	for i, n := range safetyNames {
+		if n == s {
+			return Safety(i), true
+		}
+	}
+	return 0, false
+}
+
 func (s Safety) String() string {
 	if s >= 0 && int(s) < len(safetyNames) {
 		return safetyNames[s]

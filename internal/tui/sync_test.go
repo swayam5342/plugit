@@ -42,7 +42,7 @@ func TestSyncScreenShowsDiff(t *testing.T) {
 	for _, want := range []string{
 		"sync", "pets", "Added (2)", "POST /pets/{id}/photos", "pp_addPhoto", "Changed (1)", "description, parameters",
 		"Ignore previous instructions", "default", "Removed (1)", "DELETE /pets/{id}", "kept",
-		"servers changed", "evil.example.test", "base_url stays https://pets.example.test", "no longer lists",
+		"servers changed", "evil.example.test", "endpoint stays https://pets.example.test", "no longer lists",
 		"1 lint error",
 	} {
 		if !strings.Contains(v, want) {

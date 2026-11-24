@@ -33,7 +33,7 @@ func syncFixture() (old, updated *model.Manifest, cfg config.API) {
 	updated = &model.Manifest{Endpoints: []string{"https://evil.example.test"}, Tools: []model.Tool{keep, changed2, added}}
 
 	cfg = config.API{
-		BaseURL: "https://api.example.test/v1",
+		Endpoint: "https://api.example.test/v1",
 		Toolsets: map[string]config.Toolset{
 			"default": {Tools: map[string]config.ToolOverride{
 				"GET /pets":         {Name: "list", Description: "List pets.", RateLimit: "5/min"},
@@ -82,7 +82,7 @@ func TestDiffManifests(t *testing.T) {
 func TestDiffServersNormalized(t *testing.T) {
 	old := &model.Manifest{Endpoints: []string{"https://api.example.test/v1/"}}
 	updated := &model.Manifest{Endpoints: []string{"https://api.example.test/v1", "https://mirror.example.test"}}
-	d := DiffManifests(old, updated, config.API{BaseURL: "https://api.example.test/v1"})
+	d := DiffManifests(old, updated, config.API{Endpoint: "https://api.example.test/v1"})
 	if !d.ServersChanged || !d.BaseURLListed {
 		t.Errorf("changed=%v listed=%v", d.ServersChanged, d.BaseURLListed)
 	}

@@ -24,8 +24,9 @@ import (
 )
 
 // CurrentVersion is the plugit.yaml schema version this build reads and
-// writes. Changing the schema means bumping it and adding a migration.
-const CurrentVersion = 6
+// writes. The schema restarted at 1 for the protocol-core rebuild (clean
+// break, no pre-1.0 migration; SPEC §8.1.3).
+const CurrentVersion = 1
 
 // MaxConfigBytes caps plugit.yaml. A real config is a few kilobytes.
 const MaxConfigBytes = 1 << 20
@@ -80,8 +81,9 @@ const (
 type API struct {
 	Version  int                `yaml:"version"`
 	Name     string             `yaml:"name"`
+	Protocol string             `yaml:"protocol"`
 	Source   Source             `yaml:"source"`
-	BaseURL  string             `yaml:"base_url"`
+	Endpoint string             `yaml:"endpoint"`
 	Prefix   string             `yaml:"prefix,omitempty"`
 	Fixed    []Fixed            `yaml:"fixed,omitempty"`
 	Network  Network            `yaml:"network"`
@@ -95,6 +97,7 @@ type API struct {
 // Source records where the spec came from.
 type Source struct {
 	URL    string `yaml:"url"`
+	Format string `yaml:"format,omitempty"`
 	SHA256 string `yaml:"sha256,omitempty"`
 }
 
@@ -144,6 +147,7 @@ type Log struct {
 type Toolset struct {
 	Tools       map[string]ToolOverride `yaml:"tools,omitempty"`
 	IncludeTags []string                `yaml:"include_tags,omitempty"`
+	Safety      []string                `yaml:"safety,omitempty"`
 	Methods     []string                `yaml:"methods,omitempty"`
 }
 
@@ -233,8 +237,11 @@ func ParseAPI(data []byte) (*API, error) {
 		return nil, fmt.Errorf("%w: expected a mapping of settings at the top level", ErrInvalidConfig)
 	}
 	if v, ok := doc["version"].(int); ok && v > CurrentVersion {
-		return nil, fmt.Errorf("%w: version %d is newer than this plugit supports (%d); upgrade plugit",
-			ErrUnsupportedVersion, v, CurrentVersion)
+		// The config schema restarted at 1 for the protocol-core rebuild
+		// (SPEC §8.1.3). A higher version is a pre-rebuild file; there is no
+		// migration, so the user re-adds the API.
+		return nil, fmt.Errorf("%w: config from a pre-1.0 plugit (version %d): re-run `plugit add`",
+			ErrUnsupportedVersion, v)
 	}
 
 	var c API
@@ -245,15 +252,7 @@ func ParseAPI(data []byte) (*API, error) {
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
-	c.migrate()
 	return &c, nil
-}
-
-// migrate brings a validated older config up to CurrentVersion.
-func (c *API) migrate() {
-	if c.Version < 6 {
-		c.Version = 6
-	}
 }
 
 func yamlOpts() []yaml.Option {
@@ -274,6 +273,9 @@ func yamlError(err error) string {
 }
 
 func (c *API) applyDefaults() {
+	if c.Protocol == "" {
+		c.Protocol = string(model.REST)
+	}
 	if c.Network.Timeout == 0 {
 		c.Network.Timeout = DefaultTimeout
 	}
@@ -318,6 +320,11 @@ func (c *API) Validate() error {
 	if c.Version == 0 {
 		bad("version", "missing (this plugit writes version %d)", CurrentVersion)
 	}
+	proto := model.Protocol(c.Protocol)
+	if !model.KnownProtocol(proto) {
+		bad("protocol", "%q is not a protocol this plugit serves (needs a newer plugit)", c.Protocol)
+		proto = model.REST // validate the rest of the file against REST rules
+	}
 	if err := ValidateAPIName(c.Name); err != nil {
 		wrap("name", err)
 	}
@@ -327,8 +334,8 @@ func (c *API) Validate() error {
 	if c.Source.SHA256 != "" && !sha256Re.MatchString(c.Source.SHA256) {
 		bad("source.sha256", "must be 64 lowercase hex characters")
 	}
-	if err := validateBaseURL(c.BaseURL); err != nil {
-		bad("base_url", "%s", err)
+	if err := validateEndpoint(c.Endpoint); err != nil {
+		bad("endpoint", "%s", err)
 	}
 	if !prefixRe.MatchString(c.Prefix) {
 		bad("prefix", "use at most 32 letters, digits, '_' or '-'")
@@ -346,8 +353,8 @@ func (c *API) Validate() error {
 			bad(field+".name", "%q can't be a fixed header (auth and hop-by-hop headers are set by plugit)", f.Name)
 		}
 		seen[strings.ToLower(f.Name)] = true
-		if f.In != "" && f.In != "query" && f.In != "header" {
-			bad(field+".in", "%q: use query or header (or leave it out to use the spec's location)", f.In)
+		if f.In != "" && !model.FixedInAllowed(proto, f.In) {
+			bad(field+".in", "%q is not a fixed-param location for %s (or leave it out to use the spec's location)", f.In, proto)
 		}
 		if _, err := secrets.ParseRef(f.Value); err != nil {
 			wrap(field+".value", err)
@@ -363,8 +370,8 @@ func (c *API) Validate() error {
 
 	c.validateAuth(bad, wrap)
 	if c.hasCredential() {
-		if err := CheckCredentialTransport(c.BaseURL, c.Network.AllowInsecure); err != nil {
-			bad("base_url", "%s; to send it over http anyway, set network.allow_insecure: true", err)
+		if err := CheckCredentialTransport(c.Endpoint, c.Network.AllowInsecure); err != nil {
+			bad("endpoint", "%s; to send it over http anyway, set network.allow_insecure: true", err)
 		}
 	}
 
@@ -457,14 +464,18 @@ func (c *API) validateAuth(bad func(string, string, ...any), wrap func(string, e
 
 func (c *API) validateToolset(name string, ts Toolset, bad func(string, string, ...any), wrap func(string, error)) {
 	field := "toolsets." + naming.CleanText(name, 64)
+	proto := model.Protocol(c.Protocol)
+	if !model.KnownProtocol(proto) {
+		proto = model.REST
+	}
 	if !apiNameRe.MatchString(name) {
 		bad("toolsets", "toolset name %q: use lowercase letters, digits, '-' or '_'", naming.CleanText(name, 64))
 	}
 	for key, o := range ts.Tools {
 		k := model.OpKey(key)
 		kf := field + ".tools[" + naming.CleanText(key, 120) + "]"
-		if !toolMethods[k.Method()] || !strings.HasPrefix(k.Path(), "/") || key != k.Method()+" "+k.Path() {
-			bad(kf, "keys look like \"GET /pets/{id}\"")
+		if !model.KeyValid(proto, k) || (proto == model.REST && key != k.Method()+" "+k.Path()) {
+			bad(kf, "not a valid %s tool key (REST keys look like \"GET /pets/{id}\")", proto)
 		}
 		if o.Name != "" && !toolNameRe.MatchString(o.Name) {
 			bad(kf+".name", "use 1-64 letters, digits, '_' or '-'")
@@ -484,9 +495,17 @@ func (c *API) validateToolset(name string, ts Toolset, bad func(string, string, 
 			bad(kf+".lint_ignore", "%s", msg)
 		}
 	}
+	if len(ts.Methods) > 0 && !model.MethodsFilterAllowed(proto) {
+		bad(field+".methods", "the methods: filter is REST-only; use safety: for %s", proto)
+	}
 	for _, m := range ts.Methods {
 		if !toolMethods[strings.ToUpper(m)] {
 			bad(field+".methods", "%q is not an HTTP method plugit serves", naming.CleanText(m, 20))
+		}
+	}
+	for _, s := range ts.Safety {
+		if _, ok := model.ParseSafety(s); !ok {
+			bad(field+".safety", "%q: use read-only, write or destructive", naming.CleanText(s, 20))
 		}
 	}
 	for _, tag := range ts.IncludeTags {
@@ -541,7 +560,7 @@ func (c *API) validateOAuth(bad func(string, string, ...any), wrap func(string, 
 // host, for local authorization servers) with no userinfo, query or
 // fragment.
 func validateOAuthURL(raw string) error {
-	if err := validateBaseURL(raw); err != nil {
+	if err := validateEndpoint(raw); err != nil {
 		return err
 	}
 	u, _ := url.Parse(raw)
@@ -554,10 +573,10 @@ func validateOAuthURL(raw string) error {
 	return nil
 }
 
-// validateBaseURL accepts an absolute http(s) URL with a host and no
+// validateEndpoint accepts an absolute http(s) URL with a host and no
 // userinfo, query or fragment. The value is never echoed: it may carry
 // credentials.
-func validateBaseURL(raw string) error {
+func validateEndpoint(raw string) error {
 	if raw == "" {
 		return errors.New("missing")
 	}

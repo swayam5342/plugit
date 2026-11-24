@@ -17,7 +17,7 @@ name: github
 source:
   url: https://example.test/api.github.com.json
   sha256: 3f9a000000000000000000000000000000000000000000000000000000000000
-base_url: https://api.github.com
+endpoint: https://api.github.com
 prefix: gh
 fixed:
   - name: X-GitHub-Api-Version
@@ -58,7 +58,7 @@ func TestParseAPIFull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Name != "github" || c.BaseURL != "https://api.github.com" || c.Prefix != "gh" {
+	if c.Name != "github" || c.Endpoint != "https://api.github.com" || c.Prefix != "gh" {
 		t.Errorf("basic fields: %+v", c)
 	}
 	if c.Network.Timeout != 10*time.Second || c.Network.MaxResponseBytes != 2048 {
@@ -88,7 +88,7 @@ func TestParseAPIFull(t *testing.T) {
 const minimalConfig = `version: 1
 name: pets
 source: {url: https://example.test/openapi.json}
-base_url: https://pets.example.test/v1
+endpoint: https://pets.example.test/v1
 toolsets:
   default:
     tools:
@@ -130,20 +130,20 @@ func TestParseAPIRejects(t *testing.T) {
 		is   error
 	}{
 		"unknown top-level key": {base + "polcy: {mode: full}\n", "polcy", ErrInvalidConfig},
-		"unknown nested key":    {strings.Replace(base, "base_url:", "network: {allow_privat: true}\nbase_url:", 1), "allow_privat", ErrInvalidConfig},
-		"duplicate key":         {base + "base_url: https://other.example.test\n", "base_url", ErrInvalidConfig},
+		"unknown nested key":    {strings.Replace(base, "endpoint:", "network: {allow_privat: true}\nendpoint:", 1), "allow_privat", ErrInvalidConfig},
+		"duplicate key":         {base + "endpoint: https://other.example.test\n", "endpoint", ErrInvalidConfig},
 		"multiple documents":    {base + "---\nversion: 1\n", "single document", ErrInvalidConfig},
 		"empty file":            {"", "no documents", ErrInvalidConfig},
 		"not a mapping":         {"- 1\n", "", ErrInvalidConfig},
 		"missing version":       {strings.Replace(base, "version: 1\n", "", 1), "version", ErrInvalidConfig},
-		"future version":        {strings.Replace(base, "version: 1", "version: 7", 1), "newer", ErrUnsupportedVersion},
+		"future version":        {strings.Replace(base, "version: 1", "version: 7", 1), "pre-1.0", ErrUnsupportedVersion},
 		"bad name":              {strings.Replace(base, "name: pets", "name: ../etc", 1), "name", ErrInvalidConfig},
-		"missing base_url":      {strings.Replace(base, "base_url: https://pets.example.test/v1\n", "", 1), "base_url", ErrInvalidConfig},
-		"relative base_url":     {strings.Replace(base, "https://pets.example.test/v1", "/v1", 1), "base_url", ErrInvalidConfig},
-		"ftp base_url":          {strings.Replace(base, "https://pets", "ftp://pets", 1), "base_url", ErrInvalidConfig},
-		"base_url with userinfo": {strings.Replace(base, "https://pets", "https://u:"+secret+"@pets", 1),
-			"base_url", ErrInvalidConfig},
-		"base_url with query":   {strings.Replace(base, "/v1", "/v1?key=x", 1), "base_url", ErrInvalidConfig},
+		"missing endpoint":      {strings.Replace(base, "endpoint: https://pets.example.test/v1\n", "", 1), "endpoint", ErrInvalidConfig},
+		"relative endpoint":     {strings.Replace(base, "https://pets.example.test/v1", "/v1", 1), "endpoint", ErrInvalidConfig},
+		"ftp endpoint":          {strings.Replace(base, "https://pets", "ftp://pets", 1), "endpoint", ErrInvalidConfig},
+		"endpoint with userinfo": {strings.Replace(base, "https://pets", "https://u:"+secret+"@pets", 1),
+			"endpoint", ErrInvalidConfig},
+		"endpoint with query":   {strings.Replace(base, "/v1", "/v1?key=x", 1), "endpoint", ErrInvalidConfig},
 		"missing source":        {strings.Replace(base, "source: {url: https://example.test/openapi.json}\n", "", 1), "source.url", ErrInvalidConfig},
 		"bad sha256":            {strings.Replace(base, "openapi.json}", "openapi.json, sha256: xyz}", 1), "sha256", ErrInvalidConfig},
 		"bad prefix":            {base + "prefix: 'has space'\n", "prefix", ErrInvalidConfig},
@@ -353,26 +353,26 @@ func TestRetentionPeriod(t *testing.T) {
 	}
 }
 
-// Version 2 adds per-tool rate_limit. Version 1 files load unchanged and
-// come out as version 2 (the migration has nothing to rewrite).
-func TestVersionMigration(t *testing.T) {
-	if CurrentVersion != 6 {
+// The config schema restarted at 1 for the protocol-core rebuild: there is no
+// migration, and a higher (pre-rebuild) version is rejected.
+func TestSchemaVersion(t *testing.T) {
+	if CurrentVersion != 1 {
 		t.Fatalf("CurrentVersion = %d", CurrentVersion)
 	}
 	c, err := ParseAPI([]byte(minimalConfig))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Version != CurrentVersion {
-		t.Errorf("v1 config loaded as version %d, want %d", c.Version, CurrentVersion)
+	if c.Version != 1 {
+		t.Errorf("config loaded as version %d, want 1", c.Version)
 	}
 	out, err := MarshalAPI(c)
-	if err != nil || !strings.Contains(string(out), "version: 6") {
+	if err != nil || !strings.Contains(string(out), "version: 1") {
 		t.Errorf("marshal = %s, %v", out, err)
 	}
-	v2 := strings.Replace(minimalConfig, "version: 1", "version: 2", 1)
-	if _, err := ParseAPI([]byte(v2)); err != nil {
-		t.Errorf("v2: %v", err)
+	old := strings.Replace(minimalConfig, "version: 1", "version: 6", 1)
+	if _, err := ParseAPI([]byte(old)); err == nil || !strings.Contains(err.Error(), "pre-1.0") {
+		t.Errorf("a pre-rebuild config should be rejected: %v", err)
 	}
 }
 
@@ -410,10 +410,6 @@ func TestToolResponseFields(t *testing.T) {
 		if _, err := ParseAPI([]byte(y)); err == nil || !strings.Contains(err.Error(), "response_fields") {
 			t.Errorf("%s: %v", bad, err)
 		}
-	}
-	v2 := strings.Replace(minimalConfig, "version: 1", "version: 2", 1)
-	if c, err := ParseAPI([]byte(v2)); err != nil || c.Version != CurrentVersion {
-		t.Errorf("v2 config: %v, version %d", err, c.Version)
 	}
 }
 
@@ -471,9 +467,9 @@ func TestCredentialsNeedHTTPS(t *testing.T) {
 		public = "fixed: [{name: version, value: \"literal:2\"}]\n"
 	)
 	with := func(baseURL, extra string) string {
-		return strings.Replace(minimalConfig, "base_url: https://pets.example.test/v1", "base_url: "+baseURL, 1) + extra
+		return strings.Replace(minimalConfig, "endpoint: https://pets.example.test/v1", "endpoint: "+baseURL, 1) + extra
 	}
-	if !strings.Contains(minimalConfig, "base_url: https://pets.example.test/v1") {
+	if !strings.Contains(minimalConfig, "endpoint: https://pets.example.test/v1") {
 		t.Fatal("minimalConfig changed: update this test")
 	}
 	cases := map[string]struct {

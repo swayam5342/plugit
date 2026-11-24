@@ -97,7 +97,7 @@ func DiffManifests(old, updated *model.Manifest, cfg config.API) SyncDiff {
 		return out
 	}
 	d.ServersChanged = !slices.Equal(norm(old.Endpoints), norm(updated.Endpoints))
-	d.BaseURLListed = slices.Contains(norm(updated.Endpoints), strings.TrimRight(cfg.BaseURL, "/"))
+	d.BaseURLListed = slices.Contains(norm(updated.Endpoints), strings.TrimRight(cfg.Endpoint, "/"))
 	return d
 }
 
