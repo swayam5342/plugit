@@ -53,7 +53,7 @@ func Apply(all []model.Tool, ts config.Toolset, prefix string) (Result, error) {
 func Select(all []model.Tool, ts config.Toolset, prefix string) Result {
 	var res Result
 	listed := len(ts.Tools) > 0
-	if !listed && len(ts.IncludeTags) == 0 && len(ts.Methods) == 0 {
+	if !listed && len(ts.IncludeTags) == 0 && len(ts.Methods) == 0 && len(ts.Safety) == 0 {
 		return res
 	}
 
@@ -88,6 +88,12 @@ func Select(all []model.Tool, ts config.Toolset, prefix string) Result {
 }
 
 func matchesFilters(t model.Tool, ts config.Toolset) bool {
+	if len(ts.Safety) > 0 && !slices.ContainsFunc(ts.Safety, func(s string) bool {
+		sf, ok := model.ParseSafety(s)
+		return ok && sf == t.Safety
+	}) {
+		return false
+	}
 	if len(ts.Methods) > 0 && !slices.ContainsFunc(ts.Methods, func(m string) bool { return strings.EqualFold(m, t.Key.Method()) }) {
 		return false
 	}

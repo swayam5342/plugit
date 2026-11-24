@@ -141,3 +141,32 @@ func TestSelectKeepsNameProblems(t *testing.T) {
 		t.Errorf("CheckNames = %v", err)
 	}
 }
+
+func TestApplySafetyFilter(t *testing.T) {
+	all := []model.Tool{
+		tool("GET", "/pets", "listPets"),
+		tool("POST", "/pets", "createPet"),
+		tool("DELETE", "/pets/{id}", "deletePet"),
+	}
+	names := func(ts config.Toolset) []string {
+		res, err := Apply(all, ts, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, s := range res.Tools {
+			out = append(out, s.Tool.Name)
+		}
+		slices.Sort(out)
+		return out
+	}
+	if got := names(config.Toolset{Safety: []string{"read-only"}}); !slices.Equal(got, []string{"listPets"}) {
+		t.Errorf("read-only filter = %v", got)
+	}
+	if got := names(config.Toolset{Safety: []string{"write", "destructive"}}); !slices.Equal(got, []string{"createPet", "deletePet"}) {
+		t.Errorf("write+destructive filter = %v", got)
+	}
+	if got := names(config.Toolset{Safety: []string{"read-only"}, Methods: []string{"POST"}}); len(got) != 0 {
+		t.Errorf("safety AND methods should intersect to nothing: %v", got)
+	}
+}
