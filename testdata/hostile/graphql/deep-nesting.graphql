@@ -1,0 +1,141 @@
+# Hostile: nesting far past every depth cap (T18, SPEC 6.3). In0..In63 nest
+# input objects 64 levels deep, Out0..Out63 nest object types 64 levels deep,
+# and lists() takes a list nested 40 levels. Argument schemas must stop at the
+# JSON Schema depth cap (degraded, lint L012), the selection at
+# selection_depth, and every document must still validate.
+# Generated; regenerate rather than edit by hand.
+
+input In0 { v: Int next: In1 }
+input In1 { v: Int next: In2 }
+input In2 { v: Int next: In3 }
+input In3 { v: Int next: In4 }
+input In4 { v: Int next: In5 }
+input In5 { v: Int next: In6 }
+input In6 { v: Int next: In7 }
+input In7 { v: Int next: In8 }
+input In8 { v: Int next: In9 }
+input In9 { v: Int next: In10 }
+input In10 { v: Int next: In11 }
+input In11 { v: Int next: In12 }
+input In12 { v: Int next: In13 }
+input In13 { v: Int next: In14 }
+input In14 { v: Int next: In15 }
+input In15 { v: Int next: In16 }
+input In16 { v: Int next: In17 }
+input In17 { v: Int next: In18 }
+input In18 { v: Int next: In19 }
+input In19 { v: Int next: In20 }
+input In20 { v: Int next: In21 }
+input In21 { v: Int next: In22 }
+input In22 { v: Int next: In23 }
+input In23 { v: Int next: In24 }
+input In24 { v: Int next: In25 }
+input In25 { v: Int next: In26 }
+input In26 { v: Int next: In27 }
+input In27 { v: Int next: In28 }
+input In28 { v: Int next: In29 }
+input In29 { v: Int next: In30 }
+input In30 { v: Int next: In31 }
+input In31 { v: Int next: In32 }
+input In32 { v: Int next: In33 }
+input In33 { v: Int next: In34 }
+input In34 { v: Int next: In35 }
+input In35 { v: Int next: In36 }
+input In36 { v: Int next: In37 }
+input In37 { v: Int next: In38 }
+input In38 { v: Int next: In39 }
+input In39 { v: Int next: In40 }
+input In40 { v: Int next: In41 }
+input In41 { v: Int next: In42 }
+input In42 { v: Int next: In43 }
+input In43 { v: Int next: In44 }
+input In44 { v: Int next: In45 }
+input In45 { v: Int next: In46 }
+input In46 { v: Int next: In47 }
+input In47 { v: Int next: In48 }
+input In48 { v: Int next: In49 }
+input In49 { v: Int next: In50 }
+input In50 { v: Int next: In51 }
+input In51 { v: Int next: In52 }
+input In52 { v: Int next: In53 }
+input In53 { v: Int next: In54 }
+input In54 { v: Int next: In55 }
+input In55 { v: Int next: In56 }
+input In56 { v: Int next: In57 }
+input In57 { v: Int next: In58 }
+input In58 { v: Int next: In59 }
+input In59 { v: Int next: In60 }
+input In60 { v: Int next: In61 }
+input In61 { v: Int next: In62 }
+input In62 { v: Int next: In63 }
+input In63 { v: Int }
+
+type Out0 { v: Int next: Out1 }
+type Out1 { v: Int next: Out2 }
+type Out2 { v: Int next: Out3 }
+type Out3 { v: Int next: Out4 }
+type Out4 { v: Int next: Out5 }
+type Out5 { v: Int next: Out6 }
+type Out6 { v: Int next: Out7 }
+type Out7 { v: Int next: Out8 }
+type Out8 { v: Int next: Out9 }
+type Out9 { v: Int next: Out10 }
+type Out10 { v: Int next: Out11 }
+type Out11 { v: Int next: Out12 }
+type Out12 { v: Int next: Out13 }
+type Out13 { v: Int next: Out14 }
+type Out14 { v: Int next: Out15 }
+type Out15 { v: Int next: Out16 }
+type Out16 { v: Int next: Out17 }
+type Out17 { v: Int next: Out18 }
+type Out18 { v: Int next: Out19 }
+type Out19 { v: Int next: Out20 }
+type Out20 { v: Int next: Out21 }
+type Out21 { v: Int next: Out22 }
+type Out22 { v: Int next: Out23 }
+type Out23 { v: Int next: Out24 }
+type Out24 { v: Int next: Out25 }
+type Out25 { v: Int next: Out26 }
+type Out26 { v: Int next: Out27 }
+type Out27 { v: Int next: Out28 }
+type Out28 { v: Int next: Out29 }
+type Out29 { v: Int next: Out30 }
+type Out30 { v: Int next: Out31 }
+type Out31 { v: Int next: Out32 }
+type Out32 { v: Int next: Out33 }
+type Out33 { v: Int next: Out34 }
+type Out34 { v: Int next: Out35 }
+type Out35 { v: Int next: Out36 }
+type Out36 { v: Int next: Out37 }
+type Out37 { v: Int next: Out38 }
+type Out38 { v: Int next: Out39 }
+type Out39 { v: Int next: Out40 }
+type Out40 { v: Int next: Out41 }
+type Out41 { v: Int next: Out42 }
+type Out42 { v: Int next: Out43 }
+type Out43 { v: Int next: Out44 }
+type Out44 { v: Int next: Out45 }
+type Out45 { v: Int next: Out46 }
+type Out46 { v: Int next: Out47 }
+type Out47 { v: Int next: Out48 }
+type Out48 { v: Int next: Out49 }
+type Out49 { v: Int next: Out50 }
+type Out50 { v: Int next: Out51 }
+type Out51 { v: Int next: Out52 }
+type Out52 { v: Int next: Out53 }
+type Out53 { v: Int next: Out54 }
+type Out54 { v: Int next: Out55 }
+type Out55 { v: Int next: Out56 }
+type Out56 { v: Int next: Out57 }
+type Out57 { v: Int next: Out58 }
+type Out58 { v: Int next: Out59 }
+type Out59 { v: Int next: Out60 }
+type Out60 { v: Int next: Out61 }
+type Out61 { v: Int next: Out62 }
+type Out62 { v: Int next: Out63 }
+type Out63 { v: Int }
+
+type Query {
+  deep(arg: In0): Out0
+  lists(x: [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[Int]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]): Int
+}
