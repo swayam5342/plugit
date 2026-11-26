@@ -29,4 +29,9 @@
 // without bound.
 //
 // The ingest code is pure: no network, filesystem, clock, env or randomness.
+//
+// protocol.go is the serving side, the GraphQL protocol.Protocol: Encode
+// POSTs the tool's fixed document with the validated arguments as variables
+// and attaches no credential; Decode applies the P7 result rules (ok, partial,
+// errors, else the HTTP status). It never dials or resolves a secret (T17).
 package graphql
