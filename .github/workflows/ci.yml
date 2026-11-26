@@ -63,8 +63,11 @@ jobs:
       matrix:
         target:
           - { pkg: ./internal/redact, fn: FuzzStringNeverLeaksSecret }
-          - { pkg: ./internal/openapi, fn: FuzzParse }
-          - { pkg: ./internal/openapi, fn: FuzzRefCheck }
+          - { pkg: ./internal/protocol/rest/openapi, fn: FuzzParse }
+          - { pkg: ./internal/protocol/rest/openapi, fn: FuzzRefCheck }
+          - { pkg: ./internal/protocol/rest/openapi, fn: FuzzIsOpenAPI }
+          - { pkg: ./internal/protocol/graphql, fn: FuzzSDL }
+          - { pkg: ./internal/protocol/graphql, fn: FuzzSelection }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
