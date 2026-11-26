@@ -3,8 +3,6 @@ package cli
 import (
 	"cmp"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -245,7 +243,7 @@ func addAPI(ctx context.Context, s addSettings, d addDeps) error {
 	if _, err := config.MarshalAPI(cfg); err != nil {
 		return err
 	}
-	if m, err = compileResponseFields(ctx, d.parse, cfg, src.snapshot, m); err != nil {
+	if m, err = compileResponseFields(ctx, d.parse, cfg, src.snapshot, m, nil, d.stderr); err != nil {
 		return err
 	}
 
@@ -292,31 +290,9 @@ func loadAddSource(ctx context.Context, s addSettings, d addDeps, auth config.Au
 	if err != nil {
 		return addSource{}, err
 	}
-	draft := &config.API{Name: s.name, Endpoint: endpoint.String(), Auth: auth}
-	for _, f := range fixed {
-		if f.In == "header" { // only headers go with the introspection request
-			draft.Fixed = append(draft.Fixed, f)
-		}
-	}
-	if draft.Auth.Type != config.AuthNone || len(draft.Fixed) > 0 {
-		if err := config.CheckCredentialTransport(endpoint.String(), s.allowInsecure); err != nil {
-			return addSource{}, fmt.Errorf("the --introspect URL %w; to send it over http anyway, pass --allow-insecure", err)
-		}
-	}
-	res := d.resolver
-	if res == nil {
-		res = secrets.NewResolver()
-	}
-	cred, _, err := buildCredential(draft, res, runDeps{})
-	if err != nil {
-		return addSource{}, err
-	}
-	fx, _, err := buildFixedTarget(draft, res)
-	if err != nil {
-		return addSource{}, err
-	}
-	fx.userAgent = "plugit/" + d.info.withDefaults().Version
-	raw, err := introspect(ctx, endpoint, cred, fx, s.allowPrivate)
+	draft := &config.API{Name: s.name, Endpoint: endpoint.String(), Auth: auth, Fixed: fixed,
+		Network: config.Network{AllowPrivate: s.allowPrivate, AllowInsecure: s.allowInsecure}}
+	raw, sum, err := introspectAPI(ctx, draft, runDeps{resolver: d.resolver, info: d.info})
 	if err != nil {
 		return addSource{}, err
 	}
@@ -324,17 +300,19 @@ func loadAddSource(ctx context.Context, s addSettings, d addDeps, auth config.Au
 	if err != nil {
 		return addSource{}, fmt.Errorf("introspection result from %s: %w", endpoint, err)
 	}
-	sum := sha256.Sum256(raw)
-	return addSource{snapshot: raw, sha256: hex.EncodeToString(sum[:]), m: m, endpoint: endpoint.String()}, nil
+	return addSource{snapshot: raw, sha256: sum, m: m, endpoint: endpoint.String()}, nil
 }
 
 // compileResponseFields re-parses a GraphQL snapshot in the isolate child
 // with cfg's toolset response_fields, so the saved manifest carries their
-// compiled documents (and matches cfg's cache key). Any that don't compile
-// is an error naming the toolset, tool and path. A manifest of any other
+// compiled documents (and matches cfg's cache key). Those that don't compile
+// in a toolset being written (only, or every toolset when only is nil) are
+// an error naming the toolset, tool and path; those in other toolsets are
+// warnings on stderr, since serve refuses only those toolsets. A manifest of any other
 // protocol, or one with nothing to compile and no compiled documents left
 // over, is returned as is.
-func compileResponseFields(ctx context.Context, parse parseFunc, cfg *config.API, snapshot []byte, m *model.Manifest) (*model.Manifest, error) {
+func compileResponseFields(ctx context.Context, parse parseFunc, cfg *config.API, snapshot []byte, m *model.Manifest,
+	only []string, stderr io.Writer) (*model.Manifest, error) {
 	if m.Protocol != model.GraphQL {
 		return m, nil
 	}
@@ -346,14 +324,22 @@ func compileResponseFields(ctx context.Context, parse parseFunc, cfg *config.API
 	if err != nil {
 		return nil, err
 	}
-	if m.GraphQL != nil && len(m.GraphQL.OverrideErrors) > 0 {
-		var problems []string
-		for _, ts := range slices.Sorted(maps.Keys(m.GraphQL.OverrideErrors)) {
-			byKey := m.GraphQL.OverrideErrors[ts]
-			for _, key := range slices.Sorted(maps.Keys(byKey)) {
-				problems = append(problems, fmt.Sprintf("toolset %q, tool %q: %s", ts, key, byKey[key]))
+	if m.GraphQL == nil {
+		return m, nil
+	}
+	var problems []string
+	for _, ts := range slices.Sorted(maps.Keys(m.GraphQL.OverrideErrors)) {
+		byKey := m.GraphQL.OverrideErrors[ts]
+		for _, key := range slices.Sorted(maps.Keys(byKey)) {
+			msg := fmt.Sprintf("toolset %q, tool %q: %s", ts, key, byKey[key])
+			if only == nil || slices.Contains(only, ts) {
+				problems = append(problems, msg)
+			} else if stderr != nil {
+				_, _ = fmt.Fprintf(stderr, "warning: response_fields don't compile against the schema (%s); serve refuses toolset %s until it's fixed\n", msg, ts)
 			}
 		}
+	}
+	if len(problems) > 0 {
 		return nil, fmt.Errorf("response_fields don't compile against the schema (%s); nothing saved", strings.Join(problems, "; "))
 	}
 	return m, nil

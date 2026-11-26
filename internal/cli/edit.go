@@ -90,7 +90,7 @@ func editAPI(ctx context.Context, p config.Paths, name, toolset string, d addDep
 	before := *cfg
 	before.Toolsets = maps.Clone(cfg.Toolsets)
 	cfg.Toolsets[tsName] = ts
-	if err := recompileManifest(ctx, p, &before, cfg, m, d); err != nil {
+	if err := recompileManifest(ctx, p, &before, cfg, m, tsName, d); err != nil {
 		return err
 	}
 	if err := config.SaveAPI(p, cfg); err != nil {
@@ -108,9 +108,9 @@ func editAPI(ctx context.Context, p config.Paths, name, toolset string, d addDep
 // recompileManifest re-parses the snapshot in the isolate child when an edit
 // changed what the manifest is built from (for GraphQL, the toolsets'
 // response_fields) and rewrites the cache, so the next serve starts without
-// parsing. response_fields that don't compile are an error, before anything
-// is saved.
-func recompileManifest(ctx context.Context, p config.Paths, before, after *config.API, m *model.Manifest, d addDeps) error {
+// parsing. response_fields in the edited toolset that don't compile are an
+// error, before anything is saved; other toolsets' are warnings on stderr.
+func recompileManifest(ctx context.Context, p config.Paths, before, after *config.API, m *model.Manifest, toolset string, d addDeps) error {
 	snapPath, err := p.SpecSnapshot(after.Name)
 	if err != nil {
 		return err
@@ -124,7 +124,7 @@ func recompileManifest(ctx context.Context, p config.Paths, before, after *confi
 	if key == before.CacheKey(sum, parser) {
 		return nil
 	}
-	m, err = compileResponseFields(ctx, d.parse, after, data, m)
+	m, err = compileResponseFields(ctx, d.parse, after, data, m, []string{toolset}, d.stderr)
 	if err != nil {
 		return err
 	}

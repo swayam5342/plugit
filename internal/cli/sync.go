@@ -19,6 +19,7 @@ import (
 	"github.com/swayam5342/plugit/internal/isolate"
 	"github.com/swayam5342/plugit/internal/lint"
 	"github.com/swayam5342/plugit/internal/model"
+	"github.com/swayam5342/plugit/internal/secrets"
 	"github.com/swayam5342/plugit/internal/spec"
 	"github.com/swayam5342/plugit/internal/tui"
 )
@@ -33,6 +34,10 @@ type syncSettings struct {
 	parse   parseFunc
 	info    BuildInfo
 	review  func(ctx context.Context, in tui.SyncInput) ([]model.OpKey, error)
+	// resolver and keyring resolve the credential when sync re-introspects
+	// (nil: the real environment and keyring).
+	resolver *secrets.Resolver
+	keyring  keyringSetter
 }
 
 func newSyncCmd(g *globalFlags, info BuildInfo) *cobra.Command {
@@ -40,7 +45,8 @@ func newSyncCmd(g *globalFlags, info BuildInfo) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sync <name>",
 		Short: "Re-fetch an API's spec, review what changed, and adopt it (overrides are kept)",
-		Long: `Re-fetch a saved API's spec (from source.url, or --spec) and compare it
+		Long: `Re-fetch a saved API's spec (from source.url, or --spec; an API added with
+--introspect is introspected again at its endpoint) and compare it
 with the one plugit has: operations added, removed and changed, and any
 change to the spec's servers. Lint runs on the new spec, so poisoned text
 arriving through an update is shown before it's adopted.
@@ -60,6 +66,7 @@ Otherwise pass --yes (and --add-new to add every new operation).`,
 				return err
 			}
 			s.out, s.stderr, s.parse, s.info = cmd.OutOrStdout(), cmd.ErrOrStderr(), isolate.Parse, info
+			s.resolver, s.keyring = secrets.NewResolver(), secrets.OSKeyring{}
 			if in, ok := cmd.InOrStdin().(*os.File); ok && !s.yes && term.IsTerminal(int(in.Fd())) { // #nosec G115 -- a file descriptor fits in int
 				if out, ok := s.out.(*os.File); ok && term.IsTerminal(int(out.Fd())) { // #nosec G115 -- a file descriptor fits in int
 					s.review = func(ctx context.Context, si tui.SyncInput) ([]model.OpKey, error) {
@@ -93,19 +100,29 @@ func syncAPI(ctx context.Context, p config.Paths, name string, s syncSettings) e
 		return err
 	}
 
-	location := cmp.Or(s.spec, cfg.Source.URL)
-	sp, err := spec.New(spec.Options{AllowPrivate: cfg.Network.AllowPrivate}).Load(ctx, location)
+	var data []byte
+	var sum string
+	if s.spec == "" && reintrospects(cfg) {
+		// Added with --introspect: source.url is the pinned endpoint, so ask
+		// it again instead of downloading it as a spec file.
+		data, sum, err = introspectAPI(ctx, cfg, runDeps{resolver: s.resolver, keyring: s.keyring, info: s.info})
+	} else {
+		var sp *spec.Spec
+		if sp, err = spec.New(spec.Options{AllowPrivate: cfg.Network.AllowPrivate}).Load(ctx, cmp.Or(s.spec, cfg.Source.URL)); err == nil {
+			data, sum = sp.Bytes, sp.SHA256
+		}
+	}
 	if err != nil {
 		return err
 	}
-	if sp.SHA256 == cfg.Source.SHA256 {
+	if sum == cfg.Source.SHA256 {
 		_, err := fmt.Fprintf(s.out, "%s is up to date: the spec hasn't changed.\n", name)
 		return err
 	}
 	// The child re-parses with the saved toolsets' response_fields, so every
 	// GraphQL document (default and override) is re-validated against the new
 	// schema; overrides that no longer compile come back as diff entries.
-	updated, err := s.parse(ctx, sp.Bytes, cfg.Source.Format, parseOptions(cfg))
+	updated, err := s.parse(ctx, data, cfg.Source.Format, parseOptions(cfg))
 	if err != nil {
 		return err
 	}
@@ -143,14 +160,14 @@ func syncAPI(ctx context.Context, p config.Paths, name string, s syncSettings) e
 		}
 	}
 
-	cfg.Source.SHA256 = sp.SHA256
+	cfg.Source.SHA256 = sum
 	if s.spec != "" {
 		cfg.Source.URL = sourceLocation(s.spec)
 	}
 	if len(add) > 0 {
 		curate.AddToToolset(cfg, tsName, add)
 	}
-	if err := saveAPIFiles(p, cfg, sp.Bytes, updated, parserID(s.info)); err != nil {
+	if err := saveAPIFiles(p, cfg, data, updated, parserID(s.info)); err != nil {
 		return err
 	}
 	msg := fmt.Sprintf("Synced %s: %d added, %d changed, %d removed; overrides kept.", name, len(diff.Added), len(diff.Changed), len(diff.Removed))

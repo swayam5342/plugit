@@ -3,19 +3,27 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/curate"
+	"github.com/swayam5342/plugit/internal/httpx"
 	"github.com/swayam5342/plugit/internal/isolate"
 	"github.com/swayam5342/plugit/internal/model"
+	"github.com/swayam5342/plugit/internal/protocol/graphql"
 	"github.com/swayam5342/plugit/internal/tui"
 )
 
@@ -327,5 +335,130 @@ func TestSyncRevalidatesDocuments(t *testing.T) {
 	_, err = loadActive(t.Context(), serveSettings{paths: p, name: "gh"}, gqlDeps(isolate.Parse), logger)
 	if err == nil || !strings.Contains(err.Error(), "query user") {
 		t.Errorf("serve after adopting must refuse the broken response_fields: %v", err)
+	}
+}
+
+// withQueryField returns the introspection fixture with one more Query
+// field, name: String.
+func withQueryField(t *testing.T, fixture []byte, name string) []byte {
+	t.Helper()
+	var doc map[string]any
+	if err := json.Unmarshal(fixture, &doc); err != nil {
+		t.Fatal(err)
+	}
+	types := doc["data"].(map[string]any)["__schema"].(map[string]any)["types"].([]any)
+	for _, ty := range types {
+		tm := ty.(map[string]any)
+		if tm["name"] != "Query" {
+			continue
+		}
+		tm["fields"] = append(tm["fields"].([]any), map[string]any{
+			"name": name, "description": nil, "args": []any{}, "isDeprecated": false, "deprecationReason": nil,
+			"type": map[string]any{"kind": "SCALAR", "name": "String", "ofType": nil},
+		})
+	}
+	out, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// sync of an API added with --introspect re-runs the introspection against
+// the pinned endpoint (source.url is that endpoint), with the credential
+// attached only there, instead of downloading the endpoint as a spec file.
+// A redirect to another origin fails before that origin is contacted; a
+// changed schema is picked up with --yes.
+func TestSyncReintrospects(t *testing.T) {
+	fixture := introspectionFixture(t)
+	other := newGraphQLUpstream(t, func(u *gqlUpstream) { u.introspection = fixture })
+	var schema atomic.Value
+	schema.Store(fixture)
+	var redirect atomic.Bool
+	var hits atomic.Int32
+	var auths sync.Map
+	pinned := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		auths.Store(r.Header.Get("Authorization"), true)
+		body, _ := io.ReadAll(r.Body)
+		if r.Method != http.MethodPost || !strings.Contains(string(body), "__schema") {
+			http.Error(w, "GraphQL needs a POST with a query", http.StatusMethodNotAllowed)
+			return
+		}
+		if redirect.Load() {
+			http.Redirect(w, r, other.URL+"/graphql", http.StatusTemporaryRedirect)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(schema.Load().([]byte))
+	}))
+	t.Cleanup(pinned.Close)
+
+	p, d, _ := addEnv(t)
+	env := map[string]string{"GH_TOKEN": "Bearer " + runSecret}
+	d.resolver = envResolver(env)
+	endpoint := pinned.URL + "/graphql"
+	if err := addAPI(t.Context(), addSettingsFor(endpoint, func(s *addSettings) {
+		s.name, s.introspect, s.fromRun, s.allowPrivate = "gh", true, true, true
+		s.headers = []string{"Authorization=env:GH_TOKEN"}
+	}), d); err != nil {
+		t.Fatalf("add --introspect: %v", err)
+	}
+
+	out := &bytes.Buffer{}
+	s := syncDeps(out)
+	s.resolver = envResolver(env)
+	s.yes, s.addNew = true, true
+
+	redirect.Store(true)
+	if err := syncAPI(t.Context(), p, "gh", s); !errors.Is(err, httpx.ErrRedirectBlocked) {
+		t.Fatalf("sync through a cross-origin redirect: err = %v, want ErrRedirectBlocked", err)
+	}
+	if other.hits.Load() != 0 {
+		t.Errorf("the other origin was contacted %d times", other.hits.Load())
+	}
+	redirect.Store(false)
+
+	schema.Store(withQueryField(t, fixture, "ping"))
+	if err := syncAPI(t.Context(), p, "gh", s); err != nil {
+		t.Fatalf("sync: %v\n%s", err, out)
+	}
+	if !strings.Contains(out.String(), "query ping") || !strings.Contains(out.String(), "1 added") {
+		t.Errorf("sync output:\n%s", out)
+	}
+	cfg, err := config.LoadAPI(p, "gh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Source.URL != endpoint || cfg.Source.Format != graphql.FormatIntrospection {
+		t.Errorf("source after sync = %+v", cfg.Source)
+	}
+	if _, ok := cfg.Toolsets["default"].Tools["query ping"]; !ok {
+		t.Error("--add-new didn't add query ping")
+	}
+	snap, _ := p.SpecSnapshot("gh")
+	_, sum, _ := config.ReadSnapshot(snap)
+	cache, _ := p.Manifest("gh")
+	m, err := config.ReadManifest(cache, cfg.CacheKey(sum, parserID(s.info)))
+	if err != nil || !slices.ContainsFunc(m.Tools, func(x model.Tool) bool { return x.Key == "query ping" }) {
+		t.Errorf("manifest after sync: %v", err)
+	}
+	auths.Range(func(k, _ any) bool {
+		if k != "Bearer "+runSecret {
+			t.Errorf("pinned origin got a request with Authorization %q", k)
+		}
+		return true
+	})
+	if hits.Load() < 3 || other.hits.Load() != 0 {
+		t.Errorf("pinned hits = %d, other hits = %d", hits.Load(), other.hits.Load())
+	}
+
+	// --spec still overrides: a schema file is read instead.
+	s.spec = writeSDL(t, gqlSDL)
+	s.addNew = false
+	before := hits.Load()
+	_ = syncAPI(t.Context(), p, "gh", s) // the SDL is a different format; only the source matters here
+	if hits.Load() != before {
+		t.Error("sync --spec still introspected the endpoint")
 	}
 }

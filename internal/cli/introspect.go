@@ -3,6 +3,8 @@ package cli
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,7 +15,9 @@ import (
 	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/httpx"
 	"github.com/swayam5342/plugit/internal/invoke"
+	"github.com/swayam5342/plugit/internal/protocol/graphql"
 	"github.com/swayam5342/plugit/internal/schema"
+	"github.com/swayam5342/plugit/internal/secrets"
 	"github.com/swayam5342/plugit/internal/spec"
 )
 
@@ -122,6 +126,58 @@ func introspectEndpoint(source, endpointFlag string) (*url.URL, error) {
 		}
 	}
 	return u, nil
+}
+
+// reintrospects reports whether cfg's source is an introspection of its own
+// endpoint (plugit add --introspect), so sync introspects again instead of
+// downloading source.url as a spec file.
+func reintrospects(cfg *config.API) bool {
+	return cfg.Source.Format == graphql.FormatIntrospection && cfg.Source.URL == cfg.Endpoint
+}
+
+// introspectAPI introspects cfg's pinned endpoint with cfg's credential and
+// fixed headers (the only fixed params an introspection request carries),
+// refusing credentials over plain http as serve would (T8), and returns the
+// raw result and its sha256. add --introspect and sync share it. d.resolver
+// and d.keyring default to the real environment and keyring.
+func introspectAPI(ctx context.Context, cfg *config.API, d runDeps) (raw []byte, sha256Hex string, err error) {
+	endpoint, err := validateBaseURL(cfg.Endpoint, "the endpoint")
+	if err != nil {
+		return nil, "", err
+	}
+	draft := *cfg
+	draft.Fixed = nil
+	for _, f := range cfg.Fixed {
+		if f.In == "header" {
+			draft.Fixed = append(draft.Fixed, f)
+		}
+	}
+	if draft.Auth.Type != config.AuthNone || len(draft.Fixed) > 0 {
+		if err := config.CheckCredentialTransport(endpoint.String(), cfg.Network.AllowInsecure); err != nil {
+			return nil, "", fmt.Errorf("the GraphQL endpoint %w; to send it over http anyway, allow insecure (--allow-insecure, network.allow_insecure)", err)
+		}
+	}
+	if d.resolver == nil {
+		d.resolver = secrets.NewResolver()
+	}
+	if d.keyring == nil {
+		d.keyring = secrets.OSKeyring{}
+	}
+	cred, _, err := buildCredential(&draft, d.resolver, d)
+	if err != nil {
+		return nil, "", err
+	}
+	fx, _, err := buildFixedTarget(&draft, d.resolver)
+	if err != nil {
+		return nil, "", err
+	}
+	fx.userAgent = "plugit/" + d.info.withDefaults().Version
+	raw, err = introspect(ctx, endpoint, cred, fx, cfg.Network.AllowPrivate)
+	if err != nil {
+		return nil, "", err
+	}
+	sum := sha256.Sum256(raw)
+	return raw, hex.EncodeToString(sum[:]), nil
 }
 
 // introspect POSTs the standard introspection query to the pinned endpoint
