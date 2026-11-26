@@ -10,31 +10,54 @@ import (
 	"github.com/swayam5342/plugit/internal/naming"
 )
 
-// Limits on one ArgSchema call. The input schema is untrusted (T18), so the
+// Limits on argument mapping. The input schema is untrusted (T18), so the
 // walk must terminate on self-referential and very wide input objects.
 const (
 	// maxSchemaDepth is the number of nested schema levels (lists and named
 	// types) mapped; deeper parts become {}. The argument itself is level 1.
 	maxSchemaDepth = 12
-	// maxSchemaNodes is the node budget for one argument; once spent, the
-	// remaining parts become {}.
+	// maxSchemaNodes is the node budget for one tool, shared by all of its
+	// arguments mapped through one argMapper (SPEC 3.5 rule 3); once spent,
+	// the remaining parts become {}.
 	maxSchemaNodes = 5000
 )
 
 // ArgSchema maps the GraphQL type t of one field argument to the JSON Schema
-// the model sees for that tool parameter. def is the argument's default value.
+// the model sees for that tool parameter, with a node budget of its own. A
+// tool builder mapping several arguments must use one newArgMapper per tool
+// instead, so the budget is shared.
+func ArgSchema(s *ast.Schema, def *ast.Value, t *ast.Type) (schema json.RawMessage, required, degraded bool) {
+	return newArgMapper(s).arg(def, t)
+}
+
+// argMapper maps the arguments of one tool. Its node budget is shared by
+// every arg call on it; the degraded flag is per call.
+type argMapper struct {
+	s        *ast.Schema
+	nodes    int
+	degraded bool
+}
+
+// newArgMapper returns a mapper with a fresh maxSchemaNodes budget. Create
+// one per tool.
+func newArgMapper(s *ast.Schema) *argMapper {
+	return &argMapper{s: s}
+}
+
+// arg maps the GraphQL type t of one field argument, whose default value is
+// def, to a JSON Schema.
 //
 // required is true when t is non-null and def is nil: a non-null argument
 // with a default may be omitted. Inside input objects the same rule decides
-// each field's place in "required". degraded is true when any part of the
-// schema could not be mapped (a custom scalar, an unknown or non-input type,
-// or the depth cap or node budget was hit) and was replaced by {}, which
-// accepts anything.
+// each field's place in "required". degraded is true when any part of this
+// argument's schema could not be mapped (a custom scalar, an unknown or
+// non-input type, or the depth cap or the tool's node budget was hit) and was
+// replaced by {}, which accepts anything.
 //
 // The output is deterministic: object keys are sorted, enum values keep
 // schema order and "required" is sorted.
-func ArgSchema(s *ast.Schema, def *ast.Value, t *ast.Type) (schema json.RawMessage, required, degraded bool) {
-	m := &mapper{s: s}
+func (m *argMapper) arg(def *ast.Value, t *ast.Type) (schema json.RawMessage, required, degraded bool) {
+	m.degraded = false
 	out := m.mapType(t, 1)
 	b, err := json.Marshal(out)
 	if err != nil {
@@ -44,19 +67,13 @@ func ArgSchema(s *ast.Schema, def *ast.Value, t *ast.Type) (schema json.RawMessa
 	return b, t != nil && t.NonNull && def == nil, m.degraded
 }
 
-type mapper struct {
-	s        *ast.Schema
-	nodes    int
-	degraded bool
-}
-
 // degrade marks the call degraded and returns the accept-anything schema.
-func (m *mapper) degrade() map[string]any {
+func (m *argMapper) degrade() map[string]any {
 	m.degraded = true
 	return map[string]any{}
 }
 
-func (m *mapper) mapType(t *ast.Type, depth int) map[string]any {
+func (m *argMapper) mapType(t *ast.Type, depth int) map[string]any {
 	if t == nil || m.s == nil || depth > maxSchemaDepth || m.nodes >= maxSchemaNodes {
 		return m.degrade()
 	}
@@ -81,7 +98,7 @@ func (m *mapper) mapType(t *ast.Type, depth int) map[string]any {
 	}
 }
 
-func (m *mapper) scalar(name string) map[string]any {
+func (m *argMapper) scalar(name string) map[string]any {
 	switch name {
 	case "Int":
 		// GraphQL Int is a signed 32-bit integer.
@@ -98,7 +115,7 @@ func (m *mapper) scalar(name string) map[string]any {
 	}
 }
 
-func (m *mapper) enum(d *ast.Definition) map[string]any {
+func (m *argMapper) enum(d *ast.Definition) map[string]any {
 	if len(d.EnumValues) == 0 {
 		return m.degrade()
 	}
@@ -113,7 +130,7 @@ func (m *mapper) enum(d *ast.Definition) map[string]any {
 	return out
 }
 
-func (m *mapper) inputObject(d *ast.Definition, depth int) map[string]any {
+func (m *argMapper) inputObject(d *ast.Definition, depth int) map[string]any {
 	props := make(map[string]any, len(d.Fields))
 	var req []string
 	for _, f := range d.Fields {

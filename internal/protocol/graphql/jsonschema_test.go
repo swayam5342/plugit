@@ -327,3 +327,74 @@ type Query { f(w: W): Int }
 		t.Errorf("mapped %d schema nodes, budget is %d", n, maxSchemaNodes)
 	}
 }
+
+// countNodes counts the non-empty schema nodes in raw, through properties and items.
+func countNodes(t *testing.T, raw json.RawMessage) int {
+	t.Helper()
+	var walk func(map[string]any) int
+	walk = func(s map[string]any) int {
+		if len(s) == 0 {
+			return 0
+		}
+		n := 1
+		if it, ok := s["items"].(map[string]any); ok {
+			n += walk(it)
+		}
+		if props, ok := s["properties"].(map[string]any); ok {
+			for _, p := range props {
+				n += walk(p.(map[string]any))
+			}
+		}
+		return n
+	}
+	return walk(decode(t, raw))
+}
+
+func TestMapNodeBudgetSharedAcrossArgs(t *testing.T) {
+	sdl := `
+input W { a: W, b: W, c: W, d: W }
+type Query { f(w1: W, w2: W): Int }
+`
+	s, err := LoadSchema([]byte(sdl), FormatSDL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := s.Query.Fields.ForName("f")
+	m := newArgMapper(s)
+	total := 0
+	var degraded2 bool
+	for i, name := range []string{"w1", "w2"} {
+		a := f.Arguments.ForName(name)
+		raw, _, degraded := m.arg(a.DefaultValue, a.Type)
+		total += countNodes(t, raw)
+		if i == 1 {
+			degraded2 = degraded
+		}
+	}
+	if total > maxSchemaNodes {
+		t.Errorf("two arguments mapped %d schema nodes in total, budget per tool is %d", total, maxSchemaNodes)
+	}
+	if !degraded2 {
+		t.Error("second argument not degraded after the shared budget was spent")
+	}
+}
+
+func TestMapDegradedResetsPerArg(t *testing.T) {
+	sdl := `
+scalar DateTime
+type Query { f(at: DateTime, n: Int): Int }
+`
+	s, err := LoadSchema([]byte(sdl), FormatSDL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := s.Query.Fields.ForName("f")
+	m := newArgMapper(s)
+	if _, _, degraded := m.arg(nil, f.Arguments.ForName("at").Type); !degraded {
+		t.Error("custom scalar not degraded")
+	}
+	raw, _, degraded := m.arg(nil, f.Arguments.ForName("n").Type)
+	if degraded {
+		t.Errorf("Int after a degraded argument reported degraded (%s)", raw)
+	}
+}
