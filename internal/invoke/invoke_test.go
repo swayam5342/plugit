@@ -3,6 +3,7 @@ package invoke
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -104,20 +105,53 @@ func (p offOriginProto) Encode(ctx context.Context, _ protocol.Call) (*http.Requ
 	return http.NewRequestWithContext(ctx, http.MethodGet, p.to, nil)
 }
 
+// recordingDoer records every request it is handed and answers 200 with an
+// empty JSON object, so a request that slips past the origin guard succeeds
+// instead of failing on DNS or TLS and masking the leak.
+type recordingDoer struct{ reqs []*http.Request }
+
+func (d *recordingDoer) Do(r *http.Request) (*http.Response, error) {
+	d.reqs = append(d.reqs, r)
+	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}},
+		Body: io.NopCloser(strings.NewReader(`{}`)), Request: r}, nil
+}
+
 // T8: a credential is never sent to an origin other than the pinned endpoint,
 // even if the protocol encoded a request for one. The doer must not be called.
 func TestInvokeCredentialNotCrossOrigin(t *testing.T) {
-	var hits int
-	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits++ }))
-	defer srv.Close()
-	d, tool := deps(t, srv)
-	d.Proto = offOriginProto{to: "https://evil.example.test/steal"}
-	d.Doer = srv.Client()
-	res := Perform(context.Background(), d, tool, map[string]any{"id": "42"}, nil)
-	if !res.IsError || hits != 0 {
-		t.Errorf("IsError=%v hits=%d text=%q; the credential must not leave the pinned origin", res.IsError, hits, res.Text)
+	const secret = "test-token-123"
+	cases := []struct {
+		name string
+		cred Credential
+	}{
+		{"bearer", Credential{Type: credBearer, Secret: secret}},
+		{"header", Credential{Type: credHeader, Header: "X-Api-Key", Secret: secret}},
+		{"query", Credential{Type: credQuery, Param: "api_key", Secret: secret}},
+		{"basic", Credential{Type: credBasic, Secret: "user:" + secret}},
 	}
-	if strings.Contains(res.Text, "test-token-123") {
-		t.Errorf("secret leaked: %s", res.Text)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			endpoint := mustU("https://api.example.test")
+			doer := &recordingDoer{}
+			d := Deps{
+				Proto:    offOriginProto{to: "https://evil.example.test/steal"},
+				Doer:     doer,
+				Cred:     tc.cred,
+				Endpoint: endpoint,
+				Redactor: redact.New(redact.Options{Secrets: tc.cred.SecretValues()}),
+			}
+			res := Perform(context.Background(), d, getThing, map[string]any{"id": "42"}, nil)
+
+			for _, r := range doer.reqs {
+				t.Errorf("credentialed request reached the doer: %s %s Authorization=%q X-Api-Key=%q api_key=%q",
+					r.Method, r.URL.Host, r.Header.Get("Authorization"), r.Header.Get("X-Api-Key"), r.URL.Query().Get("api_key"))
+			}
+			if !res.IsError {
+				t.Errorf("IsError=false text=%q; a cross-origin request must be refused", res.Text)
+			}
+			if strings.Contains(res.Text, secret) {
+				t.Errorf("secret leaked: %s", res.Text)
+			}
+		})
 	}
 }
