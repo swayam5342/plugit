@@ -29,6 +29,7 @@ import (
 	"github.com/swayam5342/plugit/internal/ingest"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/naming"
+	"github.com/swayam5342/plugit/internal/protocol/graphql"
 	"github.com/swayam5342/plugit/internal/protocol/rest/openapi"
 )
 
@@ -88,6 +89,7 @@ var errorKinds = []struct {
 	{"ref-cycle", openapi.ErrRefCycle},
 	{"panic", openapi.ErrParserPanic},
 	{"invalid", openapi.ErrInvalidSpec},
+	{"graphql-unsupported", graphql.ErrUnsupportedSpec},
 }
 
 // Runner starts parse children.

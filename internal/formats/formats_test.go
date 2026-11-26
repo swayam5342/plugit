@@ -1,24 +1,169 @@
 package formats
 
-import "testing"
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/swayam5342/plugit/internal/ingest"
+	"github.com/swayam5342/plugit/internal/model"
+	"github.com/swayam5342/plugit/internal/protocol/graphql"
+)
 
 const openapiDoc = `{"openapi":"3.0.0","info":{"title":"t","version":"1"},
 "servers":[{"url":"https://api.example.test"}],
 "paths":{"/pets":{"get":{"operationId":"listPets","responses":{"200":{"description":"ok"}}}}}}`
 
+const openapiYAML = "openapi: 3.0.3\ninfo: {title: t, version: '1'}\npaths:\n  /pets:\n    get:\n      responses: {'200': {description: ok}}\n"
+
+const swaggerYAML = "swagger: '2.0'\ninfo: {title: t, version: '1'}\npaths: {}\n"
+
 const postmanDoc = `{"info":{"name":"c","schema":"https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
 "item":[{"name":"list","request":{"method":"GET","url":{"raw":"https://api.example.test/pets","host":["api","example","test"],"path":["pets"]}}}]}`
 
+const graphqlTestdata = "../protocol/graphql/testdata"
+
+func readFixture(t *testing.T, path string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		t.Fatalf("reading fixture: %v", err)
+	}
+	return b
+}
+
+func TestOrderedNames(t *testing.T) {
+	var got []string
+	for _, f := range Ordered() {
+		got = append(got, f.Name())
+	}
+	want := []string{"postman", "openapi", "graphql-introspection", "graphql-sdl"}
+	if len(got) != len(want) {
+		t.Fatalf("Ordered() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("Ordered() = %v, want %v", got, want)
+		}
+	}
+}
+
+// SPEC P4: no fixture is detected by two formats, and every format detects
+// at least one fixture.
 func TestOrderedPairwiseDetection(t *testing.T) {
-	for _, data := range []string{openapiDoc, postmanDoc} {
-		n := 0
+	fixtures := map[string][]byte{
+		"openapi json":          []byte(openapiDoc),
+		"openapi yaml":          []byte(openapiYAML),
+		"swagger yaml":          []byte(swaggerYAML),
+		"petstore3":             readFixture(t, "../../testdata/specs/petstore3.json"),
+		"postman":               []byte(postmanDoc),
+		"graphql sdl":           readFixture(t, graphqlTestdata+"/user.graphql"),
+		"graphql introspection": readFixture(t, graphqlTestdata+"/user.introspection.json"),
+		"hostile graphql sdl":   readFixture(t, "../../testdata/hostile/graphql/poisoned-description.graphql"),
+	}
+	hostile, err := filepath.Glob("../../testdata/hostile/*.yaml")
+	if err != nil || len(hostile) == 0 {
+		t.Fatalf("globbing hostile REST fixtures: %v (%d found)", err, len(hostile))
+	}
+	for _, p := range hostile {
+		fixtures["hostile "+filepath.Base(p)] = readFixture(t, p)
+	}
+
+	hits := map[string]int{}
+	for name, data := range fixtures {
+		var by []string
 		for _, f := range Ordered() {
-			if f.Detect([]byte(data)) {
-				n++
+			if f.Detect(data) {
+				by = append(by, f.Name())
+				hits[f.Name()]++
 			}
 		}
-		if n != 1 {
-			t.Errorf("fixture detected by %d formats, want exactly 1", n)
+		if len(by) != 1 {
+			t.Errorf("%s: detected by %v, want exactly one format", name, by)
+		}
+	}
+	for _, f := range Ordered() {
+		if hits[f.Name()] == 0 {
+			t.Errorf("format %s detected no fixture", f.Name())
+		}
+	}
+}
+
+func TestDispatchDetectsGraphQL(t *testing.T) {
+	for _, tc := range []struct {
+		fixture, format string
+	}{
+		{"user.graphql", "graphql-sdl"},
+		{"user.introspection.json", "graphql-introspection"},
+	} {
+		t.Run(tc.format, func(t *testing.T) {
+			data := readFixture(t, graphqlTestdata+"/"+tc.fixture)
+			m, err := ingest.Dispatch(Ordered(), data, "", ingest.Options{})
+			if err != nil {
+				t.Fatalf("Dispatch: %v", err)
+			}
+			if m.Protocol != model.GraphQL {
+				t.Errorf("Protocol = %q, want %q", m.Protocol, model.GraphQL)
+			}
+			if m.Format != tc.format {
+				t.Errorf("Format = %q, want %q", m.Format, tc.format)
+			}
+			if len(m.Tools) == 0 {
+				t.Error("no tools built")
+			}
+		})
+	}
+}
+
+func TestForceGraphQLFormat(t *testing.T) {
+	sdl := readFixture(t, graphqlTestdata+"/user.graphql")
+	intro := readFixture(t, graphqlTestdata+"/user.introspection.json")
+
+	for _, tc := range []struct {
+		force string
+		data  []byte
+	}{
+		{"graphql-sdl", sdl},
+		{"graphql-introspection", intro},
+	} {
+		m, err := ingest.Dispatch(Ordered(), tc.data, tc.force, ingest.Options{})
+		if err != nil {
+			t.Fatalf("forcing %s: %v", tc.force, err)
+		}
+		if m.Format != tc.force || m.Protocol != model.GraphQL {
+			t.Errorf("forcing %s: got %q/%q", tc.force, m.Protocol, m.Format)
+		}
+	}
+
+	// A forced GraphQL format on the wrong input is tried and fails; it never
+	// falls back to the detected format.
+	for _, tc := range []struct {
+		force string
+		data  []byte
+	}{
+		{"graphql-sdl", []byte(openapiDoc)},
+		{"graphql-sdl", intro},
+		{"graphql-introspection", sdl},
+	} {
+		if _, err := ingest.Dispatch(Ordered(), tc.data, tc.force, ingest.Options{}); !errors.Is(err, graphql.ErrUnsupportedSpec) {
+			t.Errorf("forcing %s on the wrong input: err = %v, want graphql.ErrUnsupportedSpec", tc.force, err)
+		}
+	}
+	if _, err := ingest.Dispatch(Ordered(), sdl, "openapi", ingest.Options{}); err == nil {
+		t.Error("forcing openapi on an SDL document should error")
+	}
+}
+
+func TestDispatchUnclaimedInput(t *testing.T) {
+	for name, data := range map[string]string{
+		"random text": "this is not an API description",
+		"asyncapi":    "asyncapi: 2.6.0\ninfo: {title: t, version: '1'}\nchannels: {}\n",
+		"json object": `{"hello":"world"}`,
+		"empty":       "",
+	} {
+		if _, err := ingest.Dispatch(Ordered(), []byte(data), "", ingest.Options{}); !errors.Is(err, ingest.ErrUnsupportedFormat) {
+			t.Errorf("%s: err = %v, want ingest.ErrUnsupportedFormat", name, err)
 		}
 	}
 }

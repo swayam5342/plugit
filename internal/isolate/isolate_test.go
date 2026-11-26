@@ -12,6 +12,7 @@ import (
 
 	"github.com/swayam5342/plugit/internal/ingest"
 	"github.com/swayam5342/plugit/internal/model"
+	"github.com/swayam5342/plugit/internal/protocol/graphql"
 	"github.com/swayam5342/plugit/internal/protocol/rest/openapi"
 )
 
@@ -107,7 +108,11 @@ func TestParseKeepsSentinelErrors(t *testing.T) {
 		want error
 	}{
 		"deep ref":    {chain.String(), openapi.ErrRefTooDeep},
-		"unsupported": {"asyncapi: 2.6.0\ninfo: {title: t, version: '1'}\nchannels: {}\n", openapi.ErrUnsupportedSpec},
+		"unsupported": {"openapi: 4.0.0\ninfo: {title: t, version: '1'}\npaths: {}\n", openapi.ErrUnsupportedSpec},
+		// No format claims an AsyncAPI document.
+		"unsupported format": {"asyncapi: 2.6.0\ninfo: {title: t, version: '1'}\nchannels: {}\n", ingest.ErrUnsupportedFormat},
+		// Valid SDL syntax, so graphql-sdl claims it, but there is no Query root.
+		"graphql unsupported": {"type User {\n  id: ID!\n}\n", graphql.ErrUnsupportedSpec},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := runner("parse").Parse(t.Context(), []byte(tc.src), ingest.Options{})
@@ -271,5 +276,62 @@ func TestRequestCarriesGraphQLCaps(t *testing.T) {
 	}
 	if got := req.options(); !reflect.DeepEqual(got, in) {
 		t.Errorf("options after round trip = %+v, want %+v", got, in)
+	}
+}
+
+// An SDL source parsed through the real child comes back as a GraphQL
+// manifest, built with the caller's selection caps.
+func TestParseGraphQLSDLThroughChild(t *testing.T) {
+	data, err := os.ReadFile("../protocol/graphql/testdata/user.graphql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := ingest.Options{Prefix: "gh", SelectionDepth: 1, MaxFields: 2}
+	got, err := runner("parse").Parse(t.Context(), data, opts)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got.Protocol != model.GraphQL || got.Format != graphql.FormatSDL {
+		t.Fatalf("got %q/%q, want %q/%q", got.Protocol, got.Format, model.GraphQL, graphql.FormatSDL)
+	}
+	if len(got.Tools) == 0 {
+		t.Fatal("no tools built")
+	}
+
+	s, err := graphql.LoadSchema(data, graphql.FormatSDL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := graphql.Build(s, graphql.FormatSDL, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wb, _ := json.Marshal(want)
+	gb, _ := json.Marshal(got)
+	if !bytes.Equal(wb, gb) {
+		t.Errorf("child result differs from in-process build:\n got %s\nwant %s", gb, wb)
+	}
+
+	// The caps must have reached Build: MaxFields 2 truncates a selection
+	// that the default caps leave whole.
+	truncated := func(m *model.Manifest) bool {
+		for _, tool := range m.Tools {
+			for _, is := range tool.Issues {
+				if is.Kind == model.IssueSelectionTruncated {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	if !truncated(got) {
+		t.Error("MaxFields 2 truncated no selection: the caps did not reach Build")
+	}
+	def, err := runner("parse").Parse(t.Context(), data, ingest.Options{})
+	if err != nil {
+		t.Fatalf("Parse with default caps: %v", err)
+	}
+	if truncated(def) {
+		t.Error("default caps truncated a selection; this fixture can't tell the caps apart")
 	}
 }
