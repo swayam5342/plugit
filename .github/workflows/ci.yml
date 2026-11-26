@@ -1,12 +1,19 @@
 name: CI
 
-# Checks run on pull requests, by hand, and from release.yml before a
-# tagged release. Pushes to main do not trigger them, and release binaries
-# are only built for v* tags (see release.yml).
 on:
   pull_request:
   workflow_dispatch:
+    inputs:
+      full:
+        description: Run the full test matrix and fuzzing
+        type: boolean
+        default: true
   workflow_call:
+    inputs:
+      full:
+        description: Run the full test matrix and fuzzing
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -43,8 +50,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        go: [oldstable, stable]
+        # PRs: ubuntu + stable only. Release/manual: full 3 OS x 2 Go.
+        os: ${{ fromJSON(inputs.full && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
+        go: ${{ fromJSON(inputs.full && '["oldstable","stable"]' || '["stable"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -57,6 +65,7 @@ jobs:
         run: go test -race -count=1 ./...
 
   fuzz:
+    if: inputs.full
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -73,7 +82,6 @@ jobs:
         with:
           go-version: stable
       - name: fuzz ${{ matrix.target.fn }} (short)
-        # A short minimize time keeps the run fuzzing instead of shrinking inputs.
         run: go test ${{ matrix.target.pkg }} -run '^$' -fuzz '^${{ matrix.target.fn }}$' -fuzztime 30s -fuzzminimizetime 5s
 
   vulncheck:
