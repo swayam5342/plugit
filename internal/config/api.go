@@ -9,12 +9,14 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/pb33f/go-yaml"
 
+	"github.com/swayam5342/plugit/internal/formats"
 	"github.com/swayam5342/plugit/internal/jsonpick"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/naming"
@@ -91,7 +93,57 @@ type API struct {
 	Policy   Policy             `yaml:"policy"`
 	Log      Log                `yaml:"log"`
 	Lint     Lint               `yaml:"lint,omitempty"`
+	GraphQL  *GraphQLConfig     `yaml:"graphql,omitempty"`
 	Toolsets map[string]Toolset `yaml:"toolsets"`
+}
+
+// GraphQLConfig is the graphql: section (SPEC §3.6). Zero fields mean the
+// defaults.
+type GraphQLConfig struct {
+	SelectionDepth int `yaml:"selection_depth,omitempty"`
+	MaxFields      int `yaml:"max_fields,omitempty"`
+}
+
+// GraphQL selection limits (SPEC §3.5 P7, §3.6).
+const (
+	DefaultSelectionDepth = 2
+	MaxSelectionDepth     = 12
+	DefaultMaxFields      = 100
+	MaxMaxFields          = 1000
+)
+
+// GraphQLSettings is the effective graphql: section: the configured values,
+// with the defaults for an absent section or an unset (zero) field. The
+// section itself stays nil when absent, so REST configs never grow one.
+func (c *API) GraphQLSettings() GraphQLConfig {
+	g := GraphQLConfig{SelectionDepth: DefaultSelectionDepth, MaxFields: DefaultMaxFields}
+	if c.GraphQL != nil {
+		if c.GraphQL.SelectionDepth != 0 {
+			g.SelectionDepth = c.GraphQL.SelectionDepth
+		}
+		if c.GraphQL.MaxFields != 0 {
+			g.MaxFields = c.GraphQL.MaxFields
+		}
+	}
+	return g
+}
+
+// knownAuthTypes is every auth.type this plugit understands, under any
+// protocol.
+var knownAuthTypes = []AuthType{AuthNone, AuthBearer, AuthHeader, AuthQuery, AuthBasic, AuthOAuth2}
+
+// checkAuthType says whether auth.type t may be used with proto: a known
+// type the protocol's P3 row forbids, or a type no protocol knows (a newer
+// plugit's, SPEC §8.1.2 rule 4).
+func checkAuthType(proto model.Protocol, t string) error {
+	if model.AuthTypeAllowed(proto, t) {
+		return nil
+	}
+	if slices.Contains(knownAuthTypes, AuthType(t)) {
+		return fmt.Errorf("auth.type %q isn't available for protocol %q", t, proto)
+	}
+	return fmt.Errorf("auth.type %q: needs a newer plugit (this one knows none, bearer, header, query, basic and oauth2)",
+		naming.CleanText(t, 40))
 }
 
 // Source records where the spec came from.
@@ -334,6 +386,12 @@ func (c *API) Validate() error {
 	if c.Source.SHA256 != "" && !sha256Re.MatchString(c.Source.SHA256) {
 		bad("source.sha256", "must be 64 lowercase hex characters")
 	}
+	if c.Source.Format != "" {
+		if names := formats.NamesFor(proto); !slices.Contains(names, c.Source.Format) {
+			bad("source.format", "%q is not a %s format (use %s)",
+				naming.CleanText(c.Source.Format, 40), proto, strings.Join(names, " or "))
+		}
+	}
 	if err := validateEndpoint(c.Endpoint); err != nil {
 		bad("endpoint", "%s", err)
 	}
@@ -368,7 +426,8 @@ func (c *API) Validate() error {
 		bad("network.max_response_bytes", "must be between 1 and %d", MaxMaxResponseBytes)
 	}
 
-	c.validateAuth(bad, wrap)
+	c.validateSections(proto, bad)
+	c.validateAuth(proto, bad, wrap)
 	if c.hasCredential() {
 		if err := CheckCredentialTransport(c.Endpoint, c.Network.AllowInsecure); err != nil {
 			bad("endpoint", "%s; to send it over http anyway, set network.allow_insecure: true", err)
@@ -410,8 +469,30 @@ func (c *API) Validate() error {
 	return errors.Join(errs...)
 }
 
-func (c *API) validateAuth(bad func(string, string, ...any), wrap func(string, error)) {
+// validateSections allows only the protocol config section matching proto
+// (SPEC §3.6) and range-checks it.
+func (c *API) validateSections(proto model.Protocol, bad func(string, string, ...any)) {
+	if c.GraphQL == nil {
+		return
+	}
+	if model.ConfigSection(proto) != "graphql" {
+		bad("graphql", "only allowed with protocol: graphql")
+		return
+	}
+	if d := c.GraphQL.SelectionDepth; d < 0 || d > MaxSelectionDepth {
+		bad("graphql.selection_depth", "must be between 1 and %d (default %d)", MaxSelectionDepth, DefaultSelectionDepth)
+	}
+	if n := c.GraphQL.MaxFields; n < 0 || n > MaxMaxFields {
+		bad("graphql.max_fields", "must be between 1 and %d (default %d)", MaxMaxFields, DefaultMaxFields)
+	}
+}
+
+func (c *API) validateAuth(proto model.Protocol, bad func(string, string, ...any), wrap func(string, error)) {
 	a := c.Auth
+	if err := checkAuthType(proto, string(a.Type)); err != nil {
+		bad("auth.type", "%s", strings.TrimPrefix(err.Error(), "auth.type "))
+		return
+	}
 	needSecret := true
 	if a.Type != AuthOAuth2 && (a.Flow != "" || a.TokenURL != "" || a.DeviceURL != "" || a.ClientID != "" || len(a.Scopes) > 0) {
 		bad("auth", "flow, token_url, device_url, client_id and scopes are only used with type oauth2")
@@ -446,9 +527,6 @@ func (c *API) validateAuth(bad func(string, string, ...any), wrap func(string, e
 		}
 	case AuthOAuth2:
 		needSecret = c.validateOAuth(bad, wrap)
-	default:
-		needSecret = false
-		bad("auth.type", "%q: use none, bearer, header, query, basic or oauth2", naming.CleanText(string(a.Type), 40))
 	}
 	if !needSecret {
 		return

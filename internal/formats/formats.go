@@ -4,6 +4,7 @@ package formats
 
 import (
 	"github.com/swayam5342/plugit/internal/ingest"
+	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/protocol/graphql"
 	"github.com/swayam5342/plugit/internal/protocol/rest"
 )
@@ -20,4 +21,16 @@ func Ordered() []ingest.Format {
 		graphql.IntrospectionFormat{},
 		graphql.SDLFormat{},
 	}
+}
+
+// NamesFor lists the names of the registered formats of protocol p, in
+// Ordered order (what source.format may say for that protocol).
+func NamesFor(p model.Protocol) []string {
+	var names []string
+	for _, f := range Ordered() {
+		if f.Protocol() == p {
+			names = append(names, f.Name())
+		}
+	}
+	return names
 }

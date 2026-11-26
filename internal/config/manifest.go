@@ -31,6 +31,24 @@ type CacheKey struct {
 	Prefix      string `json:"prefix"`
 	Parser      string `json:"parser"`
 	UnsafePaths bool   `json:"unsafe_paths,omitempty"`
+
+	// GraphQL selection settings (zero for every other protocol, so a REST
+	// key is unchanged from before they existed).
+	SelectionDepth int `json:"selection_depth,omitempty"`
+	MaxFields      int `json:"max_fields,omitempty"`
+}
+
+// CacheKey is the manifest cache key for c's spec (sha256 specSHA256)
+// parsed by plugit build parser. It holds every config value that changes
+// the generated tools; for GraphQL that includes the effective selection
+// settings, so an absent graphql: section and the explicit defaults match.
+func (c *API) CacheKey(specSHA256, parser string) CacheKey {
+	k := CacheKey{SpecSHA256: specSHA256, Prefix: c.Prefix, Parser: parser, UnsafePaths: c.Network.AllowInsecure}
+	if model.Protocol(c.Protocol) == model.GraphQL {
+		g := c.GraphQLSettings()
+		k.SelectionDepth, k.MaxFields = g.SelectionDepth, g.MaxFields
+	}
+	return k
 }
 
 type manifestFile struct {

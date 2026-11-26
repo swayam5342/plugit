@@ -342,7 +342,7 @@ func loadManifest(ctx context.Context, p config.Paths, cfg *config.API, d runDep
 	if err != nil {
 		return nil, err
 	}
-	key := config.CacheKey{SpecSHA256: sum, Prefix: cfg.Prefix, Parser: parserID(d.info), UnsafePaths: cfg.Network.AllowInsecure}
+	key := cfg.CacheKey(sum, parserID(d.info))
 	m, err := config.ReadManifest(cachePath, key)
 	if err == nil {
 		return checkProtocol(cfg, m)

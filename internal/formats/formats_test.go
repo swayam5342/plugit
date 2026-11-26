@@ -175,3 +175,22 @@ func TestDispatchUnclaimedInput(t *testing.T) {
 		}
 	}
 }
+
+func TestNamesFor(t *testing.T) {
+	for p, want := range map[model.Protocol][]string{
+		model.REST:    {"postman", "openapi"},
+		model.GraphQL: {"graphql-introspection", "graphql-sdl"},
+		model.GRPC:    nil,
+	} {
+		got := NamesFor(p)
+		if len(got) != len(want) {
+			t.Errorf("NamesFor(%s) = %v, want %v", p, got, want)
+			continue
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("NamesFor(%s) = %v, want %v", p, got, want)
+			}
+		}
+	}
+}

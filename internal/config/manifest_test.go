@@ -132,3 +132,90 @@ func TestManifestPath(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// The GraphQL selection settings change the generated documents, so they
+// are part of the cache key; an absent section and the explicit defaults
+// give the same key.
+func TestSelectionSettingsBustCacheKey(t *testing.T) {
+	const sum = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	parse := func(extra string) *API {
+		t.Helper()
+		c, err := ParseAPI([]byte(gqlCacheConfig + extra))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	base := parse("").CacheKey(sum, "v1")
+	if base.SelectionDepth != 2 || base.MaxFields != 100 {
+		t.Errorf("graphql key = %+v, want the effective defaults", base)
+	}
+	if k := parse("graphql: {selection_depth: 2, max_fields: 100}\n").CacheKey(sum, "v1"); k != base {
+		t.Errorf("explicit defaults key %+v != absent-section key %+v", k, base)
+	}
+	deeper := parse("graphql: {selection_depth: 3}\n").CacheKey(sum, "v1")
+	if deeper == base {
+		t.Fatal("selection_depth did not change the cache key")
+	}
+	if k := parse("graphql: {max_fields: 99}\n").CacheKey(sum, "v1"); k == base {
+		t.Error("max_fields did not change the cache key")
+	}
+
+	path := filepath.Join(t.TempDir(), "manifest.json")
+	if err := WriteManifest(path, base, testManifest()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadManifest(path, base); err != nil {
+		t.Fatalf("same key: %v", err)
+	}
+	if _, err := ReadManifest(path, deeper); !errors.Is(err, ErrCacheMiss) {
+		t.Errorf("changed selection_depth: err = %v, want ErrCacheMiss", err)
+	}
+}
+
+const gqlCacheConfig = `version: 1
+name: gh
+protocol: graphql
+source: {url: https://example.test/schema.graphql}
+endpoint: https://api.example.test/graphql
+prefix: gh
+toolsets:
+  default:
+    tools:
+      "query user": {}
+`
+
+// A REST key is what it was before the GraphQL fields existed, so a
+// manifest.json written by an earlier build still matches (no spurious
+// cache miss).
+func TestRESTCacheKeyUnchanged(t *testing.T) {
+	sum := strings.Repeat("a", 64)
+	c, err := ParseAPI([]byte(strings.Replace(minimalConfig, "toolsets:", "prefix: pets\nnetwork: {allow_insecure: true}\ntoolsets:", 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := c.CacheKey(sum, "v1.2.3")
+	want := CacheKey{SpecSHA256: sum, Prefix: "pets", Parser: "v1.2.3", UnsafePaths: true}
+	if key != want {
+		t.Fatalf("REST key = %+v, want %+v", key, want)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.json")
+	old := `{"format":1,"key":{"spec_sha256":"` + sum + `","prefix":"pets","parser":"v1.2.3","unsafe_paths":true},"manifest":{"tools":[]}}`
+	if err := os.WriteFile(path, []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadManifest(path, key); err != nil {
+		t.Errorf("pre-GraphQL REST manifest: %v", err)
+	}
+	if err := WriteManifest(path, key, testManifest()); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "selection_depth") || strings.Contains(string(data), "max_fields") {
+		t.Errorf("REST manifest key carries GraphQL fields: %s", data)
+	}
+}

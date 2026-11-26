@@ -262,7 +262,7 @@ func saveAPIFiles(p config.Paths, cfg *config.API, snapshot []byte, m *model.Man
 		return err
 	}
 	cachePath, _ := p.Manifest(cfg.Name)
-	if err := config.WriteManifest(cachePath, config.CacheKey{SpecSHA256: sum, Prefix: cfg.Prefix, Parser: parser, UnsafePaths: cfg.Network.AllowInsecure}, m); err != nil {
+	if err := config.WriteManifest(cachePath, cfg.CacheKey(sum, parser), m); err != nil {
 		return err
 	}
 	return config.SaveAPI(p, cfg)
@@ -329,12 +329,12 @@ func pinBaseURL(s addSettings, servers []string, confirm func(string) (bool, err
 	if confirm == nil {
 		return "", fmt.Errorf("the spec's server is %s: confirm it with --yes, or pass --endpoint", u)
 	}
-	ok, err := confirm(fmt.Sprintf("Pin base URL %s? Credentials will only ever be sent there.", u))
+	ok, err := confirm(fmt.Sprintf("Pin endpoint %s? Credentials will only ever be sent there.", u))
 	if err != nil {
 		return "", err
 	}
 	if !ok {
-		return "", errors.New("base URL not confirmed: pass --endpoint to pin a different one")
+		return "", errors.New("endpoint not confirmed: pass --endpoint to pin a different one")
 	}
 	return u.String(), nil
 }
