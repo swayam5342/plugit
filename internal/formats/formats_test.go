@@ -52,35 +52,43 @@ func TestOrderedNames(t *testing.T) {
 // SPEC P4: no fixture is detected by two formats, and every format detects
 // at least one fixture.
 func TestOrderedPairwiseDetection(t *testing.T) {
-	fixtures := map[string][]byte{
-		"openapi json":          []byte(openapiDoc),
-		"openapi yaml":          []byte(openapiYAML),
-		"swagger yaml":          []byte(swaggerYAML),
-		"petstore3":             readFixture(t, "../../testdata/specs/petstore3.json"),
-		"postman":               []byte(postmanDoc),
-		"graphql sdl":           readFixture(t, graphqlTestdata+"/user.graphql"),
-		"graphql introspection": readFixture(t, graphqlTestdata+"/user.introspection.json"),
-		"hostile graphql sdl":   readFixture(t, "../../testdata/hostile/graphql/poisoned-description.graphql"),
+	type fixture struct {
+		data []byte
+		want string
+	}
+	fixtures := map[string]fixture{
+		"openapi json":          {[]byte(openapiDoc), "openapi"},
+		"openapi yaml":          {[]byte(openapiYAML), "openapi"},
+		"swagger yaml":          {[]byte(swaggerYAML), "openapi"},
+		"petstore3":             {readFixture(t, "../../testdata/specs/petstore3.json"), "openapi"},
+		"postman":               {[]byte(postmanDoc), "postman"},
+		"graphql sdl":           {readFixture(t, graphqlTestdata+"/user.graphql"), "graphql-sdl"},
+		"graphql introspection": {readFixture(t, graphqlTestdata+"/user.introspection.json"), "graphql-introspection"},
+		"hostile graphql sdl":   {readFixture(t, "../../testdata/hostile/graphql/poisoned-description.graphql"), "graphql-sdl"},
+		// SDL with an openapi:/swagger: line at column 0 stays SDL.
+		"sdl column-0 field":                {[]byte("type Query {\nopenapi: String\n}\n"), "graphql-sdl"},
+		"sdl description with swagger line": {[]byte("\"\"\"\nswagger: \"2.0\" mirror of /v1\n\"\"\"\ntype Query {\n  x: Int\n}\n"), "graphql-sdl"},
+		"sdl directive argument":            {[]byte("schema @link(\nopenapi: 3\n) {\n  query: Query\n}\n\ntype Query {\n  x: Int\n}\n"), "graphql-sdl"},
 	}
 	hostile, err := filepath.Glob("../../testdata/hostile/*.yaml")
 	if err != nil || len(hostile) == 0 {
 		t.Fatalf("globbing hostile REST fixtures: %v (%d found)", err, len(hostile))
 	}
 	for _, p := range hostile {
-		fixtures["hostile "+filepath.Base(p)] = readFixture(t, p)
+		fixtures["hostile "+filepath.Base(p)] = fixture{readFixture(t, p), "openapi"}
 	}
 
 	hits := map[string]int{}
-	for name, data := range fixtures {
+	for name, fx := range fixtures {
 		var by []string
 		for _, f := range Ordered() {
-			if f.Detect(data) {
+			if f.Detect(fx.data) {
 				by = append(by, f.Name())
 				hits[f.Name()]++
 			}
 		}
-		if len(by) != 1 {
-			t.Errorf("%s: detected by %v, want exactly one format", name, by)
+		if len(by) != 1 || by[0] != fx.want {
+			t.Errorf("%s: detected by %v, want exactly [%s]", name, by, fx.want)
 		}
 	}
 	for _, f := range Ordered() {

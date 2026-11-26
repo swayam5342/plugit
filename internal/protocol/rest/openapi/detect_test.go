@@ -2,6 +2,15 @@ package openapi
 
 import "testing"
 
+// SDL documents with an openapi: or swagger: line at column 0. Each must stay
+// a graphql-sdl document (internal/formats has the same fixtures in its
+// pairwise test).
+const (
+	sdlColumn0Field       = "type Query {\nopenapi: String\n}\n"
+	sdlDescriptionSwagger = "\"\"\"\nswagger: \"2.0\" mirror of /v1\n\"\"\"\ntype Query {\n  x: Int\n}\n"
+	sdlDirectiveArg       = "schema @link(\nopenapi: 3\n) {\n  query: Query\n}\n\ntype Query {\n  x: Int\n}\n"
+)
+
 func TestIsOpenAPI(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -20,7 +29,19 @@ func TestIsOpenAPI(t *testing.T) {
 		{"yaml swagger", "swagger: '2.0'\ninfo: {title: t, version: '1'}\npaths: {}\n", true},
 		{"yaml double quoted", "\"openapi\": 3.0.3\n", true},
 		{"yaml single quoted", "'swagger': '2.0'\n", true},
-		{"yaml key at end of line", "openapi:\n  3.0.3\n", true},
+		{"yaml key with no value on its line", "openapi:\n  3.0.3\n", false},
+		{"yaml value not a version", "openapi: String\n", false},
+		{"yaml double quoted value", "openapi: \"3.1.0\"\n", true},
+		{"yaml indented comment first", "  # c\n\t\nopenapi: 3.0.0\n", true},
+		{"yaml doc marker with comment", "--- # doc\nopenapi: 3.0.0\n", true},
+		{"yaml first line not a key", "hello world\nopenapi: 3.0.0\n", false},
+		{"yaml first line indented", "  info: x\nopenapi: 3.0.0\n", false},
+		{"yaml first line plain key with space", "my key: 1\nopenapi: 3.0.0\n", false},
+		{"yaml sequence root", "- a\nopenapi: 3.0.0\n", false},
+		{"yaml first line triple quote", "\"\"\"x\"\"\": 1\nopenapi: 3.0.0\n", false},
+		{"sdl column-0 field", sdlColumn0Field, false},
+		{"sdl description with swagger line", sdlDescriptionSwagger, false},
+		{"sdl directive argument", sdlDirectiveArg, false},
 		{"yaml crlf", "info:\r\n  title: t\r\nopenapi: 3.0.3\r\n", true},
 		{"yaml preamble", "\xef\xbb\xbf%YAML 1.2\n---\n# a comment\n\nopenapi: 3.1.0\n", true},
 		{"yaml key after others", "info:\n  title: t\npaths: {}\nopenapi: 3.0.0\n", true},
