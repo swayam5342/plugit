@@ -20,5 +20,13 @@
 // arguments, and degrading unmappable parts (custom scalars included) to {}.
 // ArgSchema is the single-argument shorthand.
 //
+// DefaultSelection builds the fixed selection set of a tool's document from
+// its return type (P7): depth- and field-capped, spending the field budget
+// breadth-first, never emitting an empty selection set, and aliasing field
+// names that an interface's or union's possible types declare with different
+// types. SelectionFromPaths compiles a toolset's response_fields into one
+// instead, with a step cap so paths through nested unions cannot expand
+// without bound.
+//
 // The ingest code is pure: no network, filesystem, clock, env or randomness.
 package graphql
