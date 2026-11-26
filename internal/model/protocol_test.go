@@ -74,3 +74,28 @@ func TestIdempotentForMethod(t *testing.T) {
 		}
 	}
 }
+
+// Protocols lists every protocol the P3 table defines, sorted, so callers
+// that must handle each one (the CLI's resolveProto/describeFor switches) can
+// iterate the table instead of keeping their own list.
+func TestProtocolsListsTableSorted(t *testing.T) {
+	got := Protocols()
+	want := []Protocol{GraphQL, GRPC, REST}
+	if len(got) != len(want) {
+		t.Fatalf("Protocols() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("Protocols() = %v, want %v", got, want)
+		}
+	}
+	for _, p := range got {
+		if !KnownProtocol(p) {
+			t.Errorf("Protocols() returned %q, which KnownProtocol rejects", p)
+		}
+	}
+	got[0] = "mutated"
+	if Protocols()[0] == "mutated" {
+		t.Error("Protocols() must return a fresh slice each call")
+	}
+}

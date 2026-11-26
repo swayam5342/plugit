@@ -52,7 +52,7 @@ type PickerInput struct {
 	Lint     func(config.Toolset) []lint.Finding
 	// Describe returns a tool's per-protocol badge and target for display
 	// (SPEC §2.3): REST "GET /pets/{id}", GraphQL "query user", gRPC
-	// "acme.v1.Issues/Get". The cli layer injects protocol.For(..).Describe.
+	// "acme.v1.Issues/Get". The cli layer injects it (cli.describeFor).
 	// When nil, the badge/target fall back to the REST method and path.
 	Describe func(model.Tool) (badge, target string)
 }

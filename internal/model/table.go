@@ -1,6 +1,7 @@
 package model
 
 import (
+	"maps"
 	"slices"
 	"strings"
 )
@@ -60,6 +61,12 @@ func KnownProtocol(p Protocol) bool {
 	_, ok := protoTable[p]
 	return ok
 }
+
+// Protocols lists every protocol the P3 table defines, sorted by name. The
+// slice is fresh on each call. Callers that must handle each protocol (the
+// CLI's resolveProto and describeFor switches, and the test that keeps them
+// exhaustive) iterate this rather than keeping their own list.
+func Protocols() []Protocol { return slices.Sorted(maps.Keys(protoTable)) }
 
 // KeyValid reports whether k is a well-formed OpKey for protocol p (SPEC
 // §8.1.4 grammar). REST is "METHOD /path"; every other protocol is

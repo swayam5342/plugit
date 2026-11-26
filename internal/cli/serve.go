@@ -33,7 +33,6 @@ import (
 	"github.com/swayam5342/plugit/internal/oauth"
 	"github.com/swayam5342/plugit/internal/policy"
 	"github.com/swayam5342/plugit/internal/protocol"
-	"github.com/swayam5342/plugit/internal/protocol/rest"
 	"github.com/swayam5342/plugit/internal/redact"
 	"github.com/swayam5342/plugit/internal/schema"
 	"github.com/swayam5342/plugit/internal/secrets"
@@ -220,26 +219,6 @@ type active struct {
 	doer     httpx.Doer
 }
 
-// resolveProto picks the serving protocol from the registry (SPEC §3.7 P5) and
-// binds the per-serve target. A protocol with no registered impl is refused —
-// "needs a newer plugit" — never served as REST by accident (T-rules: one serve
-// = one protocol). An empty name is a pre-field manifest, which is REST.
-func resolveProto(name model.Protocol, tg rest.Target) (protocol.Protocol, error) {
-	if name == "" {
-		name = model.REST
-	}
-	p, ok := protocol.For(name)
-	if !ok {
-		return nil, fmt.Errorf("this plugit build can't serve the %q protocol; it may need a newer version of plugit", name)
-	}
-	// REST is the only impl in M7 and carries its config on the value; bind it.
-	if r, isREST := p.(rest.REST); isREST {
-		r.Target = tg
-		return r, nil
-	}
-	return p, nil
-}
-
 // loadActive loads plugit.yaml, the manifest (from cache when fresh), the
 // toolset and the credentials. Shared by serve and try.
 func loadActive(ctx context.Context, s serveSettings, d runDeps, logger *slog.Logger) (*active, error) {
@@ -286,9 +265,8 @@ func loadActive(ctx context.Context, s serveSettings, d runDeps, logger *slog.Lo
 		return nil, err
 	}
 	fx.userAgent = "plugit/" + d.info.withDefaults().Version
-	tg := restTargetFrom(fx, baseURL)
 	hidden := append(credHidden, fixedHidden...)
-	proto, err := resolveProto(m.Protocol, tg)
+	proto, err := resolveProto(m.Protocol, fx, baseURL)
 	if err != nil {
 		return nil, err
 	}
@@ -311,7 +289,7 @@ func loadActive(ctx context.Context, s serveSettings, d runDeps, logger *slog.Lo
 		endpoint: baseURL,
 		proto:    proto,
 		red: redact.New(redact.Options{
-			Secrets:           append(cred.SecretValues(), tg.SecretValues()...),
+			Secrets:           append(cred.SecretValues(), fx.secretValues()...),
 			SecretHeaders:     hidden,
 			SecretQueryParams: hidden,
 		}),
@@ -405,20 +383,17 @@ type fixedItem struct {
 	Secret          bool
 }
 
-// restTargetFrom maps resolved fixed params to a REST target pinned to baseURL.
-func restTargetFrom(fx resolvedFixed, baseURL *url.URL) rest.Target {
-	tg := rest.Target{BaseURL: baseURL, UserAgent: fx.userAgent}
+// secretValues lists the resolved fixed values that must be redacted wherever
+// they appear (SPEC T11): every non-empty secret value, in config order. It
+// is protocol-neutral, so redaction doesn't depend on which target was built.
+func (fx resolvedFixed) secretValues() []string {
+	var out []string
 	for _, it := range fx.items {
-		in := model.InQuery
-		switch it.In {
-		case "header":
-			in = model.InHeader
-		case "cookie":
-			in = model.InCookie
+		if it.Secret && it.Value != "" {
+			out = append(out, it.Value)
 		}
-		tg.Fixed = append(tg.Fixed, rest.Fixed{Name: it.Name, In: in, Value: it.Value, Secret: it.Secret})
 	}
-	return tg
+	return out
 }
 
 // buildCredential resolves the configured credential. It returns the names to

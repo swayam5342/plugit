@@ -66,7 +66,7 @@ func (tg Target) SecretValues() []string {
 }
 
 // GraphQL serves GraphQL tools (SPEC §3.5 P7). It is constructed directly by
-// the CLI; there is no registry entry for it.
+// the CLI (cli.resolveProto), like every protocol.
 type GraphQL struct {
 	Target Target
 }

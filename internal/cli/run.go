@@ -489,13 +489,12 @@ func runServe(ctx context.Context, s runSettings, d runDeps) error {
 	}
 
 	fixed.userAgent = "plugit/" + d.info.withDefaults().Version
-	target := restTargetFrom(fixed, baseURL)
-	proto, err := resolveProto(m.Protocol, target)
+	proto, err := resolveProto(m.Protocol, fixed, baseURL)
 	if err != nil {
 		return err
 	}
 	red := redact.New(redact.Options{
-		Secrets:           target.SecretValues(),
+		Secrets:           fixed.secretValues(),
 		SecretHeaders:     hidden,
 		SecretQueryParams: hidden,
 	})

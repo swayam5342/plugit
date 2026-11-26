@@ -46,14 +46,3 @@ type BinaryInfo struct {
 	Bytes int
 	Type  string
 }
-
-var registry = map[model.Protocol]Protocol{}
-
-// Register adds p to the registry (called from each protocol package's wiring).
-func Register(p Protocol) { registry[p.Name()] = p }
-
-// For returns the registered Protocol for p, if any.
-func For(p model.Protocol) (Protocol, bool) {
-	x, ok := registry[p]
-	return x, ok
-}
