@@ -355,6 +355,27 @@ func TestLoadIntrospectionHostile(t *testing.T) {
 	}
 }
 
+// TestLoadIntrospectionBOM: a BOM-prefixed result (e.g. written by PowerShell
+// 5.1's Set-Content -Encoding UTF8) is detected, so it must also load.
+func TestLoadIntrospectionBOM(t *testing.T) {
+	plain := readFixture(t, "user.introspection.json")
+	withBOM := append([]byte(bom), plain...)
+	if !DetectIntrospection(withBOM) {
+		t.Fatal("BOM-prefixed introspection not detected")
+	}
+	want, err := LoadSchema(plain, FormatIntrospection)
+	if err != nil {
+		t.Fatalf("LoadSchema(plain): %v", err)
+	}
+	got, err := LoadSchema(withBOM, FormatIntrospection)
+	if err != nil {
+		t.Fatalf("LoadSchema(BOM-prefixed): %v", err)
+	}
+	if a, b := summarize(want), summarize(got); !slices.Equal(a, b) {
+		t.Errorf("BOM-prefixed schema differs:\nplain: %v\nbom:   %v", a, b)
+	}
+}
+
 func TestLoadUnknownFormat(t *testing.T) {
 	_, err := LoadSchema(readFixture(t, "user.graphql"), "openapi")
 	if !errors.Is(err, ErrUnsupportedSpec) {

@@ -94,16 +94,24 @@ func isName(s string) bool {
 // DetectIntrospection reports whether data is a JSON introspection result:
 // an object with a top-level "__schema" object, or one under "data".
 func DetectIntrospection(data []byte) bool {
-	trimmed := bytes.TrimLeft(bytes.TrimPrefix(data, utf8BOM), " \t\r\n")
-	if len(trimmed) == 0 || trimmed[0] != '{' || !bytes.Contains(data, []byte(`"__schema"`)) {
+	trimmed := trimJSONStart(data)
+	if len(trimmed) == 0 || trimmed[0] != '{' || !bytes.Contains(trimmed, []byte(`"__schema"`)) {
 		return false
 	}
 	_, err := introspectionRoot(trimmed)
 	return err == nil
 }
 
+// trimJSONStart drops a leading UTF-8 BOM (which encoding/json rejects; PowerShell
+// 5.1 writes one) and leading whitespace. Detection and loading share it so a
+// file that is detected also loads.
+func trimJSONStart(data []byte) []byte {
+	return bytes.TrimLeft(bytes.TrimPrefix(data, utf8BOM), " \t\r\n")
+}
+
 // introspectionRoot returns the raw "__schema" object of an introspection result.
 func introspectionRoot(data []byte) (json.RawMessage, error) {
+	data = trimJSONStart(data)
 	var env struct {
 		Data *struct {
 			Schema json.RawMessage `json:"__schema"`
