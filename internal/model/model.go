@@ -244,6 +244,9 @@ const (
 	IssueBodyNested     IssueKind = "body-nested"
 	IssueUnsupported    IssueKind = "unsupported"
 	IssueHiddenText     IssueKind = "hidden-text"
+	// IssueSelectionTruncated: a GraphQL default selection hit
+	// graphql.max_fields (lint L020).
+	IssueSelectionTruncated IssueKind = "selection-truncated"
 )
 
 // Issue is a problem found while ingesting one tool.

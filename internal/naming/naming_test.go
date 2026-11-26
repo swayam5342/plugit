@@ -156,6 +156,30 @@ func TestAssignHundredCollisions(t *testing.T) {
 	}
 }
 
+func TestAssignInOrderKeepsGivenOrder(t *testing.T) {
+	// "mutation user" sorts before "query user"; AssignInOrder must let the
+	// first candidate given claim the plain name instead.
+	cands := []Candidate{
+		{Key: "query user", OperationID: "user"},
+		{Key: "query users", OperationID: "users"},
+		{Key: "mutation user", OperationID: "User"},
+		{Key: "query user", OperationID: "ignored"}, // duplicate key: named once
+	}
+	got := AssignInOrder(cands, "gh")
+	want := map[model.OpKey]string{"query user": "gh_user", "query users": "gh_users", "mutation user": "gh_User_2"}
+	if len(got) != len(want) {
+		t.Fatalf("AssignInOrder returned %d names, want %d: %v", len(got), len(want), got)
+	}
+	for k, w := range want {
+		if got[k] != w {
+			t.Errorf("%s = %q, want %q", k, got[k], w)
+		}
+	}
+	if s := Assign(cands, "gh"); s["mutation user"] != "gh_User" || s["query user"] != "gh_user_2" {
+		t.Errorf("Assign must still sort by key: %v", s)
+	}
+}
+
 func TestAssignAvoidsCollisionWithExistingSuffix(t *testing.T) {
 	got := Assign([]Candidate{
 		{Key: "GET /a", OperationID: "x"},

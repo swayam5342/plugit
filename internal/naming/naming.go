@@ -79,10 +79,16 @@ type Candidate struct {
 func Assign(cands []Candidate, prefix string) map[model.OpKey]string {
 	sorted := slices.Clone(cands)
 	slices.SortStableFunc(sorted, func(a, b Candidate) int { return cmp.Compare(a.Key, b.Key) })
+	return AssignInOrder(sorted, prefix)
+}
 
-	names := make(map[model.OpKey]string, len(sorted))
-	used := make(map[string]bool, len(sorted))
-	for _, c := range sorted {
+// AssignInOrder names candidates by Assign's rules but in the order given,
+// so an earlier candidate claims a contested name. The caller makes the
+// order deterministic (GraphQL puts every query before every mutation).
+func AssignInOrder(cands []Candidate, prefix string) map[model.OpKey]string {
+	names := make(map[model.OpKey]string, len(cands))
+	used := make(map[string]bool, len(cands))
+	for _, c := range cands {
 		if _, done := names[c.Key]; done {
 			continue
 		}
