@@ -1,15 +1,10 @@
 package openapi
 
 import (
-	"cmp"
 	"encoding/json"
 	"fmt"
-	"maps"
-	"net/url"
-	"regexp"
 	"slices"
 	"strings"
-	"unicode"
 
 	"github.com/pb33f/go-yaml"
 	v2 "github.com/pb33f/libopenapi/datamodel/high/v2"
@@ -17,24 +12,13 @@ import (
 
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/naming"
+	"github.com/swayam5342/plugit/internal/protocol/rest/restutil"
 	"github.com/swayam5342/plugit/internal/utils"
 )
 
 type builder struct {
-	opts       Options
-	is30       bool
-	m          model.Manifest
-	ops        []*model.Tool
-	opIDs      map[model.OpKey]string
-	extraWarns int
-}
-
-func (b *builder) warn(msg string) {
-	if len(b.m.Warnings) >= maxWarnings {
-		b.extraWarns++
-		return
-	}
-	b.m.Warnings = append(b.m.Warnings, naming.CleanText(msg, 300))
+	restutil.Builder
+	is30 bool
 }
 
 // warnErr records non-fatal libopenapi errors (missing components, ...).
@@ -50,150 +34,19 @@ func (b *builder) warnErr(err error) {
 	}
 	for _, e := range errs {
 		if e != nil {
-			b.warn(e.Error())
+			b.Warn(e.Error())
 		}
 	}
-}
-
-func (b *builder) finish() *model.Manifest {
-	b.m.Protocol = model.REST
-	if b.extraWarns > 0 {
-		b.m.Warnings = append(b.m.Warnings, fmt.Sprintf("... and %d more warnings", b.extraWarns))
-	}
-	cands := make([]naming.Candidate, 0, len(b.ops))
-	for _, t := range b.ops {
-		cands = append(cands, naming.Candidate{Key: t.Key, OperationID: b.opIDs[t.Key]})
-	}
-	names := naming.Assign(cands, b.opts.Prefix)
-
-	b.m.Tools = make([]model.Tool, 0, len(b.ops))
-	for _, t := range b.ops {
-		t.Name = names[t.Key]
-		t.ID = naming.ToolID(t.Key)
-		b.m.Tools = append(b.m.Tools, *t)
-	}
-	slices.SortFunc(b.m.Tools, func(x, y model.Tool) int { return cmp.Compare(x.Key, y.Key) })
-	return &b.m
-}
-
-// addOp registers a tool, ignoring duplicate keys (first wins).
-func (b *builder) addOp(t *model.Tool, operationID string) {
-	if b.opIDs == nil {
-		b.opIDs = map[model.OpKey]string{}
-	}
-	if _, dup := b.opIDs[t.Key]; dup {
-		b.warn(fmt.Sprintf("duplicate operation %s ignored", t.Key))
-		return
-	}
-	b.opIDs[t.Key] = operationID
-	b.ops = append(b.ops, t)
-}
-
-func (b *builder) newTool(method, path, summary, description string, tags []string, deprecated bool) *model.Tool {
-	return &model.Tool{
-		Key:         model.NewOpKey(method, path),
-		Description: naming.Describe(summary, description, method, path, b.opts.MaxDescription),
-		Tags:        cleanTags(tags),
-		Deprecated:  deprecated,
-		Safety:      model.SafetyForMethod(method),
-		Idempotent:  model.IdempotentForMethod(method),
-		HTTP:        &model.HTTPOp{Method: strings.ToUpper(method), Path: path},
-	}
-}
-
-const maxTagLen = 64
-
-// cleanTags cleans tags like every other spec string: they reach the user's
-// terminal (picker, hints), where an escape sequence could rewrite the
-// screen. Empty and duplicate tags are dropped.
-func cleanTags(tags []string) []string {
-	var out []string
-	for _, tag := range tags {
-		if c := naming.CleanText(tag, maxTagLen); c != "" && !slices.Contains(out, c) {
-			out = append(out, c)
-		}
-	}
-	return out
-}
-
-// validPath rejects path templates that could smuggle a query or fragment,
-// climb out of the pinned base path, or carry invisible text into tool keys
-// and descriptions. Path templates come from the untrusted spec. The
-// percent-decoded form is checked too, since a server decodes it. Hard
-// problems always skip the path; risky ones skip it unless AllowUnsafePaths
-// is on.
-func (b *builder) validPath(path string) bool {
-	decoded, err := url.PathUnescape(path)
-	if err != nil {
-		decoded = path
-	}
-	reason, risky := hardPathProblem(path, decoded), false
-	if reason == "" {
-		reason, risky = riskyPathProblem(path, decoded), true
-	}
-	switch {
-	case reason == "":
-		return true
-	case risky && b.opts.AllowUnsafePaths:
-		return true
-	}
-	msg := fmt.Sprintf("path %+q skipped: %s", truncateRef(path), reason)
-	if risky {
-		msg += "; to import it anyway, set network.allow_insecure (--allow-insecure)"
-	}
-	b.warn(msg)
-	return false
-}
-
-func hardPathProblem(path, decoded string) string {
-	unprintable := func(r rune) bool {
-		return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || (unicode.IsSpace(r) && r != ' ')
-	}
-	switch {
-	case !strings.HasPrefix(path, "/"):
-		return "it must start with '/'"
-	case strings.ContainsAny(path, "?#"):
-		return "it contains '?' or '#'"
-	case strings.IndexFunc(path, unprintable) >= 0:
-		return "it contains control or invisible characters"
-	case strings.IndexFunc(decoded, unprintable) >= 0:
-		return "it contains percent-encoded control or invisible characters"
-	}
-	return ""
-}
-
-func riskyPathProblem(path, decoded string) string {
-	dots := func(s string) bool {
-		for seg := range strings.SplitSeq(s, "/") {
-			if seg == "." || seg == ".." {
-				return true
-			}
-		}
-		return false
-	}
-	switch {
-	case strings.Contains(path, " "):
-		return "it contains a space"
-	case strings.Contains(path, `\`):
-		return `it contains '\'`
-	case dots(path):
-		return "it contains a '.' or '..' segment"
-	case strings.Contains(decoded, `\`):
-		return `it contains a percent-encoded '\'`
-	case dots(decoded):
-		return "it contains a percent-encoded '.' or '..' segment"
-	}
-	return ""
 }
 
 func (b *builder) fromV3(doc *v3.Document) {
 	if doc.Info != nil {
-		b.m.Title = naming.CleanText(doc.Info.Title, 200)
-		b.m.Version = naming.CleanText(doc.Info.Version, 100)
+		b.M.Title = naming.CleanText(doc.Info.Title, 200)
+		b.M.Version = naming.CleanText(doc.Info.Version, 100)
 	}
 	for _, s := range doc.Servers {
 		if s != nil && s.URL != "" {
-			b.m.Endpoints = append(b.m.Endpoints, expandServer(s))
+			b.M.Endpoints = append(b.M.Endpoints, expandServer(s))
 		}
 	}
 	if doc.Paths == nil || doc.Paths.PathItems == nil {
@@ -201,14 +54,14 @@ func (b *builder) fromV3(doc *v3.Document) {
 	}
 	for pair := doc.Paths.PathItems.First(); pair != nil; pair = pair.Next() {
 		path, item := pair.Key(), pair.Value()
-		if item == nil || !b.validPath(path) {
+		if item == nil || !b.ValidPath(path) {
 			continue
 		}
 		if item.Trace != nil {
-			b.warn(fmt.Sprintf("TRACE %s skipped: TRACE echoes request credentials back", path))
+			b.Warn(fmt.Sprintf("TRACE %s skipped: TRACE echoes request credentials back", path))
 		}
 		if item.Query != nil || (item.AdditionalOperations != nil && item.AdditionalOperations.Len() > 0) {
-			b.warn(fmt.Sprintf("non-standard methods on %s skipped", path))
+			b.Warn(fmt.Sprintf("non-standard methods on %s skipped", path))
 		}
 		for _, mo := range []struct {
 			method string
@@ -237,10 +90,10 @@ func expandServer(s *v3.Server) string {
 }
 
 func (b *builder) v3Op(method, path string, item *v3.PathItem, op *v3.Operation) {
-	t := b.newTool(method, path, op.Summary, op.Description, op.Tags, op.Deprecated != nil && *op.Deprecated)
-	c := newConverter(b.is30, b.opts.MaxDescription)
-	c.hidden("summary", op.Summary)
-	c.hidden("description", op.Description)
+	t := b.NewTool(method, path, op.Summary, op.Description, op.Tags, op.Deprecated != nil && *op.Deprecated)
+	c := newConverter(b.is30, b.Opts.MaxDescription)
+	c.Hidden("summary", op.Summary)
+	c.Hidden("description", op.Description)
 
 	for _, p := range mergeParams(item.Parameters, op.Parameters, func(p *v3.Parameter) (string, string) { return p.In, p.Name }) {
 		var schema json.RawMessage
@@ -252,7 +105,7 @@ func (b *builder) v3Op(method, path string, item *v3.PathItem, op *v3.Operation)
 		default:
 			schema = json.RawMessage(`{}`)
 		}
-		b.addParam(t, c, p.Name, p.In, p.Required != nil && *p.Required, p.Description, schema)
+		b.AddParam(t, c.Collector, p.Name, p.In, p.Required != nil && *p.Required, p.Description, schema)
 	}
 
 	if rb := op.RequestBody; rb != nil && rb.Content != nil && rb.Content.Len() > 0 {
@@ -265,9 +118,9 @@ func (b *builder) v3Op(method, path string, item *v3.PathItem, op *v3.Operation)
 			case mt == nil:
 			case isJSON(ct) && jsonMT == nil:
 				jsonMT = mt
-			case ct == ctForm && formMT == nil:
+			case ct == restutil.CTForm && formMT == nil:
 				formMT = mt
-			case ct == ctMultipart && multiMT == nil:
+			case ct == restutil.CTMultipart && multiMT == nil:
 				multiMT = mt
 			}
 		}
@@ -276,29 +129,29 @@ func (b *builder) v3Op(method, path string, item *v3.PathItem, op *v3.Operation)
 		case jsonMT != nil:
 			t.HTTP.Body = &model.Body{ContentType: "application/json", Schema: c.raw(jsonMT.Schema), Required: required}
 		case formMT != nil:
-			t.HTTP.Body = formBody(c, ctForm, c.raw(formMT.Schema), v3Encodings(formMT), required)
+			t.HTTP.Body = restutil.FormBody(c.Collector, restutil.CTForm, c.raw(formMT.Schema), v3Encodings(formMT), required)
 		case multiMT != nil:
-			t.HTTP.Body = formBody(c, ctMultipart, c.raw(multiMT.Schema), v3Encodings(multiMT), required)
+			t.HTTP.Body = restutil.FormBody(c.Collector, restutil.CTMultipart, c.raw(multiMT.Schema), v3Encodings(multiMT), required)
 		default:
-			c.issue(model.IssueUnsupported, "request body content type(s) not supported yet: %s", strings.Join(all, ", "))
+			c.Issue(model.IssueUnsupported, "request body content type(s) not supported yet: %s", strings.Join(all, ", "))
 		}
 	}
-	t.Issues = c.issues
-	b.addOp(t, op.OperationId)
+	t.Issues = c.Issues()
+	b.AddOp(t, op.OperationId)
 }
 
 func (b *builder) fromV2(doc *v2.Swagger) {
 	if doc.Info != nil {
-		b.m.Title = naming.CleanText(doc.Info.Title, 200)
-		b.m.Version = naming.CleanText(doc.Info.Version, 100)
+		b.M.Title = naming.CleanText(doc.Info.Title, 200)
+		b.M.Version = naming.CleanText(doc.Info.Version, 100)
 	}
-	b.m.Endpoints = v2Servers(doc)
+	b.M.Endpoints = v2Servers(doc)
 	if doc.Paths == nil || doc.Paths.PathItems == nil {
 		return
 	}
 	for pair := doc.Paths.PathItems.First(); pair != nil; pair = pair.Next() {
 		path, item := pair.Key(), pair.Value()
-		if item == nil || !b.validPath(path) {
+		if item == nil || !b.ValidPath(path) {
 			continue
 		}
 		for _, mo := range []struct {
@@ -334,10 +187,10 @@ func v2Servers(doc *v2.Swagger) []string {
 }
 
 func (b *builder) v2Op(method, path string, item *v2.PathItem, op *v2.Operation, globalConsumes []string) {
-	t := b.newTool(method, path, op.Summary, op.Description, op.Tags, op.Deprecated)
-	c := newConverter(false, b.opts.MaxDescription)
-	c.hidden("summary", op.Summary)
-	c.hidden("description", op.Description)
+	t := b.NewTool(method, path, op.Summary, op.Description, op.Tags, op.Deprecated)
+	c := newConverter(false, b.Opts.MaxDescription)
+	c.Hidden("summary", op.Summary)
+	c.Hidden("description", op.Description)
 	consumes := op.Consumes
 	if len(consumes) == 0 {
 		consumes = globalConsumes
@@ -351,13 +204,13 @@ func (b *builder) v2Op(method, path string, item *v2.PathItem, op *v2.Operation,
 		case "body":
 			ct, ok := pickJSON(consumes)
 			if !ok {
-				c.issue(model.IssueUnsupported, "request body content type(s) not supported yet: %s", strings.Join(consumes, ", "))
+				c.Issue(model.IssueUnsupported, "request body content type(s) not supported yet: %s", strings.Join(consumes, ", "))
 				continue
 			}
 			t.HTTP.Body = &model.Body{ContentType: ct, Schema: c.raw(p.Schema), Required: p.Required != nil && *p.Required}
 		case "formdata":
 			prop := v2ParamSchema(c, p)
-			if d := naming.CleanText(p.Description, b.opts.MaxDescription); d != "" {
+			if d := naming.CleanText(p.Description, b.Opts.MaxDescription); d != "" {
 				prop["description"] = d
 			}
 			form[p.Name] = prop
@@ -366,79 +219,23 @@ func (b *builder) v2Op(method, path string, item *v2.PathItem, op *v2.Operation,
 				formAnyRequired = true
 			}
 		default:
-			b.addParam(t, c, p.Name, p.In, p.Required != nil && *p.Required, p.Description, utils.MustJSON(v2ParamSchema(c, p)))
+			b.AddParam(t, c.Collector, p.Name, p.In, p.Required != nil && *p.Required, p.Description, utils.MustJSON(v2ParamSchema(c, p)))
 		}
 	}
 	if len(form) > 0 && t.HTTP.Body == nil {
-		ct := ctForm
-		if slices.ContainsFunc(consumes, func(x string) bool { return normalizeMediaType(x) == ctMultipart }) &&
-			!slices.ContainsFunc(consumes, func(x string) bool { return normalizeMediaType(x) == ctForm }) {
-			ct = ctMultipart
+		ct := restutil.CTForm
+		if slices.ContainsFunc(consumes, func(x string) bool { return normalizeMediaType(x) == restutil.CTMultipart }) &&
+			!slices.ContainsFunc(consumes, func(x string) bool { return normalizeMediaType(x) == restutil.CTForm }) {
+			ct = restutil.CTMultipart
 		}
 		obj := map[string]any{"type": "object", "properties": form}
 		if len(formRequired) > 0 {
 			obj["required"] = formRequired
 		}
-		t.HTTP.Body = formBody(c, ct, utils.MustJSON(obj), nil, formAnyRequired)
+		t.HTTP.Body = restutil.FormBody(c.Collector, ct, utils.MustJSON(obj), nil, formAnyRequired)
 	}
-	t.Issues = c.issues
-	b.addOp(t, op.OperationId)
-}
-
-const (
-	ctForm      = "application/x-www-form-urlencoded"
-	ctMultipart = "multipart/form-data"
-)
-
-// formBody models a form or multipart body. Its schema must be an object
-// (its fields become parameters like a JSON body's). File fields are
-// dropped with an issue, since their content can't come from a model; if
-// one is required, the body isn't modelled at all.
-func formBody(c *converter, ct string, raw json.RawMessage, enc map[string]model.Encoding, required bool) *model.Body {
-	var schema map[string]any
-	if json.Unmarshal(raw, &schema) != nil || (schema["type"] != nil && schema["type"] != "object") {
-		c.issue(model.IssueUnsupported, "%s body schema is not an object, so it can't be sent as fields", ct)
-		return nil
-	}
-	props, _ := schema["properties"].(map[string]any)
-	req, _ := schema["required"].([]any)
-	for _, name := range slices.Sorted(maps.Keys(props)) {
-		if !isFileField(props[name]) {
-			continue
-		}
-		delete(props, name)
-		if slices.Contains(req, any(name)) {
-			c.issue(model.IssueUnsupported, "%s body needs the file field %q, which plugit can't send (file content can't come from a model)", ct, name)
-			return nil
-		}
-		c.issue(model.IssueUnsupported, "file field %q left out of the %s body (file content can't come from a model)", name, ct)
-	}
-	if len(props) == 0 {
-		return nil
-	}
-	for k := range enc {
-		if _, ok := props[k]; !ok {
-			delete(enc, k)
-		}
-	}
-	if len(enc) == 0 {
-		enc = nil
-	}
-	return &model.Body{ContentType: ct, Schema: utils.MustJSON(schema), Required: required, Encoding: enc}
-}
-
-// isFileField reports a schema whose value is file content.
-func isFileField(v any) bool {
-	m, ok := v.(map[string]any)
-	if !ok {
-		return false
-	}
-	if m["type"] == "file" || m["format"] == "binary" {
-		return true
-	}
-	_, media := m["contentMediaType"]
-	_, encoding := m["contentEncoding"]
-	return media || encoding
+	t.Issues = c.Issues()
+	b.AddOp(t, op.OperationId)
 }
 
 // v3Encodings reads a media type's per-field encoding, resolving explode:
@@ -471,7 +268,7 @@ func v3Encodings(mt *v3.MediaType) map[string]model.Encoding {
 
 func v2ParamSchema(c *converter, p *v2.Parameter) map[string]any {
 	if p.Type == "file" && !strings.EqualFold(p.In, "formData") {
-		c.issue(model.IssueUnsupported, "file parameter %q not supported yet", p.Name)
+		c.Issue(model.IssueUnsupported, "file parameter %q not supported yet", p.Name)
 	}
 	out := map[string]any{}
 	types, isFile := knownTypes([]string{p.Type})
@@ -574,41 +371,6 @@ func mergeParams[P any](pathLevel, opLevel []*P, id func(*P) (string, string)) [
 		}
 	}
 	return out
-}
-
-var cookieNameRe = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$")
-
-func (b *builder) addParam(t *model.Tool, c *converter, name, in string, required bool, desc string, schema json.RawMessage) {
-	if name == "" {
-		c.issue(model.IssueSchemaDegraded, "parameter without a name (or an unresolvable parameter $ref) ignored")
-		return
-	}
-	var loc model.Location
-	switch strings.ToLower(in) {
-	case "path":
-		loc, required = model.InPath, true
-	case "query":
-		loc = model.InQuery
-	case "header":
-		loc = model.InHeader
-	case "cookie":
-		if !cookieNameRe.MatchString(name) {
-			c.issue(model.IssueUnsupported, "%q isn't a valid cookie name; parameter dropped", name)
-			return
-		}
-		loc = model.InCookie
-	default:
-		c.issue(model.IssueUnsupported, "parameter %q in %q not supported", name, in)
-		return
-	}
-	c.hidden(fmt.Sprintf("parameter %q description", name), desc)
-	t.Params = append(t.Params, model.Param{
-		Name:     name,
-		Bind:     model.Binding{Upstream: name, In: loc},
-		Required: required,
-		Schema:   schema,
-		Desc:     naming.CleanText(desc, b.opts.MaxDescription),
-	})
 }
 
 func normalizeMediaType(ct string) string {

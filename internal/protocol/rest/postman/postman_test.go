@@ -1,4 +1,4 @@
-package openapi
+package postman
 
 import (
 	"encoding/json"
@@ -169,17 +169,9 @@ func itoa(i int) string {
 
 func parsePM(t *testing.T, src string, opts Options) *model.Manifest {
 	t.Helper()
-	m, err := ParsePostman([]byte(src), opts)
+	m, err := Parse([]byte(src), opts)
 	if err != nil {
-		t.Fatalf("ParsePostman: %v", err)
+		t.Fatalf("Parse: %v", err)
 	}
 	return m
-}
-
-func TestOpenAPIParseRejectsPostman(t *testing.T) {
-	// The Postman sniff moved to the ingest dispatcher, so the OpenAPI parser
-	// no longer special-cases a collection: it just fails to build a document.
-	if _, err := Parse([]byte(petsCollection), Options{}); err == nil {
-		t.Error("Parse on a Postman collection should error now that the sniff moved to ingest")
-	}
 }

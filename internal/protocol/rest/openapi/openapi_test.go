@@ -15,15 +15,16 @@ import (
 	"testing"
 
 	"github.com/swayam5342/plugit/internal/model"
+	"github.com/swayam5342/plugit/internal/protocol/rest/postman"
 )
 
 // parse mimics the ingest dispatcher for tests: a Postman collection goes to
-// ParsePostman, everything else to Parse.
+// postman.Parse, everything else to Parse.
 func parse(t *testing.T, src string, opts Options) *model.Manifest {
 	t.Helper()
 	p := Parse
-	if IsPostman([]byte(src)) {
-		p = ParsePostman
+	if postman.Detect([]byte(src)) {
+		p = postman.Parse
 	}
 	m, err := p([]byte(src), opts)
 	if err != nil {

@@ -4,10 +4,11 @@ import (
 	"github.com/swayam5342/plugit/internal/ingest"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/protocol/rest/openapi"
+	"github.com/swayam5342/plugit/internal/protocol/rest/postman"
 )
 
-// restOptions maps the protocol-neutral ingest options onto the OpenAPI
-// parser's.
+// restOptions maps the protocol-neutral ingest options onto the options the
+// REST parsers share (openapi.Options is postman.Options).
 func restOptions(o ingest.Options) openapi.Options {
 	return openapi.Options{
 		Prefix:           o.Prefix,
@@ -30,7 +31,7 @@ func (OpenapiFormat) Protocol() model.Protocol { return model.REST }
 // Detect reports whether data is an OpenAPI or Swagger document that is not
 // a Postman collection.
 func (OpenapiFormat) Detect(data []byte) bool {
-	return openapi.IsOpenAPI(data) && !openapi.IsPostman(data)
+	return openapi.IsOpenAPI(data) && !postman.Detect(data)
 }
 
 // Parse loads data as OpenAPI and builds its manifest.
@@ -48,9 +49,9 @@ func (PostmanFormat) Name() string { return "postman" }
 func (PostmanFormat) Protocol() model.Protocol { return model.REST }
 
 // Detect reports whether data is a Postman collection.
-func (PostmanFormat) Detect(data []byte) bool { return openapi.IsPostman(data) }
+func (PostmanFormat) Detect(data []byte) bool { return postman.Detect(data) }
 
 // Parse loads data as a Postman collection and builds its manifest.
 func (PostmanFormat) Parse(data []byte, opts ingest.Options) (*model.Manifest, error) {
-	return openapi.ParsePostman(data, restOptions(opts))
+	return postman.Parse(data, restOptions(opts))
 }

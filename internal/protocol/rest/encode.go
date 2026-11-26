@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/swayam5342/plugit/internal/model"
+	"github.com/swayam5342/plugit/internal/protocol/rest/restutil"
 	"github.com/swayam5342/plugit/internal/schema"
 	"github.com/swayam5342/plugit/internal/utils"
 )
@@ -369,12 +370,10 @@ func scalar(v any) (string, bool) {
 	return "", false
 }
 
-var cookieNameRe = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$")
-
 // cookieValue formats a scalar as a cookie value and refuses anything that
 // could end the value or start another cookie (RFC 6265 cookie-octets).
 func cookieValue(name string, v any) (string, error) {
-	if !cookieNameRe.MatchString(name) {
+	if !restutil.ValidCookieName(name) {
 		return "", fmt.Errorf("%q isn't a valid cookie name", name)
 	}
 	s, ok := formScalar(v)

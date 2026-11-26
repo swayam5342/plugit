@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/pb33f/go-yaml"
+
+	"github.com/swayam5342/plugit/internal/protocol/rest/restutil"
 )
 
 // checkRefs walks the parsed document once, without following YAML aliases,
@@ -125,10 +127,10 @@ func checkMediaTypes(content *yaml.Node) error {
 	for i := 0; i+1 < len(content.Content); i += 2 {
 		k, v := content.Content[i], content.Content[i+1]
 		if v.Kind != yaml.MappingNode && v.Kind != yaml.AliasNode {
-			return fmt.Errorf("%w: media type %q (line %d) must be an object", ErrInvalidSpec, truncateRef(k.Value), k.Line)
+			return fmt.Errorf("%w: media type %q (line %d) must be an object", ErrInvalidSpec, restutil.Truncate(k.Value), k.Line)
 		}
 		if _, isRef := pureRef(v); isRef {
-			return fmt.Errorf("%w: media type %q (line %d) cannot be a $ref", ErrInvalidSpec, truncateRef(k.Value), k.Line)
+			return fmt.Errorf("%w: media type %q (line %d) cannot be a $ref", ErrInvalidSpec, restutil.Truncate(k.Value), k.Line)
 		}
 	}
 	return nil
@@ -153,10 +155,10 @@ func (rc *refChecker) check(ref string) error {
 			break
 		}
 		if seen[next] {
-			return fmt.Errorf("%w: %s", ErrRefCycle, truncateRef(ref))
+			return fmt.Errorf("%w: %s", ErrRefCycle, restutil.Truncate(ref))
 		}
 		if hops > MaxRefDepth {
-			return fmt.Errorf("%w: more than %d hops from %s", ErrRefTooDeep, MaxRefDepth, truncateRef(ref))
+			return fmt.Errorf("%w: more than %d hops from %s", ErrRefTooDeep, MaxRefDepth, restutil.Truncate(ref))
 		}
 		seen[next] = true
 		cur = next
@@ -231,13 +233,6 @@ func (rc *refChecker) lookup(m *yaml.Node, key string) *yaml.Node {
 	return idx[key]
 }
 
-func truncateRef(ref string) string {
-	if len(ref) > 120 {
-		return ref[:120] + "…"
-	}
-	return ref
-}
-
 // checkV2PathItems rejects Swagger 2.0 path items with a scalar value that
 // contains "$ref". libopenapi v0.42.5 treats any node of a v2 path item
 // containing "$ref" as a reference and reads the node after it, which is
@@ -265,7 +260,7 @@ func checkV2PathItems(root *yaml.Node) error {
 			for k := 0; k+1 < len(item.Content); k += 2 {
 				key, val := item.Content[k], item.Content[k+1]
 				if key.Value != "$ref" && val.Kind == yaml.ScalarNode && strings.Contains(strings.ToLower(val.Value), "$ref") {
-					return fmt.Errorf("%w: path %q (line %d): %q must be an object", ErrInvalidSpec, truncateRef(paths.Content[j].Value), key.Line, truncateRef(key.Value))
+					return fmt.Errorf("%w: path %q (line %d): %q must be an object", ErrInvalidSpec, restutil.Truncate(paths.Content[j].Value), key.Line, restutil.Truncate(key.Value))
 				}
 			}
 		}

@@ -11,34 +11,19 @@ import (
 
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/naming"
+	"github.com/swayam5342/plugit/internal/protocol/rest/restutil"
 	"github.com/swayam5342/plugit/internal/utils"
 )
 
 type converter struct {
-	is30     bool
-	maxDesc  int
-	budget   int
-	issues   []model.Issue
-	issueSet map[string]bool
+	*restutil.Collector
+	is30    bool
+	maxDesc int
+	budget  int
 }
 
 func newConverter(is30 bool, maxDesc int) *converter {
-	return &converter{is30: is30, maxDesc: maxDesc, budget: MaxSchemaNodes, issueSet: map[string]bool{}}
-}
-
-func (c *converter) issue(kind model.IssueKind, format string, args ...any) {
-	detail := naming.CleanText(fmt.Sprintf(format, args...), 300)
-	if key := string(kind) + "\x00" + detail; !c.issueSet[key] {
-		c.issueSet[key] = true
-		c.issues = append(c.issues, model.Issue{Kind: kind, Detail: detail})
-	}
-}
-
-// hidden records that cleaning removed hidden content from where (L007).
-func (c *converter) hidden(where, s string) {
-	if r := naming.Hidden(s); r != "" {
-		c.issue(model.IssueHiddenText, "%s contained %s (removed)", where, r)
-	}
+	return &converter{Collector: &restutil.Collector{}, is30: is30, maxDesc: maxDesc, budget: MaxSchemaNodes}
 }
 
 // raw converts sp and encodes it. Encoding a map sorts keys, so output is
@@ -52,25 +37,25 @@ func (c *converter) proxy(sp *base.SchemaProxy, depth int) map[string]any {
 		return map[string]any{}
 	}
 	if depth > MaxSchemaDepth {
-		c.issue(model.IssueSchemaDegraded, "schema nested deeper than %d levels (depth cap); deeper parts accept anything", MaxSchemaDepth)
+		c.Issue(model.IssueSchemaDegraded, "schema nested deeper than %d levels (depth cap); deeper parts accept anything", MaxSchemaDepth)
 		return map[string]any{}
 	}
 	if c.budget <= 0 {
-		c.issue(model.IssueSchemaDegraded, "schema too large (more than %d nodes); remaining parts accept anything", MaxSchemaNodes)
+		c.Issue(model.IssueSchemaDegraded, "schema too large (more than %d nodes); remaining parts accept anything", MaxSchemaNodes)
 		return map[string]any{}
 	}
 	c.budget--
 
 	if sp.IsReference() && !strings.HasPrefix(sp.GetReference(), "#") {
-		c.issue(model.IssueSchemaDegraded, "external $ref not resolved: %s", truncateRef(sp.GetReference()))
+		c.Issue(model.IssueSchemaDegraded, "external $ref not resolved: %s", restutil.Truncate(sp.GetReference()))
 		return map[string]any{}
 	}
 	s := sp.Schema()
 	if s == nil {
 		if sp.IsReference() {
-			c.issue(model.IssueSchemaDegraded, "unresolvable $ref: %s", truncateRef(sp.GetReference()))
+			c.Issue(model.IssueSchemaDegraded, "unresolvable $ref: %s", restutil.Truncate(sp.GetReference()))
 		} else {
-			c.issue(model.IssueSchemaDegraded, "invalid schema")
+			c.Issue(model.IssueSchemaDegraded, "invalid schema")
 		}
 		return map[string]any{}
 	}
@@ -98,8 +83,8 @@ func (c *converter) schema(s *base.Schema, depth int) map[string]any {
 		out["type"] = types
 	}
 
-	c.hidden("schema title", s.Title)
-	c.hidden("schema description", s.Description)
+	c.Hidden("schema title", s.Title)
+	c.Hidden("schema description", s.Description)
 	if t := naming.CleanText(s.Title, c.maxDesc); t != "" {
 		out["title"] = t
 	}
@@ -196,7 +181,7 @@ func (c *converter) schema(s *base.Schema, depth int) map[string]any {
 	}
 	if len(ignored) > 0 {
 		slices.Sort(ignored)
-		c.issue(model.IssueSchemaDegraded, "unsupported JSON Schema keywords ignored: %s", strings.Join(ignored, ", "))
+		c.Issue(model.IssueSchemaDegraded, "unsupported JSON Schema keywords ignored: %s", strings.Join(ignored, ", "))
 	}
 	return out
 }
@@ -288,7 +273,7 @@ func (c *converter) hiddenValue(where string, v any) {
 	switch x := v.(type) {
 	case string:
 		if r := naming.Hidden(x); r != "" {
-			c.issue(model.IssueHiddenText, "%s contains %s (left in: it is part of what the API accepts)", where, r)
+			c.Issue(model.IssueHiddenText, "%s contains %s (left in: it is part of what the API accepts)", where, r)
 		}
 	case []any:
 		for _, e := range x {
@@ -318,7 +303,7 @@ func knownTypes(types []string) (known []string, isFile bool) {
 }
 
 // markFile makes out a binary string, JSON Schema's form of Swagger's
-// "file" (see isFileField).
+// "file" (see restutil.FormBody).
 func markFile(out map[string]any) {
 	if _, typed := out["type"]; !typed {
 		out["type"] = "string"

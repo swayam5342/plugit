@@ -1,4 +1,9 @@
-package openapi
+// Package postman turns a Postman v2.0/v2.1 collection into a model.Manifest
+// (SPEC §3.4, §3.5). The collection is untrusted input (SPEC §5.3): folder
+// nesting and request counts are capped, unsafe paths are skipped, and all
+// text that reaches the model is cleaned. It shares its manifest builder
+// with the openapi package through restutil.
+package postman
 
 import (
 	"bytes"
@@ -11,6 +16,7 @@ import (
 
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/naming"
+	"github.com/swayam5342/plugit/internal/protocol/rest/restutil"
 	"github.com/swayam5342/plugit/internal/utils"
 )
 
@@ -105,8 +111,8 @@ type pmCollection struct {
 	Auth     json.RawMessage `json:"auth"`
 }
 
-// IsPostman reports whether data looks like a Postman v2 collection.
-func IsPostman(data []byte) bool {
+// Detect reports whether data looks like a Postman v2 collection.
+func Detect(data []byte) bool {
 	if !bytes.Contains(data, []byte(postmanSchemaURL)) {
 		return false
 	}
@@ -120,32 +126,35 @@ func IsPostman(data []byte) bool {
 
 var postmanMethods = []string{"GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE"}
 
-// ParsePostman converts a Postman v2.0/v2.1 collection into a manifest.
+// Options configures Parse. It is the options type the REST parsers share.
+type Options = restutil.Options
+
+// Parse converts a Postman v2.0/v2.1 collection into a manifest.
 // Requests become tools, top-level folders become tags, and the
 // collection's base URL variables are offered as servers (the user still
 // pins base_url, T3). Collection auth is ignored: plugit's auth applies.
-func ParsePostman(data []byte, opts Options) (*model.Manifest, error) {
+func Parse(data []byte, opts Options) (*model.Manifest, error) {
 	var col pmCollection
 	if err := json.Unmarshal(data, &col); err != nil {
 		return nil, fmt.Errorf("parsing Postman collection: %w", err)
 	}
-	b := &builder{opts: opts}
-	b.m.Format = "postman"
+	b := &restutil.Builder{Opts: opts}
+	b.M.Format = "postman"
 	switch {
 	case strings.Contains(col.Info.Schema, "v2.1"):
-		b.m.SpecVersion = "postman-2.1"
+		b.M.SpecVersion = "postman-2.1"
 	case strings.Contains(col.Info.Schema, "v2.0"):
-		b.m.SpecVersion = "postman-2.0"
+		b.M.SpecVersion = "postman-2.0"
 	default:
-		return nil, fmt.Errorf("parsing Postman collection: %w (schema %q)", ErrUnsupportedSpec, naming.CleanText(col.Info.Schema, 100))
+		return nil, fmt.Errorf("parsing Postman collection: %w (schema %q)", restutil.ErrUnsupportedSpec, naming.CleanText(col.Info.Schema, 100))
 	}
-	b.m.Title = naming.CleanText(col.Info.Name, 200)
+	b.M.Title = naming.CleanText(col.Info.Name, 200)
 
 	vars := map[string]string{}
 	for _, v := range col.Variable {
 		if u, err := url.Parse(v.Value); err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" {
 			vars[v.Key] = strings.TrimRight(v.Value, "/")
-			b.addServer(vars[v.Key])
+			addServer(b, vars[v.Key])
 		}
 	}
 	p := &pmWalk{b: b, vars: vars}
@@ -154,25 +163,26 @@ func ParsePostman(data []byte, opts Options) (*model.Manifest, error) {
 	}
 	p.walk(col.Item, "", 1)
 	if p.authSeen {
-		b.warn("the collection's auth settings are ignored: set the credential with plugit add --header and plugit auth")
+		b.Warn("the collection's auth settings are ignored: set the credential with plugit add --header and plugit auth")
 	}
 	if p.tooDeep {
-		b.warn(fmt.Sprintf("folders nested more than %d deep were skipped", maxPostmanDepth))
+		b.Warn(fmt.Sprintf("folders nested more than %d deep were skipped", maxPostmanDepth))
 	}
 	if p.skipped > 0 {
-		b.warn(fmt.Sprintf("only the first %d requests were imported (%d more skipped)", maxPostmanItems, p.skipped))
+		b.Warn(fmt.Sprintf("only the first %d requests were imported (%d more skipped)", maxPostmanItems, p.skipped))
 	}
-	return b.finish(), nil
+	return b.Finish(), nil
 }
 
-func (b *builder) addServer(s string) {
-	if !slices.Contains(b.m.Endpoints, s) {
-		b.m.Endpoints = append(b.m.Endpoints, s)
+// addServer offers s as a server, once.
+func addServer(b *restutil.Builder, s string) {
+	if !slices.Contains(b.M.Endpoints, s) {
+		b.M.Endpoints = append(b.M.Endpoints, s)
 	}
 }
 
 type pmWalk struct {
-	b        *builder
+	b        *restutil.Builder
 	vars     map[string]string
 	count    int
 	skipped  int
@@ -213,7 +223,7 @@ func (p *pmWalk) request(it pmItem, tag string) {
 		method = "GET"
 	}
 	if !slices.Contains(postmanMethods, method) {
-		b.warn(fmt.Sprintf("request %q uses method %s, which plugit doesn't serve; skipped", naming.CleanText(it.Name, 80), naming.CleanText(method, 20)))
+		b.Warn(fmt.Sprintf("request %q uses method %s, which plugit doesn't serve; skipped", naming.CleanText(it.Name, 80), naming.CleanText(method, 20)))
 		return
 	}
 	if len(r.Auth) > 0 && string(r.Auth) != "null" {
@@ -222,10 +232,10 @@ func (p *pmWalk) request(it pmItem, tag string) {
 
 	path, query, pathVars, ok := p.splitURL(r.URL.Raw)
 	if !ok {
-		b.warn(fmt.Sprintf("request %q has no usable URL; skipped", naming.CleanText(it.Name, 80)))
+		b.Warn(fmt.Sprintf("request %q has no usable URL; skipped", naming.CleanText(it.Name, 80)))
 		return
 	}
-	if !b.validPath(path) {
+	if !b.ValidPath(path) {
 		return
 	}
 	var tags []string
@@ -240,10 +250,10 @@ func (p *pmWalk) request(it pmItem, tag string) {
 	if strings.TrimSpace(desc) == "" {
 		summary = it.Name
 	}
-	t := b.newTool(method, path, summary, desc, tags, false)
-	c := newConverter(true, b.opts.MaxDescription)
-	c.hidden("summary", it.Name)
-	c.hidden("description", desc)
+	t := b.NewTool(method, path, summary, desc, tags, false)
+	c := &restutil.Collector{}
+	c.Hidden("summary", it.Name)
+	c.Hidden("description", desc)
 
 	varDesc := map[string]string{}
 	for _, v := range r.URL.Variable {
@@ -251,7 +261,7 @@ func (p *pmWalk) request(it pmItem, tag string) {
 	}
 	str := json.RawMessage(`{"type":"string"}`)
 	for _, name := range pathVars {
-		b.addParam(t, c, name, "path", true, varDesc[name], str)
+		b.AddParam(t, c, name, "path", true, varDesc[name], str)
 	}
 
 	seen := map[string]bool{}
@@ -264,7 +274,7 @@ func (p *pmWalk) request(it pmItem, tag string) {
 			continue
 		}
 		seen[q.Key] = true
-		b.addParam(t, c, q.Key, "query", false, string(q.Description), str)
+		b.AddParam(t, c, q.Key, "query", false, string(q.Description), str)
 	}
 	for _, h := range r.Header {
 		switch strings.ToLower(h.Key) {
@@ -274,14 +284,14 @@ func (p *pmWalk) request(it pmItem, tag string) {
 		if h.Disabled {
 			continue
 		}
-		b.addParam(t, c, h.Key, "header", false, string(h.Description), str)
+		b.AddParam(t, c, h.Key, "header", false, string(h.Description), str)
 	}
 
 	if r.Body != nil {
 		p.body(t, c, r.Body)
 	}
-	t.Issues = c.issues
-	b.addOp(t, it.Name)
+	t.Issues = c.Issues()
+	b.AddOp(t, it.Name)
 }
 
 // splitURL resolves base URL variables, records the server, and returns
@@ -309,7 +319,7 @@ func (p *pmWalk) splitURL(raw string) (path string, query []pmKV, pathVars []str
 		if err != nil || u.Host == "" {
 			return "", nil, nil, false
 		}
-		p.b.addServer(u.Scheme + "://" + u.Host)
+		addServer(p.b, u.Scheme+"://"+u.Host)
 		resolved = u.EscapedPath()
 		if unescaped, err := url.PathUnescape(resolved); err == nil {
 			resolved = unescaped
@@ -340,7 +350,7 @@ func (p *pmWalk) splitURL(raw string) (path string, query []pmKV, pathVars []str
 
 func (p *pmWalk) matchesServer(u string) string {
 	best := ""
-	for _, s := range p.b.m.Endpoints {
+	for _, s := range p.b.M.Endpoints {
 		if (u == s || strings.HasPrefix(u, s+"/")) && len(s) > len(best) {
 			best = s
 		}
@@ -360,7 +370,7 @@ func sortedQueryKeys(q string) []string {
 }
 
 // body converts a Postman request body.
-func (p *pmWalk) body(t *model.Tool, c *converter, body *pmBody) {
+func (p *pmWalk) body(t *model.Tool, c *restutil.Collector, body *pmBody) {
 	switch body.Mode {
 	case "raw":
 		var v any
@@ -368,9 +378,9 @@ func (p *pmWalk) body(t *model.Tool, c *converter, body *pmBody) {
 		dec.UseNumber()
 		if dec.Decode(&v) != nil {
 			if body.Options.Raw.Language == "json" {
-				c.issue(model.IssueUnsupported, "the example JSON body doesn't parse, so its fields are unknown")
+				c.Issue(model.IssueUnsupported, "the example JSON body doesn't parse, so its fields are unknown")
 			} else if strings.TrimSpace(body.Raw) != "" {
-				c.issue(model.IssueUnsupported, "raw %s request body not supported", naming.CleanText(cmp.Or(body.Options.Raw.Language, "text"), 20))
+				c.Issue(model.IssueUnsupported, "raw %s request body not supported", naming.CleanText(cmp.Or(body.Options.Raw.Language, "text"), 20))
 			}
 			return
 		}
@@ -385,19 +395,19 @@ func (p *pmWalk) body(t *model.Tool, c *converter, body *pmBody) {
 			if f.Type == "file" {
 				prop["format"] = "binary"
 			}
-			if d := naming.CleanText(string(f.Description), p.b.opts.MaxDescription); d != "" {
+			if d := naming.CleanText(string(f.Description), p.b.Opts.MaxDescription); d != "" {
 				prop["description"] = d
 			}
 			props[f.Key] = prop
 		}
-		ct := ctForm
+		ct := restutil.CTForm
 		if body.Mode == "formdata" {
-			ct = ctMultipart
+			ct = restutil.CTMultipart
 		}
-		t.HTTP.Body = formBody(c, ct, utils.MustJSON(map[string]any{"type": "object", "properties": props}), nil, false)
+		t.HTTP.Body = restutil.FormBody(c, ct, utils.MustJSON(map[string]any{"type": "object", "properties": props}), nil, false)
 	case "":
 	default:
-		c.issue(model.IssueUnsupported, "%s request body not supported", naming.CleanText(body.Mode, 20))
+		c.Issue(model.IssueUnsupported, "%s request body not supported", naming.CleanText(body.Mode, 20))
 	}
 }
 
