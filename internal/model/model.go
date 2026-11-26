@@ -254,15 +254,26 @@ type Issue struct {
 
 // Manifest is the result of ingesting one source (SPEC §3.4 P2).
 type Manifest struct {
-	Protocol    Protocol    `json:"protocol"`
-	Format      string      `json:"format,omitempty"`
-	Title       string      `json:"title"`
-	Version     string      `json:"version"`
-	SpecVersion string      `json:"specVersion"`
-	Endpoints   []string    `json:"endpoints,omitempty"`
-	Tools       []Tool      `json:"tools"`
-	Warnings    []string    `json:"warnings,omitempty"`
-	GRPC        *GRPCSchema `json:"grpc,omitempty"`
+	Protocol    Protocol       `json:"protocol"`
+	Format      string         `json:"format,omitempty"`
+	Title       string         `json:"title"`
+	Version     string         `json:"version"`
+	SpecVersion string         `json:"specVersion"`
+	Endpoints   []string       `json:"endpoints,omitempty"`
+	Tools       []Tool         `json:"tools"`
+	Warnings    []string       `json:"warnings,omitempty"`
+	GraphQL     *GraphQLSchema `json:"graphql,omitempty"`
+	GRPC        *GRPCSchema    `json:"grpc,omitempty"`
+}
+
+// GraphQLSchema is the derived GraphQL data serve and sync need, cached in
+// manifest.json so serve never parses a schema (SPEC §3.6, no migration).
+// NormalizedSDL is kept for sync re-validation in the child; OverrideDocs
+// maps toolset -> tool key -> the operation document compiled from that
+// toolset's response_fields.
+type GraphQLSchema struct {
+	NormalizedSDL string                       `json:"normalizedSDL,omitempty"`
+	OverrideDocs  map[string]map[string]string `json:"overrideDocs,omitempty"`
 }
 
 // GRPCSchema holds the trimmed descriptor set gRPC tools need (M11); an
