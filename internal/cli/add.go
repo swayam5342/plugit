@@ -208,11 +208,16 @@ func addAPI(ctx context.Context, s addSettings, d addDeps) error {
 	}
 
 	source := s.spec
-	if !strings.HasPrefix(source, "http://") && !strings.HasPrefix(source, "https://") {
+	switch {
+	case s.introspect:
+		// Exactly the pinned endpoint, so sync recognizes the API as
+		// introspected (safeLocation would drop a percent-escaped path).
+		source = src.endpoint
+	case !strings.HasPrefix(source, "http://") && !strings.HasPrefix(source, "https://"):
 		if abs, err := filepath.Abs(source); err == nil {
 			source = abs
 		}
-	} else {
+	default:
 		source = safeLocation(source)
 	}
 	cfg := &config.API{

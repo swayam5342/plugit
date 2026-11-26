@@ -78,3 +78,42 @@ func TestSecondFormat(t *testing.T) {
 		t.Errorf("routed to %q/%q, want echo/echo", m.Protocol, m.Format)
 	}
 }
+
+// misnamed is a format whose Parse records some other format name.
+type misnamed struct{}
+
+func (misnamed) Name() string             { return "misnamed" }
+func (misnamed) Protocol() model.Protocol { return model.REST }
+func (misnamed) Detect(d []byte) bool     { return len(d) > 0 && d[0] == '?' }
+func (misnamed) Parse(_ []byte, _ ingest.Options) (*model.Manifest, error) {
+	return &model.Manifest{Protocol: model.REST, Format: "something-else"}, nil
+}
+
+const swaggerDoc = `{"swagger":"2.0","info":{"title":"t","version":"1"},"host":"api.example.test","schemes":["https"],
+"paths":{"/pets":{"get":{"operationId":"listPets","responses":{"200":{"description":"ok"}}}}}}`
+
+// Manifest.Format is the name of the ingest format that produced it (SPEC
+// 3.4), detected or forced, whatever the format's parser wrote: a Swagger
+// 2.0 document is format "openapi" (its version is in SpecVersion), since
+// that is the name --format, source.format and a forced re-parse use.
+func TestDispatchStampsFormatName(t *testing.T) {
+	fs := append([]ingest.Format{misnamed{}}, formats.Ordered()...)
+	for _, force := range []string{"", "misnamed"} {
+		m, err := ingest.Dispatch(fs, []byte("?x"), force, ingest.Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m.Format != "misnamed" {
+			t.Errorf("force %q: Format = %q, want misnamed", force, m.Format)
+		}
+	}
+	for _, force := range []string{"", "openapi"} {
+		m, err := ingest.Dispatch(formats.Ordered(), []byte(swaggerDoc), force, ingest.Options{})
+		if err != nil {
+			t.Fatalf("force %q: %v", force, err)
+		}
+		if m.Format != "openapi" || m.SpecVersion != "2.0" {
+			t.Errorf("force %q: Swagger 2.0 Format/SpecVersion = %q/%q, want openapi/2.0", force, m.Format, m.SpecVersion)
+		}
+	}
+}

@@ -26,20 +26,33 @@ type Format interface {
 
 // Dispatch parses data with the format named by forceName, or, when it is
 // empty, the first Format in formats whose Detect matches. Order matters: a
-// more specific format comes before a fallback.
+// more specific format comes before a fallback. The manifest's Format is
+// set to the name of the format that parsed it (SPEC 3.4: which ingester
+// produced it), so it is always a name --format and source.format accept.
 func Dispatch(formats []Format, data []byte, forceName string, opts Options) (*model.Manifest, error) {
 	if forceName != "" {
 		for _, f := range formats {
 			if f.Name() == forceName {
-				return f.Parse(data, opts)
+				return parseWith(f, data, opts)
 			}
 		}
 		return nil, fmt.Errorf("%w: unknown format %q", ErrUnsupportedFormat, forceName)
 	}
 	for _, f := range formats {
 		if f.Detect(data) {
-			return f.Parse(data, opts)
+			return parseWith(f, data, opts)
 		}
 	}
 	return nil, fmt.Errorf("%w: unrecognized source format", ErrUnsupportedFormat)
+}
+
+func parseWith(f Format, data []byte, opts Options) (*model.Manifest, error) {
+	m, err := f.Parse(data, opts)
+	if err != nil {
+		return nil, err
+	}
+	if m != nil {
+		m.Format = f.Name()
+	}
+	return m, nil
 }

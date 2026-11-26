@@ -124,6 +124,11 @@ func syncAPI(ctx context.Context, p config.Paths, name string, s syncSettings) e
 	// schema; overrides that no longer compile come back as diff entries.
 	updated, err := s.parse(ctx, data, cfg.Source.Format, parseOptions(cfg))
 	if err != nil {
+		if cfg.Source.Format != "" {
+			// The saved format is forced (SPEC P4), --spec included.
+			return fmt.Errorf("%s's source format is %s, and the new source didn't parse as that (to change the format, remove the API and add it again with plugit add): %w",
+				name, cfg.Source.Format, err)
+		}
 		return err
 	}
 	diff := curate.DiffManifests(old, updated, *cfg)

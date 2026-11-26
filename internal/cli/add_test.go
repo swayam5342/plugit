@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/swayam5342/plugit/internal/config"
@@ -487,5 +488,59 @@ func TestIntrospectSendsTokenOnlyToPinnedOrigin(t *testing.T) {
 	}
 	if pinned.hits.Load() != pinnedHits || other.hits.Load() != 0 {
 		t.Error("a request was sent before the endpoint mismatch was refused")
+	}
+}
+
+const swaggerSpec = `swagger: '2.0'
+info: {title: Pets, version: '1'}
+host: %s
+schemes: [http]
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses: {'200': {description: ok}}
+%s`
+
+// Regression: a Swagger 2.0 spec is added with source.format openapi (the
+// ingest format that parsed it; "swagger" is no format name, so plugit.yaml
+// would be invalid and every forced re-parse would fail). sync and the
+// stale-cache re-parse then force openapi and work.
+func TestAddSwagger2(t *testing.T) {
+	up := newUpstream(t)
+	host := strings.TrimPrefix(up.URL, "http://")
+	p, d, _ := addEnv(t)
+	specPath := writeSpec(t, fmt.Sprintf(swaggerSpec, host, ""))
+	if err := addAPI(t.Context(), addSettingsFor(specPath, func(s *addSettings) {
+		s.fromRun, s.baseURL, s.allowPrivate = true, up.URL, true
+	}), d); err != nil {
+		t.Fatalf("add a Swagger 2.0 spec: %v", err)
+	}
+	cfg, err := config.LoadAPI(p, "pets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Source.Format != "openapi" || cfg.Protocol != string(model.REST) {
+		t.Errorf("saved protocol/format = %q/%q, want rest/openapi", cfg.Protocol, cfg.Source.Format)
+	}
+
+	s := syncDeps(&bytes.Buffer{})
+	s.info, s.yes, s.addNew = d.info, true, true
+	s.spec = writeSpec(t, fmt.Sprintf(swaggerSpec, host, "  /owners:\n    get:\n      operationId: listOwners\n      responses: {'200': {description: ok}}\n"))
+	if err := syncAPI(t.Context(), p, "pets", s); err != nil {
+		t.Fatalf("sync a Swagger 2.0 spec: %v", err)
+	}
+
+	cache, _ := p.Manifest("pets")
+	if err := os.Remove(cache); err != nil {
+		t.Fatal(err)
+	}
+	var parses atomic.Int32
+	cs, _ := startServe(t, serveSettings{paths: p, name: "pets"}, serveDeps(countingParse(&parses)))
+	if got := toolNames(t, cs); !slices.Equal(got, []string{"listOwners", "listPets"}) {
+		t.Errorf("served tools after a stale-cache re-parse = %v", got)
+	}
+	if parses.Load() != 1 {
+		t.Errorf("parses = %d, want 1 (the stale-cache re-parse)", parses.Load())
 	}
 }
