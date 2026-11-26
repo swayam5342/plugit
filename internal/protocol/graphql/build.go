@@ -23,7 +23,12 @@ import (
 const (
 	maxWarnings   = 25
 	maxWarningLen = 300
+	maxIssueLen   = 300
 )
+
+// maxParamNameLen caps model-facing parameter names (SPEC 3.5 rule 3; MCP
+// property names match ^[a-zA-Z0-9_.-]{1,64}$).
+const maxParamNameLen = 64
 
 // operationPrefix starts every generated operation name: query PlugIt_user.
 const operationPrefix = "PlugIt_"
@@ -142,6 +147,8 @@ func (b *builder) tool(op string, f *ast.FieldDefinition) (*model.Tool, error) {
 	if t.Description == "" {
 		t.Description = naming.CleanText(string(key), b.opts.MaxDescription)
 	}
+	issues := issueSet{t: t}
+	issues.hidden("description", f.Description)
 
 	// One mapper per tool: the schema node budget covers all its arguments.
 	mapper := newArgMapper(b.s)
@@ -159,11 +166,12 @@ func (b *builder) tool(op string, f *ast.FieldDefinition) (*model.Tool, error) {
 			Schema:   schema,
 			Desc:     naming.CleanText(a.Description, b.opts.MaxDescription),
 		})
+		issues.hidden("argument "+a.Name+" description", a.Description)
+		for _, d := range mapper.hidden() {
+			issues.add(model.IssueHiddenText, d)
+		}
 		if degraded {
-			t.Issues = append(t.Issues, model.Issue{
-				Kind:   model.IssueSchemaDegraded,
-				Detail: "argument " + a.Name + ": schema simplified to {} (custom scalar, depth or node budget)",
-			})
+			issues.add(model.IssueSchemaDegraded, "argument "+a.Name+": schema simplified to {} (custom scalar, depth or node budget)")
 		}
 		v := "$" + a.Name + ": " + a.Type.String()
 		if a.DefaultValue != nil {
@@ -180,10 +188,7 @@ func (b *builder) tool(op string, f *ast.FieldDefinition) (*model.Tool, error) {
 		if maxFields <= 0 {
 			maxFields = DefaultMaxFields
 		}
-		t.Issues = append(t.Issues, model.Issue{
-			Kind:   model.IssueSelectionTruncated,
-			Detail: fmt.Sprintf("selection hit graphql.max_fields (%d) and was truncated", maxFields),
-		})
+		issues.add(model.IssueSelectionTruncated, fmt.Sprintf("selection hit graphql.max_fields (%d) and was truncated", maxFields))
 	}
 
 	doc := document(op, f.Name, vars, args, sel.Render())
@@ -229,15 +234,51 @@ func (b *builder) validate(doc string) (err error) {
 	return nil
 }
 
-// uniqueName returns name, or name_2, name_3, ... if a case-insensitive
-// match is already in used, and records the result.
+// issueSet adds deduplicated issues to one tool.
+type issueSet struct {
+	t    *model.Tool
+	seen map[model.Issue]bool
+}
+
+func (is *issueSet) add(kind model.IssueKind, detail string) {
+	i := model.Issue{Kind: kind, Detail: naming.CleanText(detail, maxIssueLen)}
+	if is.seen == nil {
+		is.seen = map[model.Issue]bool{}
+	}
+	if !is.seen[i] {
+		is.seen[i] = true
+		is.t.Issues = append(is.t.Issues, i)
+	}
+}
+
+// hidden records that cleaning removed hidden content from the text s of
+// where (lint L007), as the REST converter does.
+func (is *issueSet) hidden(where, s string) {
+	if r := naming.Hidden(s); r != "" {
+		is.add(model.IssueHiddenText, where+" contained "+r+" (removed)")
+	}
+}
+
+// uniqueName returns name cut to maxParamNameLen bytes, or that base with
+// _2, _3, ... (cut further so the suffix fits) if a case-insensitive match
+// is already in used, and records the result. GraphQL names are ASCII, so a
+// byte cut is a character cut.
 func uniqueName(name string, used map[string]bool) string {
-	out := name
+	base := cutBytes(name, maxParamNameLen)
+	out := base
 	for n := 2; used[strings.ToLower(out)]; n++ {
-		out = name + "_" + strconv.Itoa(n)
+		suffix := "_" + strconv.Itoa(n)
+		out = cutBytes(base, maxParamNameLen-len(suffix)) + suffix
 	}
 	used[strings.ToLower(out)] = true
 	return out
+}
+
+func cutBytes(s string, n int) string {
+	if len(s) > n {
+		return s[:n]
+	}
+	return s
 }
 
 // normalizedSDL prints s back to SDL, built-in types and directives and

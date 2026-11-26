@@ -3,6 +3,7 @@ package graphql
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/vektah/gqlparser/v2/ast"
@@ -396,5 +397,19 @@ type Query { f(at: DateTime, n: Int): Int }
 	raw, _, degraded := m.arg(nil, f.Arguments.ForName("n").Type)
 	if degraded {
 		t.Errorf("Int after a degraded argument reported degraded (%s)", raw)
+	}
+}
+
+func TestMapHiddenResetsPerArg(t *testing.T) {
+	s := loadSDL(t, "input F {\n  \"a\u200b<!-- x -->\"\n  f: Int\n}\ntype Query { q(a: F, b: Int): Int }")
+	args := s.Query.Fields.ForName("q").Arguments
+	m := newArgMapper(s)
+	m.arg(args[0].DefaultValue, args[0].Type)
+	if got := m.hidden(); !slices.Equal(got, []string{"input F field f description contained invisible or bidi characters (removed)"}) {
+		t.Errorf("hidden after a = %q", got)
+	}
+	m.arg(args[1].DefaultValue, args[1].Type)
+	if got := m.hidden(); len(got) != 0 {
+		t.Errorf("hidden after b = %q, want none", got)
 	}
 }

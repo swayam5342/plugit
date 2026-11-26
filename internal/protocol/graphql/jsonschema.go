@@ -31,11 +31,14 @@ func ArgSchema(s *ast.Schema, def *ast.Value, t *ast.Type) (schema json.RawMessa
 }
 
 // argMapper maps the arguments of one tool. Its node budget is shared by
-// every arg call on it; the degraded flag is per call.
+// every arg call on it; the degraded flag and the hidden-text findings are
+// per call.
 type argMapper struct {
-	s        *ast.Schema
-	nodes    int
-	degraded bool
+	s          *ast.Schema
+	nodes      int
+	degraded   bool
+	hiddenList []string
+	hiddenSeen map[string]bool
 }
 
 // newArgMapper returns a mapper with a fresh maxSchemaNodes budget. Create
@@ -58,6 +61,7 @@ func newArgMapper(s *ast.Schema) *argMapper {
 // schema order and "required" is sorted.
 func (m *argMapper) arg(def *ast.Value, t *ast.Type) (schema json.RawMessage, required, degraded bool) {
 	m.degraded = false
+	m.hiddenList, m.hiddenSeen = nil, nil
 	out := m.mapType(t, 1)
 	b, err := json.Marshal(out)
 	if err != nil {
@@ -65,6 +69,29 @@ func (m *argMapper) arg(def *ast.Value, t *ast.Type) (schema json.RawMessage, re
 		b, m.degraded = []byte(`{}`), true
 	}
 	return b, t != nil && t.NonNull && def == nil, m.degraded
+}
+
+// hidden returns what the most recent arg call's description cleaning
+// removed that a reader would never see (lint L007), one deduplicated
+// "<where> contained <what> (removed)" detail per description.
+func (m *argMapper) hidden() []string {
+	return m.hiddenList
+}
+
+// noteHidden records a hidden-text finding for the description s of where.
+func (m *argMapper) noteHidden(where, s string) {
+	r := naming.Hidden(s)
+	if r == "" {
+		return
+	}
+	d := naming.CleanText(where+" contained "+r+" (removed)", maxIssueLen)
+	if m.hiddenSeen == nil {
+		m.hiddenSeen = map[string]bool{}
+	}
+	if !m.hiddenSeen[d] {
+		m.hiddenSeen[d] = true
+		m.hiddenList = append(m.hiddenList, d)
+	}
 }
 
 // degrade marks the call degraded and returns the accept-anything schema.
@@ -124,6 +151,7 @@ func (m *argMapper) enum(d *ast.Definition) map[string]any {
 		values = append(values, v.Name)
 	}
 	out := map[string]any{"enum": values}
+	m.noteHidden("enum "+d.Name+" description", d.Description)
 	if desc := naming.CleanText(d.Description, 0); desc != "" {
 		out["description"] = desc
 	}
@@ -135,6 +163,7 @@ func (m *argMapper) inputObject(d *ast.Definition, depth int) map[string]any {
 	var req []string
 	for _, f := range d.Fields {
 		ps := m.mapType(f.Type, depth+1)
+		m.noteHidden("input "+d.Name+" field "+f.Name+" description", f.Description)
 		if desc := naming.CleanText(f.Description, 0); desc != "" {
 			ps["description"] = desc
 		}

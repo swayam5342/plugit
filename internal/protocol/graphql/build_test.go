@@ -3,6 +3,7 @@ package graphql
 import (
 	"os"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -332,5 +333,78 @@ func TestBuildDeterministic(t *testing.T) {
 func TestBuildNilSchema(t *testing.T) {
 	if _, err := Build(nil, FormatSDL, ingest.Options{}); err == nil {
 		t.Error("Build(nil) succeeded")
+	}
+}
+
+const hostileDir = "../../../testdata/hostile/graphql"
+
+func TestBuildPoisonedDescriptions(t *testing.T) {
+	data, err := os.ReadFile(hostileDir + "/poisoned-description.graphql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := build(t, string(data), ingest.Options{})
+	find := toolByKey(t, m, "query find")
+
+	var hidden []string
+	for _, is := range find.Issues {
+		if is.Kind == model.IssueHiddenText {
+			hidden = append(hidden, is.Detail)
+		}
+	}
+	want := []string{
+		"description contained invisible or bidi characters (removed)",
+		"argument term description contained invisible or bidi characters (removed)",
+		"input Filter field name description contained invisible or bidi characters (removed)",
+		"enum Role description contained invisible or bidi characters (removed)",
+	}
+	slices.Sort(hidden)
+	slices.Sort(want)
+	// filter and other share Filter: its issue is listed once.
+	if !slices.Equal(hidden, want) {
+		t.Errorf("hidden-text issues = %q\nwant %q", hidden, want)
+	}
+
+	// The hidden content never reaches the model.
+	texts := []string{find.Description}
+	for _, p := range find.Params {
+		texts = append(texts, p.Desc, string(p.Schema))
+	}
+	for _, s := range texts {
+		for _, bad := range []string{"<!--", "SYSTEM", "deleteEverything", "term=admin", "\u200b", "\u202e"} {
+			if strings.Contains(s, bad) {
+				t.Errorf("model-facing text %q still contains %q", s, bad)
+			}
+		}
+	}
+	if find.Description != "Find things." || find.Params[0].Desc != "Search term." {
+		t.Errorf("cleaned descriptions = %q / %q", find.Description, find.Params[0].Desc)
+	}
+	if c := toolByKey(t, m, "query clean"); len(c.Issues) != 0 {
+		t.Errorf("clean tool issues = %+v", c.Issues)
+	}
+}
+
+var validParamName = regexp.MustCompile(`^[a-zA-Z0-9_.-]{1,64}$`)
+
+func TestBuildParamNamesCappedAt64(t *testing.T) {
+	long := strings.Repeat("a", 100)
+	x1, x2 := strings.Repeat("x", 70)+"1", strings.Repeat("x", 70)+"2"
+	m := build(t, "type Query { q("+long+": Int, "+x1+": Int, "+x2+": Int): Int }", ingest.Options{})
+	tl := toolByKey(t, m, "query q")
+	wantNames := []string{strings.Repeat("a", 64), strings.Repeat("x", 64), strings.Repeat("x", 62) + "_2"}
+	wantUp := []string{long, x1, x2}
+	seen := map[string]bool{}
+	for i, p := range tl.Params {
+		if p.Name != wantNames[i] || p.Bind.Upstream != wantUp[i] {
+			t.Errorf("param %d = %q (upstream %q), want %q (upstream %q)", i, p.Name, p.Bind.Upstream, wantNames[i], wantUp[i])
+		}
+		if !validParamName.MatchString(p.Name) || seen[strings.ToLower(p.Name)] {
+			t.Errorf("param name %q invalid or duplicate", p.Name)
+		}
+		seen[strings.ToLower(p.Name)] = true
+	}
+	if !strings.Contains(tl.GraphQL.Document, "$"+x2+": Int") {
+		t.Errorf("document must keep the full upstream names: %s", tl.GraphQL.Document)
 	}
 }
