@@ -14,5 +14,9 @@
 //     gqlparser path as SDL;
 //   - a gqlparser panic becomes an error wrapping ErrUnsupportedSpec.
 //
+// ArgSchema maps one field argument's GraphQL type to the JSON Schema of a
+// tool parameter, capped at maxSchemaDepth levels and maxSchemaNodes nodes
+// and degrading unmappable parts (custom scalars included) to {}.
+//
 // The ingest code is pure: no network, filesystem, clock, env or randomness.
 package graphql
