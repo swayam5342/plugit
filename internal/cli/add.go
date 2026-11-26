@@ -1,13 +1,18 @@
 package cli
 
 import (
+	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -20,7 +25,10 @@ import (
 	"github.com/swayam5342/plugit/internal/isolate"
 	"github.com/swayam5342/plugit/internal/lint"
 	"github.com/swayam5342/plugit/internal/model"
+	"github.com/swayam5342/plugit/internal/naming"
 	"github.com/swayam5342/plugit/internal/policy"
+	"github.com/swayam5342/plugit/internal/protocol/graphql"
+	"github.com/swayam5342/plugit/internal/secrets"
 	"github.com/swayam5342/plugit/internal/spec"
 	"github.com/swayam5342/plugit/internal/tokens"
 	"github.com/swayam5342/plugit/internal/tui"
@@ -40,6 +48,8 @@ type addSettings struct {
 	tags, methods, paths []string
 	maxTools             int
 	yes                  bool
+	format               string // --format: skip detection
+	introspect           bool   // --introspect: spec is the GraphQL endpoint
 }
 
 type pickResult struct {
@@ -62,16 +72,19 @@ type addDeps struct {
 	out     io.Writer
 	stderr  io.Writer
 	confirm func(string) (bool, error)
-	parse   func(context.Context, []byte, ingest.Options) (*model.Manifest, error)
+	parse   parseFunc
 	pick    func(context.Context, pickInput) (pickResult, error)
 	info    BuildInfo
+	// resolver resolves the credential for --introspect (nil: the real
+	// environment and keyring).
+	resolver *secrets.Resolver
 }
 
 func newAddCmd(g *globalFlags, info BuildInfo) *cobra.Command {
 	var s addSettings
 	var mode string
 	cmd := &cobra.Command{
-		Use:   "add <name> <spec-url|file>",
+		Use:   "add <name> <spec-url|file|graphql-endpoint>",
 		Short: "Save an API: fetch its spec, pin the base URL, pick tools",
 		Long: `Fetch and parse a spec, confirm the base URL to pin, choose the tools in
 the picker, and save apis/<name>/ (plugit.yaml, the spec snapshot and the
@@ -82,7 +95,12 @@ parsed manifest).
 becomes a saved config by adding "add <name>" and --from-run.
 
 Credentials are references only (--header Name=env:VAR, keyring:svc/key);
-store a keyring value with plugit auth.`,
+store a keyring value with plugit auth.
+
+--format NAME skips format detection (openapi, postman, graphql-sdl,
+graphql-introspection). --introspect treats the URL as a GraphQL endpoint:
+it is pinned, and the standard introspection query is POSTed there (with
+the credential) instead of reading a schema file.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p, err := g.paths()
@@ -94,12 +112,13 @@ store a keyring value with plugit auth.`,
 				return err
 			}
 			d := addDeps{
-				paths:   p,
-				out:     cmd.OutOrStdout(),
-				stderr:  cmd.ErrOrStderr(),
-				confirm: terminalConfirm(cmd),
-				parse:   isolate.Parse,
-				info:    info,
+				paths:    p,
+				out:      cmd.OutOrStdout(),
+				stderr:   cmd.ErrOrStderr(),
+				confirm:  terminalConfirm(cmd),
+				parse:    isolate.Parse,
+				info:     info,
+				resolver: secrets.NewResolver(),
 			}
 			if d.confirm != nil {
 				d.pick = runPicker
@@ -122,6 +141,8 @@ store a keyring value with plugit auth.`,
 	fl.StringSliceVar(&s.paths, "paths", nil, "with --from-run: only these path prefixes or globs")
 	fl.IntVar(&s.maxTools, "max-tools", defaultMaxTools, "with --from-run: refuse more tools than this")
 	fl.BoolVar(&s.yes, "yes", false, "pin the spec's server as the base URL without asking")
+	fl.StringVar(&s.format, "format", "", "source format, skipping detection: openapi, postman, graphql-sdl or graphql-introspection")
+	fl.BoolVar(&s.introspect, "introspect", false, "GraphQL: the URL is the endpoint; pin it and fetch the schema by introspection")
 	return cmd
 }
 
@@ -146,17 +167,16 @@ func addAPI(ctx context.Context, s addSettings, d addDeps) error {
 		return err
 	}
 
-	sp, err := spec.New(spec.Options{AllowPrivate: s.allowPrivate}).Load(ctx, s.spec)
+	src, err := loadAddSource(ctx, s, d, auth, fixed)
 	if err != nil {
 		return err
 	}
-	m, err := d.parse(ctx, sp.Bytes, ingest.Options{Prefix: s.prefix, AllowUnsafePaths: s.allowInsecure})
-	if err != nil {
-		return err
-	}
-	baseURL, err := pinBaseURL(s, m.Endpoints, d.confirm)
-	if err != nil {
-		return err
+	m := src.m
+	baseURL := src.endpoint
+	if baseURL == "" {
+		if baseURL, err = pinBaseURL(s, m.Endpoints, d.confirm); err != nil {
+			return err
+		}
 	}
 
 	prepared := prepareAll(m.Tools, hiddenParams(auth, fixed))
@@ -200,8 +220,8 @@ func addAPI(ctx context.Context, s addSettings, d addDeps) error {
 	cfg := &config.API{
 		Version:  config.CurrentVersion,
 		Name:     s.name,
-		Protocol: string(model.REST),
-		Source:   config.Source{URL: source, SHA256: sp.SHA256},
+		Protocol: string(cmp.Or(m.Protocol, model.REST)),
+		Source:   config.Source{URL: source, Format: m.Format, SHA256: src.sha256},
 		Endpoint: baseURL,
 		Prefix:   s.prefix,
 		Fixed:    fixed,
@@ -225,11 +245,118 @@ func addAPI(ctx context.Context, s addSettings, d addDeps) error {
 	if _, err := config.MarshalAPI(cfg); err != nil {
 		return err
 	}
+	if m, err = compileResponseFields(ctx, d.parse, cfg, src.snapshot, m); err != nil {
+		return err
+	}
 
-	if err := saveAPIFiles(d.paths, cfg, sp.Bytes, m, parserID(d.info)); err != nil {
+	if err := saveAPIFiles(d.paths, cfg, src.snapshot, m, parserID(d.info)); err != nil {
 		return err
 	}
 	return printAddSummary(d.out, cfg, active)
+}
+
+// addSource is a parsed source for add: the snapshot to save and its
+// sha256, the manifest, and the endpoint when it is already pinned
+// (--introspect).
+type addSource struct {
+	snapshot []byte
+	sha256   string
+	m        *model.Manifest
+	endpoint string
+}
+
+// loadAddSource loads and parses (in the isolate child) the source add
+// saves. A spec file or URL is loaded with the spec loader and parsed with
+// --format, or detected. With --introspect the URL is the GraphQL endpoint:
+// it is pinned first, then the introspection query is sent there with the
+// configured credential, and the raw result is parsed as
+// graphql-introspection.
+func loadAddSource(ctx context.Context, s addSettings, d addDeps, auth config.Auth, fixed []config.Fixed) (addSource, error) {
+	opts := ingest.Options{Prefix: s.prefix, AllowUnsafePaths: s.allowInsecure}
+	if !s.introspect {
+		sp, err := spec.New(spec.Options{AllowPrivate: s.allowPrivate}).Load(ctx, s.spec)
+		if err != nil {
+			return addSource{}, err
+		}
+		m, err := d.parse(ctx, sp.Bytes, s.format, opts)
+		if err != nil {
+			return addSource{}, err
+		}
+		return addSource{snapshot: sp.Bytes, sha256: sp.SHA256, m: m}, nil
+	}
+
+	if s.format != "" && s.format != graphql.FormatIntrospection {
+		return addSource{}, fmt.Errorf("--introspect reads an introspection result; --format %s doesn't apply", naming.CleanText(s.format, 40))
+	}
+	endpoint, err := introspectEndpoint(s.spec, s.baseURL)
+	if err != nil {
+		return addSource{}, err
+	}
+	draft := &config.API{Name: s.name, Endpoint: endpoint.String(), Auth: auth}
+	for _, f := range fixed {
+		if f.In == "header" { // only headers go with the introspection request
+			draft.Fixed = append(draft.Fixed, f)
+		}
+	}
+	if draft.Auth.Type != config.AuthNone || len(draft.Fixed) > 0 {
+		if err := config.CheckCredentialTransport(endpoint.String(), s.allowInsecure); err != nil {
+			return addSource{}, fmt.Errorf("the --introspect URL %w; to send it over http anyway, pass --allow-insecure", err)
+		}
+	}
+	res := d.resolver
+	if res == nil {
+		res = secrets.NewResolver()
+	}
+	cred, _, err := buildCredential(draft, res, runDeps{})
+	if err != nil {
+		return addSource{}, err
+	}
+	fx, _, err := buildFixedTarget(draft, res)
+	if err != nil {
+		return addSource{}, err
+	}
+	fx.userAgent = "plugit/" + d.info.withDefaults().Version
+	raw, err := introspect(ctx, endpoint, cred, fx, s.allowPrivate)
+	if err != nil {
+		return addSource{}, err
+	}
+	m, err := d.parse(ctx, raw, graphql.FormatIntrospection, opts)
+	if err != nil {
+		return addSource{}, fmt.Errorf("introspection result from %s: %w", endpoint, err)
+	}
+	sum := sha256.Sum256(raw)
+	return addSource{snapshot: raw, sha256: hex.EncodeToString(sum[:]), m: m, endpoint: endpoint.String()}, nil
+}
+
+// compileResponseFields re-parses a GraphQL snapshot in the isolate child
+// with cfg's toolset response_fields, so the saved manifest carries their
+// compiled documents (and matches cfg's cache key). Any that don't compile
+// is an error naming the toolset, tool and path. A manifest of any other
+// protocol, or one with nothing to compile and no compiled documents left
+// over, is returned as is.
+func compileResponseFields(ctx context.Context, parse parseFunc, cfg *config.API, snapshot []byte, m *model.Manifest) (*model.Manifest, error) {
+	if m.Protocol != model.GraphQL {
+		return m, nil
+	}
+	stale := m.GraphQL != nil && (len(m.GraphQL.OverrideDocs) > 0 || len(m.GraphQL.OverrideErrors) > 0)
+	if cfg.GraphQLResponseFields() == nil && !stale {
+		return m, nil
+	}
+	m, err := parse(ctx, snapshot, cfg.Source.Format, parseOptions(cfg))
+	if err != nil {
+		return nil, err
+	}
+	if m.GraphQL != nil && len(m.GraphQL.OverrideErrors) > 0 {
+		var problems []string
+		for _, ts := range slices.Sorted(maps.Keys(m.GraphQL.OverrideErrors)) {
+			byKey := m.GraphQL.OverrideErrors[ts]
+			for _, key := range slices.Sorted(maps.Keys(byKey)) {
+				problems = append(problems, fmt.Sprintf("toolset %q, tool %q: %s", ts, key, byKey[key]))
+			}
+		}
+		return nil, fmt.Errorf("response_fields don't compile against the schema (%s); nothing saved", strings.Join(problems, "; "))
+	}
+	return m, nil
 }
 
 // pickerLint lints a picker selection as toolset ts of api. tools are the

@@ -13,10 +13,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/swayam5342/plugit/internal/config"
-	"github.com/swayam5342/plugit/internal/ingest"
 	"github.com/swayam5342/plugit/internal/isolate"
 	"github.com/swayam5342/plugit/internal/lint"
-	"github.com/swayam5342/plugit/internal/model"
 )
 
 type exitCodeError struct {
@@ -35,7 +33,7 @@ type lintSettings struct {
 	asJSON  bool
 	out     io.Writer
 	stderr  io.Writer
-	parse   func(ctx context.Context, data []byte, opts ingest.Options) (*model.Manifest, error)
+	parse   parseFunc
 	info    BuildInfo
 }
 

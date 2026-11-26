@@ -33,6 +33,7 @@ import (
 	"github.com/swayam5342/plugit/internal/oauth"
 	"github.com/swayam5342/plugit/internal/policy"
 	"github.com/swayam5342/plugit/internal/protocol"
+	"github.com/swayam5342/plugit/internal/protocol/graphql"
 	"github.com/swayam5342/plugit/internal/redact"
 	"github.com/swayam5342/plugit/internal/schema"
 	"github.com/swayam5342/plugit/internal/secrets"
@@ -270,16 +271,34 @@ func loadActive(ctx context.Context, s serveSettings, d runDeps, logger *slog.Lo
 	if err != nil {
 		return nil, err
 	}
+	gql := m.Protocol == model.GraphQL
+	docs, err := overrideDocs(m, tsName, sel.Tools, cfg.Name)
+	if err != nil {
+		return nil, err
+	}
 	tools := make([]mcpserver.Tool, 0, len(sel.Tools))
 	for _, st := range sel.Tools {
-		mt := mcpserver.Tool{Tool: schema.Prepare(st.Tool, schema.Options{Fixed: hidden}), Override: st.Override}
-		if r, err := policy.ParseRate(ts.Tools[string(st.Tool.Key)].RateLimit); err == nil {
+		t := st.Tool
+		if doc, ok := docs[t.Key]; ok && t.GraphQL != nil {
+			op := *t.GraphQL
+			op.Document = doc
+			t.GraphQL = &op
+		}
+		mt := mcpserver.Tool{Tool: schema.Prepare(t, schema.Options{Fixed: hidden}), Override: st.Override}
+		if r, err := policy.ParseRate(ts.Tools[string(t.Key)].RateLimit); err == nil {
 			mt.Limit = policy.NewLimiter(r, nil)
 		}
-		if p, err := jsonpick.Parse(ts.Tools[string(st.Tool.Key)].ResponseFields); err == nil {
+		// GraphQL response_fields are compiled into the document (the server
+		// returns only those fields), so no picker filters the result.
+		if p, err := jsonpick.Parse(ts.Tools[string(t.Key)].ResponseFields); err == nil && !gql {
 			mt.Fields = p
 		}
 		tools = append(tools, mt)
+	}
+	if gql {
+		if err := checkFixedVariables(tools, fx, logger); err != nil {
+			return nil, err
+		}
 	}
 	return &active{
 		cfg:      cfg,
@@ -301,9 +320,81 @@ func loadActive(ctx context.Context, s serveSettings, d runDeps, logger *slog.Lo
 	}, nil
 }
 
+// overrideDocs returns the toolset's compiled response_fields documents for
+// the selected tools (GraphQL; nil for any other manifest). A selected tool
+// whose response_fields didn't compile against the schema is a load error
+// naming the toolset, the tool and the path (SPEC P7): the server would
+// reject the document anyway.
+func overrideDocs(m *model.Manifest, toolset string, sel []curate.Selected, api string) (map[model.OpKey]string, error) {
+	if m.GraphQL == nil {
+		return nil, nil
+	}
+	var problems []string
+	for _, st := range sel {
+		if msg, ok := m.GraphQL.OverrideErrors[toolset][string(st.Tool.Key)]; ok {
+			problems = append(problems, fmt.Sprintf("%s: %s", st.Tool.Key, msg))
+		}
+	}
+	if len(problems) > 0 {
+		slices.Sort(problems)
+		return nil, fmt.Errorf("toolset %q: response_fields that don't compile against the schema (%s); fix them with `plugit edit %s --toolset %s`",
+			toolset, strings.Join(problems, "; "), api, toolset)
+	}
+	docs := map[model.OpKey]string{}
+	for key, doc := range m.GraphQL.OverrideDocs[toolset] {
+		docs[model.OpKey(key)] = doc
+	}
+	return docs, nil
+}
+
+// checkFixedVariables checks the GraphQL fixed variables against the
+// selected tools: one whose variable is an input object or a list is refused
+// (a fixed value is a single scalar), and a tool that doesn't declare some of
+// them gets one warning naming them, since they aren't sent with it.
+func checkFixedVariables(tools []mcpserver.Tool, fx resolvedFixed, logger *slog.Logger) error {
+	for _, mt := range tools {
+		var missing []string
+		for _, it := range fx.items {
+			if it.In == "header" {
+				continue
+			}
+			i := slices.IndexFunc(mt.Tool.Params, func(p model.Param) bool {
+				return p.Bind.In == model.InVariable && p.Bind.Upstream == it.Name
+			})
+			if i < 0 {
+				missing = append(missing, it.Name)
+				continue
+			}
+			if typ := graphql.SchemaType(mt.Tool.Params[i].Schema); typ == "object" || typ == "array" {
+				return fmt.Errorf("fixed variable %q: tool %s declares it as an %s, and a fixed value can only set a scalar; remove it from fixed",
+					it.Name, mt.Tool.Key, typ)
+			}
+		}
+		if len(missing) > 0 {
+			logger.Warn("tool does not declare these fixed variables, so they are not sent with it",
+				"tool", string(mt.Tool.Key), "fixed_variables", strings.Join(missing, ", "))
+		}
+	}
+	return nil
+}
+
+// parseOptions is the parse configuration plugit.yaml implies: the REST
+// subset, and for GraphQL the selection caps and every toolset's
+// response_fields, which the child compiles into override documents.
+func parseOptions(cfg *config.API) ingest.Options {
+	o := ingest.Options{Prefix: cfg.Prefix, AllowUnsafePaths: cfg.Network.AllowInsecure}
+	if model.Protocol(cfg.Protocol) == model.GraphQL {
+		g := cfg.GraphQLSettings()
+		o.SelectionDepth, o.MaxFields = g.SelectionDepth, g.MaxFields
+		o.ResponseFields = cfg.GraphQLResponseFields()
+	}
+	return o
+}
+
 // loadManifest returns the parsed spec snapshot, from manifest.json when it
-// was built from this snapshot, prefix and plugit build. Otherwise it parses
-// the snapshot once in the isolate child and rewrites the cache (SPEC §3.6).
+// was built from this snapshot, config and plugit build. Otherwise it parses
+// the snapshot once in the isolate child (with source.format, if recorded)
+// and rewrites the cache (SPEC §3.6).
 func loadManifest(ctx context.Context, p config.Paths, cfg *config.API, d runDeps, logger *slog.Logger) (*model.Manifest, error) {
 	snapPath, err := p.SpecSnapshot(cfg.Name)
 	if err != nil {
@@ -328,7 +419,7 @@ func loadManifest(ctx context.Context, p config.Paths, cfg *config.API, d runDep
 	if !errors.Is(err, os.ErrNotExist) {
 		logger.Info("re-parsing the spec snapshot", "reason", err.Error())
 	}
-	m, err = d.parse(ctx, data, ingest.Options{Prefix: cfg.Prefix, AllowUnsafePaths: cfg.Network.AllowInsecure})
+	m, err = d.parse(ctx, data, cfg.Source.Format, parseOptions(cfg))
 	if err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", snapPath, err)
 	}

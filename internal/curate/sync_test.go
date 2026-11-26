@@ -134,3 +134,32 @@ func TestDiffAddedAutoSelected(t *testing.T) {
 		t.Errorf("listed = %v", got)
 	}
 }
+
+// A GraphQL tool whose generated document changed (a field the server
+// removed) is a change, and each toolset's response_fields that no longer
+// compile against the new schema are their own diff entries, sorted.
+func TestDiffManifestsGraphQLDocumentsAndFieldErrors(t *testing.T) {
+	op := func(doc string) model.Tool {
+		return model.Tool{Key: "query user", Name: "user", GraphQL: &model.GraphQLOp{Operation: "query", Field: "user", Document: doc}}
+	}
+	old := &model.Manifest{Protocol: model.GraphQL, Tools: []model.Tool{op("query PlugIt_user { user { id name } }")}}
+	updated := &model.Manifest{Protocol: model.GraphQL, Tools: []model.Tool{op("query PlugIt_user { user { id } }")},
+		GraphQL: &model.GraphQLSchema{OverrideErrors: map[string]map[string]string{
+			"lean":    {"query user": `response_fields path "name": no field`},
+			"default": {"query user": `response_fields path "name": no field`},
+		}}}
+	d := DiffManifests(old, updated, config.API{})
+	if len(d.Changed) != 1 || !slices.Contains(d.Changed[0].What, "document") {
+		t.Errorf("changed = %+v, want query user with a document change", d.Changed)
+	}
+	want := []FieldError{
+		{Toolset: "default", Key: "query user", Err: `response_fields path "name": no field`},
+		{Toolset: "lean", Key: "query user", Err: `response_fields path "name": no field`},
+	}
+	if !reflect.DeepEqual(d.FieldErrors, want) {
+		t.Errorf("FieldErrors = %+v, want %+v", d.FieldErrors, want)
+	}
+	if d.Empty() {
+		t.Error("a diff with field errors is not empty")
+	}
+}

@@ -22,11 +22,13 @@ import (
 	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/httpx"
 	"github.com/swayam5342/plugit/internal/ingest"
+	"github.com/swayam5342/plugit/internal/invoke"
 	"github.com/swayam5342/plugit/internal/isolate"
 	"github.com/swayam5342/plugit/internal/mcpserver"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/naming"
 	"github.com/swayam5342/plugit/internal/policy"
+	"github.com/swayam5342/plugit/internal/protocol/graphql"
 	"github.com/swayam5342/plugit/internal/redact"
 	"github.com/swayam5342/plugit/internal/schema"
 	"github.com/swayam5342/plugit/internal/secrets"
@@ -44,6 +46,8 @@ type runFlags struct {
 	maxTools                    int
 	timeout                     time.Duration
 	allowPrivate, allowInsecure bool
+	format                      string
+	introspect                  bool
 }
 
 type runSettings struct {
@@ -55,6 +59,8 @@ type runSettings struct {
 	allowPrivate          bool
 	allowInsecure         bool
 	mode                  policy.Mode
+	format                string // skip detection
+	introspect            bool   // spec is a GraphQL endpoint
 }
 
 func resolveRunSettings(f runFlags, changed map[string]bool, lookup func(string) (string, bool)) (runSettings, error) {
@@ -86,6 +92,7 @@ func resolveRunSettings(f runFlags, changed map[string]bool, lookup func(string)
 		tags:    list("tags", f.tags, "PLUGIT_TAGS"),
 		methods: list("methods", f.methods, "PLUGIT_METHODS"),
 		paths:   list("paths", f.paths, "PLUGIT_PATHS"),
+		format:  str("format", f.format, "PLUGIT_FORMAT", ""),
 	}
 	if s.spec == "" {
 		return s, errors.New("no spec given: pass a file or URL, or set PLUGIT_SPEC")
@@ -141,6 +148,19 @@ func resolveRunSettings(f runFlags, changed map[string]bool, lookup func(string)
 				return s, fmt.Errorf("PLUGIT_ALLOW_PRIVATE: %q is not true or false", v)
 			}
 			s.allowPrivate = b
+		}
+	}
+
+	switch {
+	case changed["introspect"]:
+		s.introspect = f.introspect
+	default:
+		if v, ok := lookup("PLUGIT_INTROSPECT"); ok && v != "" {
+			b, err := strconv.ParseBool(v)
+			if err != nil {
+				return s, fmt.Errorf("PLUGIT_INTROSPECT: %q is not true or false", v)
+			}
+			s.introspect = b
 		}
 	}
 
@@ -365,27 +385,36 @@ func checkToolCount(tools []model.Tool, maxTools int) error {
 		errTooManyTools, len(tools), maxTools, tagHint)
 }
 
+// parseFunc parses untrusted source bytes in the isolate child (isolate.Parse;
+// tests substitute counting or failing fakes). format names the format to
+// use, skipping detection; "" detects.
+type parseFunc func(ctx context.Context, data []byte, format string, opts ingest.Options) (*model.Manifest, error)
+
 type runDeps struct {
 	transport mcp.Transport
 	stderr    io.Writer
 	resolver  *secrets.Resolver
 	keyring   keyringSetter
-	parse     func(ctx context.Context, data []byte, opts ingest.Options) (*model.Manifest, error)
+	parse     parseFunc
 	info      BuildInfo
 }
 
 func newRunCmd(info BuildInfo) *cobra.Command {
 	var f runFlags
 	cmd := &cobra.Command{
-		Use:   "run <spec-url|file>",
+		Use:   "run <spec-url|file|graphql-endpoint>",
 		Short: "Serve a spec as MCP tools on stdio, with no setup (read-only by default)",
 		Long: `Serve a spec's operations as MCP tools on stdio, without saving anything.
 
 Settings come from flags, then PLUGIT_* environment variables (PLUGIT_SPEC,
 PLUGIT_BASE_URL, PLUGIT_PREFIX, PLUGIT_MODE, PLUGIT_TAGS, PLUGIT_METHODS,
 PLUGIT_PATHS, PLUGIT_MAX_TOOLS, PLUGIT_TIMEOUT, PLUGIT_ALLOW_PRIVATE,
-PLUGIT_ALLOW_INSECURE,
+PLUGIT_ALLOW_INSECURE, PLUGIT_FORMAT, PLUGIT_INTROSPECT,
 PLUGIT_HEADER, PLUGIT_FIXED), then defaults.
+
+--introspect treats the URL as a GraphQL endpoint: the standard
+introspection query is POSTed there instead of reading a schema file. For
+GraphQL the first --header is the credential, sent only to the endpoint.
 
 Secrets in --header and --fixed must be env: or keyring: references; put the
 real value in the MCP client's env block. When any credential is configured,
@@ -396,7 +425,7 @@ real value in the MCP client's env block. When any credential is configured,
 				f.spec = args[0]
 			}
 			changed := map[string]bool{}
-			for _, n := range []string{"endpoint", "prefix", "mode", "header", "fixed", "tags", "methods", "paths", "max-tools", "timeout", "allow-private", "allow-insecure"} {
+			for _, n := range []string{"endpoint", "prefix", "mode", "header", "fixed", "tags", "methods", "paths", "max-tools", "timeout", "allow-private", "allow-insecure", "format", "introspect"} {
 				changed[n] = cmd.Flags().Changed(n)
 			}
 			s, err := resolveRunSettings(f, changed, os.LookupEnv)
@@ -425,6 +454,8 @@ real value in the MCP client's env block. When any credential is configured,
 	fl.IntVar(&f.maxTools, "max-tools", defaultMaxTools, "refuse to start if more tools than this are selected")
 	fl.DurationVar(&f.timeout, "timeout", httpx.DefaultTimeout, "per-request timeout")
 	fl.BoolVar(&f.allowPrivate, "allow-private", false, "allow loopback and private-network addresses (spec fetch and API calls)")
+	fl.StringVar(&f.format, "format", "", "source format, skipping detection: openapi, postman, graphql-sdl or graphql-introspection")
+	fl.BoolVar(&f.introspect, "introspect", false, "GraphQL: the URL is the endpoint; fetch the schema there by introspection")
 	fl.BoolVar(&f.allowInsecure, "allow-insecure", false, "accept what plugit otherwise refuses: credentials over plain http to a remote host, and spec paths with spaces, '..' or backslashes")
 	return cmd
 }
@@ -441,64 +472,92 @@ func runServe(ctx context.Context, s runSettings, d runDeps) error {
 		return err
 	}
 	credentials := len(headers) > 0 || slices.ContainsFunc(fixedFlags, func(c credFlag) bool { return c.ref.IsSecret() })
-
-	sp, err := spec.New(spec.Options{AllowPrivate: s.allowPrivate}).Load(ctx, s.spec)
-	if err != nil {
-		return err
-	}
-	m, err := d.parse(ctx, sp.Bytes, ingest.Options{Prefix: s.prefix, AllowUnsafePaths: s.allowInsecure})
-	if err != nil {
-		return err
-	}
-	baseURL, err := chooseBaseURL(s.baseURL, m.Endpoints, credentials)
-	if err != nil {
-		return err
-	}
-	if credentials {
-		if err := config.CheckCredentialTransport(baseURL.String(), s.allowInsecure); err != nil {
+	userAgent := "plugit/" + d.info.withDefaults().Version
+	opts := ingest.Options{Prefix: s.prefix, AllowUnsafePaths: s.allowInsecure}
+	checkTransport := func(u *url.URL) error {
+		if !credentials {
+			return nil
+		}
+		if err := config.CheckCredentialTransport(u.String(), s.allowInsecure); err != nil {
 			return fmt.Errorf("--endpoint %w; to send it over http anyway, pass --allow-insecure", err)
+		}
+		return nil
+	}
+
+	var (
+		m       *model.Manifest
+		baseURL *url.URL
+		creds   runCredentials
+	)
+	if s.introspect {
+		// The URL is the GraphQL endpoint: pin it, then send the introspection
+		// query there with the credentials.
+		if s.format != "" && s.format != graphql.FormatIntrospection {
+			return fmt.Errorf("--introspect reads an introspection result; --format %s doesn't apply", naming.CleanText(s.format, 40))
+		}
+		if baseURL, err = introspectEndpoint(s.spec, s.baseURL); err != nil {
+			return err
+		}
+		if err := checkTransport(baseURL); err != nil {
+			return err
+		}
+		if creds, err = resolveRunCredentials(headers, fixedFlags, d.resolver, true); err != nil {
+			return err
+		}
+		creds.fixed.userAgent = userAgent
+		raw, err := introspect(ctx, baseURL, creds.cred, creds.fixed, s.allowPrivate)
+		if err != nil {
+			return err
+		}
+		if m, err = d.parse(ctx, raw, graphql.FormatIntrospection, opts); err != nil {
+			return fmt.Errorf("introspection result from %s: %w", baseURL, err)
+		}
+	} else {
+		sp, err := spec.New(spec.Options{AllowPrivate: s.allowPrivate}).Load(ctx, s.spec)
+		if err != nil {
+			return err
+		}
+		if m, err = d.parse(ctx, sp.Bytes, s.format, opts); err != nil {
+			return err
+		}
+		if baseURL, err = chooseBaseURL(s.baseURL, m.Endpoints, credentials); err != nil {
+			return err
+		}
+		if err := checkTransport(baseURL); err != nil {
+			return err
 		}
 	}
 	selected := selectTools(m.Tools, s.mode, s.tags, s.methods, s.paths)
 	if err := checkToolCount(selected, s.maxTools); err != nil {
 		return err
 	}
-
-	var fixed resolvedFixed
-	var hidden []string
-	for _, h := range headers {
-		v, err := d.resolver.Resolve(h.ref)
-		if err != nil {
-			return fmt.Errorf("--header %s: %w", h.name, err)
+	if !s.introspect {
+		if creds, err = resolveRunCredentials(headers, fixedFlags, d.resolver, m.Protocol == model.GraphQL); err != nil {
+			return err
 		}
-		fixed.items = append(fixed.items, fixedItem{Name: h.name, In: "header", Value: v, Secret: true})
-		hidden = append(hidden, h.name)
-	}
-	for _, f := range fixedFlags {
-		v, err := d.resolver.Resolve(f.ref)
-		if err != nil {
-			return fmt.Errorf("--fixed %s: %w", f.name, err)
-		}
-		fixed.items = append(fixed.items, fixedItem{Name: f.name, In: "query", Value: v, Secret: f.ref.IsSecret()})
-		hidden = append(hidden, f.name)
+		creds.fixed.userAgent = userAgent
 	}
 
 	tools := make([]mcpserver.Tool, 0, len(selected))
 	for _, t := range selected {
-		tools = append(tools, mcpserver.Tool{Tool: schema.Prepare(t, schema.Options{Fixed: hidden})})
+		tools = append(tools, mcpserver.Tool{Tool: schema.Prepare(t, schema.Options{Fixed: creds.hidden})})
+	}
+	logger := slog.New(slog.NewTextHandler(d.stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	if m.Protocol == model.GraphQL {
+		if err := checkFixedVariables(tools, creds.fixed, logger); err != nil {
+			return err
+		}
 	}
 
-	fixed.userAgent = "plugit/" + d.info.withDefaults().Version
-	proto, err := resolveProto(m.Protocol, fixed, baseURL)
+	proto, err := resolveProto(m.Protocol, creds.fixed, baseURL)
 	if err != nil {
 		return err
 	}
 	red := redact.New(redact.Options{
-		Secrets:           fixed.secretValues(),
-		SecretHeaders:     hidden,
-		SecretQueryParams: hidden,
+		Secrets:           append(creds.cred.SecretValues(), creds.fixed.secretValues()...),
+		SecretHeaders:     creds.hidden,
+		SecretQueryParams: creds.hidden,
 	})
-	logger := slog.New(slog.NewTextHandler(d.stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	logger.Info("plugit run serving",
 		"tools", len(tools), "mode", string(s.mode), "endpoint", baseURL.String(),
 		"spec", red.String(safeLocation(s.spec)), "warnings", len(m.Warnings))
@@ -508,12 +567,53 @@ func runServe(ctx context.Context, s runSettings, d runDeps) error {
 		Version:  d.info.withDefaults().Version,
 		Tools:    tools,
 		Mode:     s.mode,
+		Cred:     creds.cred,
 		Endpoint: baseURL,
 		Proto:    proto,
 		Doer:     httpx.NewClient(httpx.Options{AllowPrivate: s.allowPrivate, Timeout: s.timeout}),
 		Redactor: red,
 		Logger:   logger,
 	}, d.transport)
+}
+
+// runCredentials are run's resolved --header and --fixed values: the
+// credential (GraphQL only), the fixed params, and the names to hide from
+// the model and redact by name.
+type runCredentials struct {
+	cred   invoke.Credential
+	fixed  resolvedFixed
+	hidden []string
+}
+
+// resolveRunCredentials resolves --header and --fixed. For REST every
+// header is a fixed header and --fixed goes to the query string, as before.
+// For GraphQL the first header is the credential, as plugit add makes it:
+// invoke attaches it only to the pinned endpoint's origin (T8), and an
+// Authorization header (the bearer form SPEC 2.4 documents) can't be a
+// GraphQL fixed header; --fixed values are variables.
+func resolveRunCredentials(headers, fixedFlags []credFlag, res *secrets.Resolver, gql bool) (runCredentials, error) {
+	var rc runCredentials
+	for i, h := range headers {
+		v, err := res.Resolve(h.ref)
+		if err != nil {
+			return rc, fmt.Errorf("--header %s: %w", h.name, err)
+		}
+		if gql && i == 0 {
+			rc.cred = invoke.Credential{Type: string(config.AuthHeader), Header: h.name, Secret: v}
+		} else {
+			rc.fixed.items = append(rc.fixed.items, fixedItem{Name: h.name, In: "header", Value: v, Secret: true})
+		}
+		rc.hidden = append(rc.hidden, h.name)
+	}
+	for _, f := range fixedFlags {
+		v, err := res.Resolve(f.ref)
+		if err != nil {
+			return rc, fmt.Errorf("--fixed %s: %w", f.name, err)
+		}
+		rc.fixed.items = append(rc.fixed.items, fixedItem{Name: f.name, In: "query", Value: v, Secret: f.ref.IsSecret()})
+		rc.hidden = append(rc.hidden, f.name)
+	}
+	return rc, nil
 }
 
 // safeLocation drops userinfo, query and fragment from URL locations.

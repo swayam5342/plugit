@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"reflect"
 	"slices"
@@ -287,5 +288,44 @@ func TestSyncDiffSanitizesKeys(t *testing.T) {
 	}
 	if got := strings.Count(out.String(), "GET /pets]0;owned"); got != 3 {
 		t.Errorf("keys shown %d times, want 3: %q", got, out.String())
+	}
+}
+
+// sync re-parses the new schema in the child, which regenerates every
+// default document and re-compiles each toolset's saved response_fields:
+// a field the server removed shows in the sync diff (the tool's document
+// changed, and the response_fields that no longer compile, naming toolset,
+// tool and path) instead of only failing at load. After adopting, serve
+// refuses that toolset until it's fixed.
+func TestSyncRevalidatesDocuments(t *testing.T) {
+	p := setupGraphQLAPI(t, "https://api.example.test/graphql")
+	logger := slog.New(slog.DiscardHandler)
+	if _, err := loadActive(t.Context(), serveSettings{paths: p, name: "gh"}, gqlDeps(isolate.Parse), logger); err != nil {
+		t.Fatalf("before sync: %v", err)
+	}
+	noName := strings.Replace(gqlSDL, "type User { id: ID! name: String email: String org: Org }", "type User { id: ID! email: String org: Org }", 1)
+
+	out := &bytes.Buffer{}
+	s := syncDeps(out)
+	s.spec = writeSDL(t, noName)
+	err := syncAPI(t.Context(), p, "gh", s)
+	if err == nil || !strings.Contains(err.Error(), "--yes") {
+		t.Fatalf("sync without --yes: %v", err)
+	}
+	o := out.String()
+	for _, want := range []string{"~ query user", "document", "response_fields", "default", `"name"`} {
+		if !strings.Contains(o, want) {
+			t.Errorf("sync diff missing %q:\n%s", want, o)
+		}
+	}
+
+	s.yes = true
+	out.Reset()
+	if err := syncAPI(t.Context(), p, "gh", s); err != nil {
+		t.Fatalf("sync --yes: %v\n%s", err, out)
+	}
+	_, err = loadActive(t.Context(), serveSettings{paths: p, name: "gh"}, gqlDeps(isolate.Parse), logger)
+	if err == nil || !strings.Contains(err.Error(), "query user") {
+		t.Errorf("serve after adopting must refuse the broken response_fields: %v", err)
 	}
 }

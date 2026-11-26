@@ -57,19 +57,22 @@ type request struct {
 	UnsafePaths    bool   `json:"unsafePaths,omitempty"`
 	SelectionDepth int    `json:"selectionDepth,omitempty"`
 	MaxFields      int    `json:"maxFields,omitempty"`
+	// ResponseFields is toolset -> tool key -> GraphQL response_fields,
+	// compiled into override documents in the child.
+	ResponseFields map[string]map[string][]string `json:"responseFields,omitempty"`
 }
 
-func newRequest(data []byte, opts ingest.Options) request {
+func newRequest(data []byte, format string, opts ingest.Options) request {
 	return request{
-		Spec: data, Prefix: opts.Prefix, MaxDescription: opts.MaxDescription, UnsafePaths: opts.AllowUnsafePaths,
-		SelectionDepth: opts.SelectionDepth, MaxFields: opts.MaxFields,
+		Spec: data, Format: format, Prefix: opts.Prefix, MaxDescription: opts.MaxDescription, UnsafePaths: opts.AllowUnsafePaths,
+		SelectionDepth: opts.SelectionDepth, MaxFields: opts.MaxFields, ResponseFields: opts.ResponseFields,
 	}
 }
 
 func (r request) options() ingest.Options {
 	return ingest.Options{
 		Prefix: r.Prefix, MaxDescription: r.MaxDescription, AllowUnsafePaths: r.UnsafePaths,
-		SelectionDepth: r.SelectionDepth, MaxFields: r.MaxFields,
+		SelectionDepth: r.SelectionDepth, MaxFields: r.MaxFields, ResponseFields: r.ResponseFields,
 	}
 }
 
@@ -110,17 +113,19 @@ func NewRunner() (*Runner, error) {
 	return &Runner{Exe: exe, Args: []string{ChildArg}}, nil
 }
 
-// Parse is a format parse (openapi, postman, …) in a child process. opts.Logger is not used.
-func Parse(ctx context.Context, data []byte, opts ingest.Options) (*model.Manifest, error) {
+// Parse is a format parse (openapi, postman, graphql-sdl, …) in a child
+// process. format names the format to use, skipping detection; "" detects.
+// opts.Logger is not used.
+func Parse(ctx context.Context, data []byte, format string, opts ingest.Options) (*model.Manifest, error) {
 	r, err := NewRunner()
 	if err != nil {
 		return nil, err
 	}
-	return r.Parse(ctx, data, opts)
+	return r.Parse(ctx, data, format, opts)
 }
 
-// Parse runs one parse child.
-func (r *Runner) Parse(ctx context.Context, data []byte, opts ingest.Options) (*model.Manifest, error) {
+// Parse runs one parse child; format is as for the package-level Parse.
+func (r *Runner) Parse(ctx context.Context, data []byte, format string, opts ingest.Options) (*model.Manifest, error) {
 	timeout, maxOut := r.Timeout, r.MaxOutput
 	if timeout <= 0 {
 		timeout = DefaultTimeout
@@ -128,7 +133,7 @@ func (r *Runner) Parse(ctx context.Context, data []byte, opts ingest.Options) (*
 	if maxOut <= 0 {
 		maxOut = DefaultMaxOutput
 	}
-	req, err := json.Marshal(newRequest(data, opts))
+	req, err := json.Marshal(newRequest(data, format, opts))
 	if err != nil {
 		return nil, fmt.Errorf("encoding parse request: %w", err)
 	}

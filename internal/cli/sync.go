@@ -16,7 +16,6 @@ import (
 
 	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/curate"
-	"github.com/swayam5342/plugit/internal/ingest"
 	"github.com/swayam5342/plugit/internal/isolate"
 	"github.com/swayam5342/plugit/internal/lint"
 	"github.com/swayam5342/plugit/internal/model"
@@ -31,7 +30,7 @@ type syncSettings struct {
 	addNew  bool
 	out     io.Writer
 	stderr  io.Writer
-	parse   func(context.Context, []byte, ingest.Options) (*model.Manifest, error)
+	parse   parseFunc
 	info    BuildInfo
 	review  func(ctx context.Context, in tui.SyncInput) ([]model.OpKey, error)
 }
@@ -103,7 +102,10 @@ func syncAPI(ctx context.Context, p config.Paths, name string, s syncSettings) e
 		_, err := fmt.Fprintf(s.out, "%s is up to date: the spec hasn't changed.\n", name)
 		return err
 	}
-	updated, err := s.parse(ctx, sp.Bytes, ingest.Options{Prefix: cfg.Prefix, AllowUnsafePaths: cfg.Network.AllowInsecure})
+	// The child re-parses with the saved toolsets' response_fields, so every
+	// GraphQL document (default and override) is re-validated against the new
+	// schema; overrides that no longer compile come back as diff entries.
+	updated, err := s.parse(ctx, sp.Bytes, cfg.Source.Format, parseOptions(cfg))
 	if err != nil {
 		return err
 	}
@@ -211,6 +213,10 @@ func printSyncDiff(w io.Writer, baseURL string, d curate.SyncDiff, lintNote stri
 			note = "  (listed in " + strings.Join(r.Listed, ", ") + "; overrides kept)"
 		}
 		fmt.Fprintf(&b, "- %s%s\n", tui.Safe(string(r.Key)), note)
+	}
+	for _, fe := range d.FieldErrors {
+		fmt.Fprintf(&b, "! %s  response_fields in toolset %s no longer compile: %s (serve refuses that toolset until you fix it with plugit edit --toolset %s)\n",
+			tui.Safe(string(fe.Key)), tui.Safe(fe.Toolset), tui.Safe(fe.Err), tui.Safe(fe.Toolset))
 	}
 	if lintNote != "" {
 		fmt.Fprintf(&b, "\n✗ %s\n", lintNote)

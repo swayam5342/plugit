@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"io"
+	"net/http"
 	"net/url"
 	"reflect"
 	"slices"
@@ -253,5 +255,35 @@ func TestProtocolMustMatchManifest(t *testing.T) {
 	// The matching case is accepted.
 	if _, err := checkProtocol(&config.API{Name: "pets", Protocol: string(model.REST)}, &model.Manifest{Protocol: model.REST}); err != nil {
 		t.Errorf("matching protocols should load: %v", err)
+	}
+}
+
+// resolveProto builds GraphQL for a GraphQL manifest: its Encode POSTs the
+// tool's fixed document to the full endpoint URL as is (no path joining) and
+// sends the fixed variable with the declared param's type.
+func TestResolveProtoGraphQL(t *testing.T) {
+	endpoint := mustParseURL(t, "https://api.example.test/v4/graphql")
+	fx := resolvedFixed{items: []fixedItem{{Name: "first", In: "variable", Value: "5"}}}
+	p, err := resolveProto(model.GraphQL, fx, endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Name() != model.GraphQL {
+		t.Fatalf("Name() = %q", p.Name())
+	}
+	tl := model.Tool{Key: "query users", Name: "users",
+		Params: []model.Param{{Name: "first", Hidden: true, Bind: model.Binding{In: model.InVariable, Upstream: "first"},
+			Schema: []byte(`{"type":"integer"}`)}},
+		GraphQL: &model.GraphQLOp{Operation: "query", Field: "users", Document: "query PlugIt_users($first: Int) { users(first: $first) { id } }"}}
+	req, err := p.Encode(context.Background(), protocol.Call{Tool: tl, Endpoint: endpoint})
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	if req.Method != http.MethodPost || req.URL.String() != endpoint.String() {
+		t.Errorf("request = %s %s", req.Method, req.URL)
+	}
+	body, _ := io.ReadAll(req.Body)
+	if !strings.Contains(string(body), `"variables":{"first":5}`) {
+		t.Errorf("body = %s", body)
 	}
 }

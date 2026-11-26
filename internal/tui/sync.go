@@ -122,6 +122,13 @@ func (s *SyncScreen) body(w int) (lines []string, cursorLine int) {
 		add("  " + th.Err.Render("✗ "+safe(s.in.LintNote)))
 		add("")
 	}
+	if len(d.FieldErrors) > 0 {
+		add("  " + th.Err.Render(fmt.Sprintf("✗ response_fields that no longer compile (%d); serve refuses these toolsets until you fix them with plugit edit", len(d.FieldErrors))))
+		for _, fe := range d.FieldErrors {
+			add("    " + safe(fe.Toolset) + th.Dim.Render(" · ") + safe(string(fe.Key)) + th.Dim.Render("  "+safe(fe.Err)))
+		}
+		add("")
+	}
 
 	add("  " + th.Accent.Bold(true).Render(fmt.Sprintf("Added (%d)", len(d.Added))) + th.Dim.Render("  space adds one to toolset "+safe(s.in.Toolset)))
 	for i, a := range d.Added {
