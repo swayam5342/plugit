@@ -8,7 +8,7 @@ updates:
       go-minor-patch:
         update-types: [minor, patch]
     commit-message:
-      prefix: chore
+      prefix: "[skip ci] chore"
       include: scope
 
   - package-ecosystem: github-actions
@@ -19,5 +19,5 @@ updates:
       actions:
         patterns: ["*"]
     commit-message:
-      prefix: "chore [skip ci]"
+      prefix: "[skip ci] chore"
       include: scope
