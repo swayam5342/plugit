@@ -2,6 +2,7 @@ package openapi
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/naming"
+	"github.com/swayam5342/plugit/internal/utils"
 )
 
 const (
@@ -368,11 +370,11 @@ func (p *pmWalk) body(t *model.Tool, c *converter, body *pmBody) {
 			if body.Options.Raw.Language == "json" {
 				c.issue(model.IssueUnsupported, "the example JSON body doesn't parse, so its fields are unknown")
 			} else if strings.TrimSpace(body.Raw) != "" {
-				c.issue(model.IssueUnsupported, "raw %s request body not supported", naming.CleanText(cmpOr(body.Options.Raw.Language, "text"), 20))
+				c.issue(model.IssueUnsupported, "raw %s request body not supported", naming.CleanText(cmp.Or(body.Options.Raw.Language, "text"), 20))
 			}
 			return
 		}
-		t.HTTP.Body = &model.Body{ContentType: "application/json", Schema: mustJSON(inferSchema(v, 1))}
+		t.HTTP.Body = &model.Body{ContentType: "application/json", Schema: utils.MustJSON(inferSchema(v, 1))}
 	case "urlencoded", "formdata":
 		props := map[string]any{}
 		for _, f := range slices.Concat(body.URLEncoded, body.FormData) {
@@ -392,18 +394,11 @@ func (p *pmWalk) body(t *model.Tool, c *converter, body *pmBody) {
 		if body.Mode == "formdata" {
 			ct = ctMultipart
 		}
-		t.HTTP.Body = formBody(c, ct, mustJSON(map[string]any{"type": "object", "properties": props}), nil, false)
+		t.HTTP.Body = formBody(c, ct, utils.MustJSON(map[string]any{"type": "object", "properties": props}), nil, false)
 	case "":
 	default:
 		c.issue(model.IssueUnsupported, "%s request body not supported", naming.CleanText(body.Mode, 20))
 	}
-}
-
-func cmpOr(s, def string) string {
-	if s == "" {
-		return def
-	}
-	return s
 }
 
 // inferSchema builds a JSON Schema from an example value. Nothing is

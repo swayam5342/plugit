@@ -9,6 +9,8 @@ import (
 	"github.com/vektah/gqlparser/v2"
 	"github.com/vektah/gqlparser/v2/ast"
 	"github.com/vektah/gqlparser/v2/parser"
+
+	"github.com/swayam5342/plugit/internal/utils"
 )
 
 // Format names (SPEC §3.5 P4).
@@ -23,8 +25,6 @@ var ErrUnsupportedSpec = errors.New("unsupported spec: need a GraphQL SDL schema
 
 // sdlKeywords are the tokens a type-system document can start with.
 var sdlKeywords = [...]string{"type", "schema", "interface", "enum", "input", "scalar", "union", "directive", "extend"}
-
-var utf8BOM = []byte{0xef, 0xbb, 0xbf}
 
 // DetectSDL reports whether data is a GraphQL SDL document. The cheap token
 // check runs first; only input that passes it is fully parsed.
@@ -45,7 +45,7 @@ func DetectSDL(data []byte) (ok bool) {
 // whitespace, commas and # comments is an SDL keyword or a """ description.
 // It does not allocate.
 func sdlKeywordFirst(data []byte) bool {
-	data = bytes.TrimPrefix(data, utf8BOM)
+	data = utils.TrimBOM(data)
 	for i := 0; i < len(data); {
 		switch data[i] {
 		case ' ', '\t', '\n', '\r', ',':
@@ -106,7 +106,7 @@ func DetectIntrospection(data []byte) bool {
 // 5.1 writes one) and leading whitespace. Detection and loading share it so a
 // file that is detected also loads.
 func trimJSONStart(data []byte) []byte {
-	return bytes.TrimLeft(bytes.TrimPrefix(data, utf8BOM), " \t\r\n")
+	return bytes.TrimLeft(utils.TrimBOM(data), " \t\r\n")
 }
 
 // introspectionRoot returns the raw "__schema" object of an introspection result.

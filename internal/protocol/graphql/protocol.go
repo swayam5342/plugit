@@ -7,18 +7,16 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"mime"
 	"net/http"
 	"net/url"
-	"slices"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/naming"
 	"github.com/swayam5342/plugit/internal/protocol"
 	"github.com/swayam5342/plugit/internal/schema"
+	"github.com/swayam5342/plugit/internal/utils"
 )
 
 // Sentinel errors callers can match with errors.Is.
@@ -115,7 +113,7 @@ func (g GraphQL) Encode(ctx context.Context, c protocol.Call) (*http.Request, er
 	}
 
 	vars := map[string]any{}
-	for _, name := range sortedKeys(c.Args) {
+	for _, name := range utils.SortedKeys(c.Args) {
 		p, ok := byName[name]
 		if !ok {
 			return nil, fmt.Errorf("%w: unknown argument %q", ErrBadArgument, name)
@@ -145,7 +143,7 @@ func (g GraphQL) Encode(ctx context.Context, c protocol.Call) (*http.Request, er
 			if schema.IsForbiddenHeader(f.Name) {
 				return nil, fmt.Errorf("%w: fixed header %q can't be set", ErrBuild, f.Name)
 			}
-			if hasControl(f.Value) {
+			if utils.HasControl(f.Value) {
 				return nil, fmt.Errorf("%w: fixed header %q has an invalid value", ErrBuild, f.Name)
 			}
 			header.Set(f.Name, f.Value)
@@ -233,19 +231,6 @@ func checkEndpoint(u *url.URL) error {
 	return nil
 }
 
-func sortedKeys(m map[string]any) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	return keys
-}
-
-func hasControl(s string) bool {
-	return strings.IndexFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0
-}
-
 // response is a GraphQL response envelope. Both fields stay raw so the data
 // keeps its number formatting, key order and escaping; a nil field was absent.
 type response struct {
@@ -287,7 +272,7 @@ func (GraphQL) Decode(c protocol.Call, resp *http.Response, body []byte, truncat
 	case len(body) == 0:
 		httpRes.Text = fmt.Sprintf("(empty response, status %d)", resp.StatusCode)
 		return httpRes
-	case isBinary(ct, body):
+	case utils.IsBinary(ct, body):
 		typ := ct
 		if typ == "" {
 			typ = "unknown"
@@ -415,15 +400,4 @@ func errorText(errs []cleanError) string {
 func isNull(raw json.RawMessage) bool {
 	t := bytes.TrimSpace(raw)
 	return len(t) == 0 || string(t) == "null"
-}
-
-func isBinary(ct string, body []byte) bool {
-	mt, _, _ := mime.ParseMediaType(ct)
-	switch {
-	case strings.HasPrefix(mt, "image/"), strings.HasPrefix(mt, "audio/"), strings.HasPrefix(mt, "video/"),
-		strings.HasPrefix(mt, "font/"), mt == "application/octet-stream", mt == "application/pdf",
-		mt == "application/zip", mt == "application/gzip":
-		return true
-	}
-	return !utf8.Valid(body) || bytes.IndexByte(body, 0) >= 0
 }

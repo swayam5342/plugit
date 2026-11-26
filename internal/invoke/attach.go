@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/swayam5342/plugit/internal/httpx"
+	"github.com/swayam5342/plugit/internal/utils"
 )
 
 // errBuild marks a request that cannot be built or credentialed.
@@ -26,7 +27,7 @@ func attachAuth(req *http.Request, a Credential, endpoint *url.URL) error {
 	if !httpx.SameOrigin(req.URL, endpoint) {
 		return fmt.Errorf("%w: request origin differs from the pinned base URL", errBuild)
 	}
-	if hasControl(a.Secret) {
+	if utils.HasControl(a.Secret) {
 		return fmt.Errorf("%w: the credential contains control characters", errBuild)
 	}
 	switch a.Type {
@@ -54,10 +55,6 @@ func attachAuth(req *http.Request, a Credential, endpoint *url.URL) error {
 		return fmt.Errorf("%w: unknown auth type %q", errBuild, a.Type)
 	}
 	return nil
-}
-
-func hasControl(s string) bool {
-	return strings.IndexFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0
 }
 
 // describeTransportError explains a failed exchange without repeating the

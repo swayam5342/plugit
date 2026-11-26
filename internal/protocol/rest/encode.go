@@ -27,6 +27,7 @@ import (
 
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/schema"
+	"github.com/swayam5342/plugit/internal/utils"
 )
 
 // Sentinel errors callers can match with errors.Is.
@@ -279,7 +280,7 @@ func pathSegment(name string, v any) (string, error) {
 		decoded = s
 	}
 	for _, c := range []string{s, decoded} {
-		if c == "" || c == "." || c == ".." || strings.ContainsAny(c, `/\`) || hasControl(c) {
+		if c == "" || c == "." || c == ".." || strings.ContainsAny(c, `/\`) || utils.HasControl(c) {
 			return "", fmt.Errorf("%w: path parameter %q must not be empty, '.', '..', contain '/', '\\' or control characters (also when percent-decoded)", ErrBadArgument, name)
 		}
 	}
@@ -344,7 +345,7 @@ func headerValue(v any) (string, error) {
 			return "", errors.New("header values must be strings, numbers or booleans")
 		}
 	}
-	if hasControl(s) {
+	if utils.HasControl(s) {
 		return "", errors.New("header values must not contain CR, LF or other control characters")
 	}
 	return s, nil
@@ -366,10 +367,6 @@ func scalar(v any) (string, bool) {
 		return strconv.FormatInt(x, 10), true
 	}
 	return "", false
-}
-
-func hasControl(s string) bool {
-	return strings.IndexFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0
 }
 
 var cookieNameRe = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$")

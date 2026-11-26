@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/httpx"
@@ -19,6 +18,7 @@ import (
 	"github.com/swayam5342/plugit/internal/schema"
 	"github.com/swayam5342/plugit/internal/secrets"
 	"github.com/swayam5342/plugit/internal/spec"
+	"github.com/swayam5342/plugit/internal/utils"
 )
 
 // introspectionQuery is graphql-js's standard introspection query with
@@ -201,7 +201,7 @@ func introspect(ctx context.Context, endpoint *url.URL, cred invoke.Credential, 
 		if it.In != "header" {
 			continue
 		}
-		if schema.IsForbiddenHeader(it.Name) || strings.ContainsFunc(it.Value, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+		if schema.IsForbiddenHeader(it.Name) || utils.HasControl(it.Value) {
 			return nil, fmt.Errorf("introspecting %s: fixed header %q can't be sent", where, it.Name)
 		}
 		req.Header.Set(it.Name, it.Value)

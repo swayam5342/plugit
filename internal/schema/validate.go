@@ -10,6 +10,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/swayam5342/plugit/internal/model"
+	"github.com/swayam5342/plugit/internal/utils"
 )
 
 // ErrInvalidArgs means tool-call arguments failed validation.
@@ -117,7 +118,7 @@ func minimalSchema(t model.Tool) []byte {
 	if len(required) > 0 {
 		out["required"] = required
 	}
-	return mustJSON(out)
+	return utils.MustJSON(out)
 }
 
 func shorten(s string) string {

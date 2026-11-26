@@ -17,6 +17,7 @@ import (
 
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/naming"
+	"github.com/swayam5342/plugit/internal/utils"
 )
 
 type builder struct {
@@ -365,7 +366,7 @@ func (b *builder) v2Op(method, path string, item *v2.PathItem, op *v2.Operation,
 				formAnyRequired = true
 			}
 		default:
-			b.addParam(t, c, p.Name, p.In, p.Required != nil && *p.Required, p.Description, mustJSON(v2ParamSchema(c, p)))
+			b.addParam(t, c, p.Name, p.In, p.Required != nil && *p.Required, p.Description, utils.MustJSON(v2ParamSchema(c, p)))
 		}
 	}
 	if len(form) > 0 && t.HTTP.Body == nil {
@@ -378,7 +379,7 @@ func (b *builder) v2Op(method, path string, item *v2.PathItem, op *v2.Operation,
 		if len(formRequired) > 0 {
 			obj["required"] = formRequired
 		}
-		t.HTTP.Body = formBody(c, ct, mustJSON(obj), nil, formAnyRequired)
+		t.HTTP.Body = formBody(c, ct, utils.MustJSON(obj), nil, formAnyRequired)
 	}
 	t.Issues = c.issues
 	b.addOp(t, op.OperationId)
@@ -423,7 +424,7 @@ func formBody(c *converter, ct string, raw json.RawMessage, enc map[string]model
 	if len(enc) == 0 {
 		enc = nil
 	}
-	return &model.Body{ContentType: ct, Schema: mustJSON(schema), Required: required, Encoding: enc}
+	return &model.Body{ContentType: ct, Schema: utils.MustJSON(schema), Required: required, Encoding: enc}
 }
 
 // isFileField reports a schema whose value is file content.

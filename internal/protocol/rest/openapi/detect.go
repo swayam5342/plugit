@@ -3,9 +3,9 @@ package openapi
 import (
 	"bytes"
 	"encoding/json"
-)
 
-var utf8BOM = []byte{0xef, 0xbb, 0xbf}
+	"github.com/swayam5342/plugit/internal/utils"
+)
 
 // rootKeys are the top-level keys that mark an OpenAPI 3.x or Swagger 2.0
 // document.
@@ -32,7 +32,7 @@ var rootKeys = [...]string{"openapi", "swagger"}
 // It is linear in len(data), does not allocate on the YAML path and never
 // panics.
 func IsOpenAPI(data []byte) bool {
-	data = bytes.TrimPrefix(data, utf8BOM)
+	data = utils.TrimBOM(data)
 	if trimmed := bytes.TrimLeft(data, " \t\r\n"); len(trimmed) > 0 && trimmed[0] == '{' {
 		return jsonHasRootKey(trimmed)
 	}

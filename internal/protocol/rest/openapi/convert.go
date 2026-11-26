@@ -11,6 +11,7 @@ import (
 
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/naming"
+	"github.com/swayam5342/plugit/internal/utils"
 )
 
 type converter struct {
@@ -43,15 +44,7 @@ func (c *converter) hidden(where, s string) {
 // raw converts sp and encodes it. Encoding a map sorts keys, so output is
 // deterministic.
 func (c *converter) raw(sp *base.SchemaProxy) json.RawMessage {
-	return mustJSON(c.proxy(sp, 0))
-}
-
-func mustJSON(v any) json.RawMessage {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return json.RawMessage(`{}`)
-	}
-	return b
+	return utils.MustJSON(c.proxy(sp, 0))
 }
 
 func (c *converter) proxy(sp *base.SchemaProxy, depth int) map[string]any {
