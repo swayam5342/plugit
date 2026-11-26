@@ -133,7 +133,7 @@ func syncAPI(ctx context.Context, p config.Paths, name string, s syncSettings) e
 	}
 	diff := curate.DiffManifests(old, updated, *cfg)
 
-	findings := lint.Run(lint.Input{API: *cfg, Tools: updated.Tools, Hidden: hiddenParams(cfg.Auth, cfg.Fixed)})
+	findings := lint.Run(lint.Input{API: *cfg, Tools: updated.Tools, Hidden: hiddenParams(cfg.Auth, cfg.Fixed), Warnings: updated.Warnings})
 	lintNote := ""
 	if n := lint.Summarize(findings).Errors; n > 0 {
 		lintNote = fmt.Sprintf("%s in the new spec for tools you serve (run plugit lint %s after syncing to see them all)", plural(n, "lint error"), name)

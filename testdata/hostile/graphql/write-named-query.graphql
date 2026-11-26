@@ -1,0 +1,16 @@
+# Hostile: a query whose name says it changes something (lint L015, T18). A
+# GraphQL tool's safety comes from its operation type, so "query resetCache"
+# is read-only and stays listed under policy read-only: lint must flag it.
+# "mutation deleteX" is already Destructive, so it is not an L015 finding.
+
+type Query {
+  "Reset the server-side cache."
+  resetCache: Boolean
+  "Fetch one item."
+  item(id: ID!): String
+}
+
+type Mutation {
+  "Delete one item."
+  deleteX(id: ID!): Boolean
+}

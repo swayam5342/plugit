@@ -1,5 +1,5 @@
 // Package lint checks an API's toolsets for quality and safety problems
-// (SPEC 4, rules L001-L019). It is pure: it looks only at the parsed
+// (SPEC 4, rules L001-L020). It is pure: it looks only at the parsed
 // manifest and the config it is given.
 package lint
 
@@ -74,6 +74,9 @@ type Input struct {
 	API    config.API
 	Tools  []model.Tool
 	Hidden []string
+	// Warnings are the manifest's warnings. Run reads the GraphQL ones for
+	// operations that became no tool (L013 for a subscription).
+	Warnings []string
 }
 
 // Summary counts findings by severity.
@@ -112,6 +115,13 @@ func Run(in Input) []Finding {
 // RunCounting is Run, and also says how many findings the config ignores.
 func RunCounting(in Input) (fs []Finding, ignored int) {
 	fs = apiFindings(in.API)
+	for _, f := range warningFindings(in.Warnings) {
+		if ignoredByAPI(in.API, f) {
+			ignored++
+			continue
+		}
+		fs = append(fs, f)
+	}
 	for _, name := range slices.Sorted(maps.Keys(in.API.Toolsets)) {
 		kept, n := toolset(in, name)
 		fs, ignored = append(fs, kept...), ignored+n
@@ -130,10 +140,51 @@ func Toolset(in Input, name string) []Finding {
 // warnings and infos everywhere, a tool's lint_ignore hides the rule for
 // that tool, errors included.
 func ignored(a config.API, ts config.Toolset, f Finding) bool {
-	if f.Severity < Error && slices.Contains(a.Lint.Ignore, f.Rule) {
+	if ignoredByAPI(a, f) {
 		return true
 	}
 	return f.Tool != "" && slices.Contains(ts.Tools[string(f.Tool)].LintIgnore, f.Rule)
+}
+
+func ignoredByAPI(a config.API, f Finding) bool {
+	return f.Severity < Error && slices.Contains(a.Lint.Ignore, f.Rule)
+}
+
+// subscriptionWarning matches the manifest warning the GraphQL builder
+// writes for a Subscription field, which becomes no tool.
+var subscriptionWarning = regexp.MustCompile(`^subscription "([_A-Za-z][_0-9A-Za-z]*)": subscriptions aren't supported yet \(L013\)$`)
+
+// warningFindings are the API-wide findings read from manifest warnings:
+// L013 for each GraphQL subscription that has no tool.
+func warningFindings(warnings []string) []Finding {
+	var out []Finding
+	for _, w := range warnings {
+		if m := subscriptionWarning.FindStringSubmatch(w); m != nil {
+			out = append(out, Finding{Rule: "L013", Severity: Info,
+				Message: fmt.Sprintf("subscription %q has no tool: subscriptions aren't supported yet", m[1])})
+		}
+	}
+	return out
+}
+
+// writeName returns the name and path writeLike checks: a GraphQL tool's root
+// field (its safety comes from the operation type, so a write-like name only
+// matters on a query), else the tool name without the API prefix and the
+// REST path.
+func writeName(t model.Tool, prefix string) (name, path string) {
+	if t.GraphQL != nil {
+		return t.GraphQL.Field, ""
+	}
+	return strings.TrimPrefix(t.Name, prefix+"_"), t.Key.Path()
+}
+
+// operation names what a tool calls in a message: the HTTP method for REST,
+// the operation key ("query resetCache") otherwise.
+func operation(t model.Tool) string {
+	if m := t.Key.Method(); m != "" {
+		return m
+	}
+	return string(t.Key)
 }
 
 func toolset(in Input, name string) (kept []Finding, n int) {
@@ -193,6 +244,8 @@ func toolset(in Input, name string) (kept []Finding, n int) {
 				l.add("L012", Warn, "%s", is.Detail)
 			case model.IssueUnsupported:
 				l.add("L013", Info, "%s", is.Detail)
+			case model.IssueSelectionTruncated:
+				l.add("L020", Warn, "%s; raise graphql.max_fields or list the fields you need in response_fields", is.Detail)
 			}
 		}
 
@@ -202,8 +255,8 @@ func toolset(in Input, name string) (kept []Finding, n int) {
 		if st.Override == policy.OverrideAllow && t.Safety == model.Destructive && mode != policy.Full {
 			l.add("L009", Error, "destructive tool set to allow has no effect under policy mode %s (it stays %s); remove the override or use mode full", mode, policy.Check(t.Safety, mode, policy.None).Decision)
 		}
-		if w := writeLike(strings.TrimPrefix(t.Name, in.API.Prefix+"_"), t.Key.Path()); w != "" && t.Safety == model.ReadOnly && st.Override == policy.None {
-			l.add("L015", Warn, "%s is treated as read-only but looks like it changes something (%q); if it does, set its policy to confirm or deny", t.Key.Method(), w)
+		if w := writeLike(writeName(t, in.API.Prefix)); w != "" && t.Safety == model.ReadOnly && st.Override == policy.None {
+			l.add("L015", Warn, "%s is treated as read-only but looks like it changes something (%q); if it does, set its policy to confirm or deny", operation(t), w)
 		}
 		if mode == policy.Full && t.Safety == model.Destructive && st.Override != policy.OverrideConfirm && st.Override != policy.OverrideDeny {
 			unconfirmed = append(unconfirmed, t.Name)
