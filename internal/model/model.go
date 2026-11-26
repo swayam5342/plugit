@@ -273,10 +273,14 @@ type Manifest struct {
 // manifest.json so serve never parses a schema (SPEC §3.6, no migration).
 // NormalizedSDL is kept for sync re-validation in the child; OverrideDocs
 // maps toolset -> tool key -> the operation document compiled from that
-// toolset's response_fields.
+// toolset's response_fields. OverrideErrors maps toolset -> tool key -> why
+// that toolset's response_fields didn't compile (a cleaned message naming
+// the path): it is recorded, not fatal, so sync can show it as a diff entry,
+// add and edit refuse it, and serve refuses to start with it.
 type GraphQLSchema struct {
-	NormalizedSDL string                       `json:"normalizedSDL,omitempty"`
-	OverrideDocs  map[string]map[string]string `json:"overrideDocs,omitempty"`
+	NormalizedSDL  string                       `json:"normalizedSDL,omitempty"`
+	OverrideDocs   map[string]map[string]string `json:"overrideDocs,omitempty"`
+	OverrideErrors map[string]map[string]string `json:"overrideErrors,omitempty"`
 }
 
 // GRPCSchema holds the trimmed descriptor set gRPC tools need (M11); an

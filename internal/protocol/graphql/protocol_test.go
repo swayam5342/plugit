@@ -447,3 +447,65 @@ func TestDecodeErrorTextOneLinePerError(t *testing.T) {
 		t.Errorf("Text = %q, want %q (one line per error; a non-list path is dropped)", res.Text, want)
 	}
 }
+
+// A fixed variable's value is a config string; Encode sends it with the JSON
+// type of the declared variable's param (integer, number, boolean, else
+// string), and refuses one that doesn't parse without echoing the value.
+func TestEncodeCoercesFixedVariables(t *testing.T) {
+	tool := model.Tool{
+		Key: "query items", Name: "items",
+		Params: []model.Param{
+			{Name: "first", Bind: model.Binding{In: model.InVariable, Upstream: "first"}, Schema: json.RawMessage(`{"type":"integer","minimum":-2147483648}`), Hidden: true},
+			{Name: "ratio", Bind: model.Binding{In: model.InVariable, Upstream: "ratio"}, Schema: json.RawMessage(`{"type":"number"}`), Hidden: true},
+			{Name: "draft", Bind: model.Binding{In: model.InVariable, Upstream: "draft"}, Schema: json.RawMessage(`{"type":"boolean"}`), Hidden: true},
+			{Name: "org", Bind: model.Binding{In: model.InVariable, Upstream: "org"}, Schema: json.RawMessage(`{"type":"string"}`), Hidden: true},
+			{Name: "role", Bind: model.Binding{In: model.InVariable, Upstream: "role"}, Schema: json.RawMessage(`{"enum":["ADMIN"]}`), Hidden: true},
+		},
+		GraphQL: &model.GraphQLOp{Operation: "query", Field: "items", Document: "query PlugIt_items { items }"},
+	}
+	encode := func(fixed ...Fixed) (map[string]json.RawMessage, error) {
+		req, err := GraphQL{Target: Target{Fixed: fixed}}.Encode(context.Background(), protocol.Call{Tool: tool, Endpoint: endpoint(t)})
+		if err != nil {
+			return nil, err
+		}
+		var wb wireBody
+		raw, _ := io.ReadAll(req.Body)
+		if err := json.Unmarshal(raw, &wb); err != nil {
+			t.Fatal(err)
+		}
+		return wb.Variables, nil
+	}
+	v, err := encode(
+		Fixed{Name: "first", In: model.InVariable, Value: "25"},
+		Fixed{Name: "ratio", In: model.InVariable, Value: "0.5"},
+		Fixed{Name: "draft", In: model.InVariable, Value: "true"},
+		Fixed{Name: "org", In: model.InVariable, Value: "42"},
+		Fixed{Name: "role", In: model.InVariable, Value: "ADMIN"},
+	)
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	want := map[string]string{"first": `25`, "ratio": `0.5`, "draft": `true`, "org": `"42"`, "role": `"ADMIN"`}
+	for k, w := range want {
+		if got := string(v[k]); got != w {
+			t.Errorf("variables.%s = %s, want %s", k, got, w)
+		}
+	}
+	for _, bad := range []Fixed{
+		{Name: "first", In: model.InVariable, Value: "test-token-123", Secret: true},
+		{Name: "ratio", In: model.InVariable, Value: "NaN"},
+		{Name: "draft", In: model.InVariable, Value: "test-token-123", Secret: true},
+	} {
+		_, err := encode(bad)
+		if err == nil {
+			t.Errorf("fixed %s=%q must be refused", bad.Name, bad.Value)
+			continue
+		}
+		if !errors.Is(err, ErrBuild) || !strings.Contains(err.Error(), bad.Name) {
+			t.Errorf("error should be ErrBuild naming %s: %v", bad.Name, err)
+		}
+		if strings.Contains(err.Error(), "test-token-123") {
+			t.Errorf("error echoes the fixed value: %v", err)
+		}
+	}
+}

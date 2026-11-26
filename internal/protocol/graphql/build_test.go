@@ -408,3 +408,60 @@ func TestBuildParamNamesCappedAt64(t *testing.T) {
 		t.Errorf("document must keep the full upstream names: %s", tl.GraphQL.Document)
 	}
 }
+
+// A toolset's response_fields are compiled in the child into a replacement
+// document for that toolset's tool: same operation name, variables and
+// arguments, only the selection differs, and it validates. A path the schema
+// doesn't have is recorded in OverrideErrors (toolset, key, path named), not
+// fatal, so the rest of the manifest still builds; a key that isn't a tool is
+// skipped.
+func TestBuildCompilesResponseFieldOverrides(t *testing.T) {
+	s := loadSDL(t, userFixture(t))
+	m, err := Build(s, FormatSDL, ingest.Options{ResponseFields: map[string]map[string][]string{
+		"default": {"query user": {"id"}, "query org": {"name", "members.id"}, "query gone": {"id"}},
+		"broken":  {"query user": {"id", "nosuch"}},
+		"empty":   {"query user": nil},
+	}})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	g := m.GraphQL
+	if g == nil {
+		t.Fatal("no GraphQL schema data")
+	}
+	const wantUser = "query PlugIt_user($id: ID!) { user(id: $id) { id } }"
+	if got := g.OverrideDocs["default"]["query user"]; got != wantUser {
+		t.Errorf("override for query user = %q\nwant %q", got, wantUser)
+	}
+	org := g.OverrideDocs["default"]["query org"]
+	if !strings.Contains(org, "{ org(id: $id) { name members { id } } }") {
+		t.Errorf("override for query org = %q", org)
+	}
+	for ts, docs := range g.OverrideDocs {
+		for key, doc := range docs {
+			if _, errs := gqlparser.LoadQueryWithRules(s, doc, rules.NewDefaultRules()); errs != nil {
+				t.Errorf("%s/%s override does not validate: %v\n%s", ts, key, errs, doc)
+			}
+		}
+	}
+	if _, ok := g.OverrideDocs["default"]["query gone"]; ok {
+		t.Error("an override for a key that is not a tool must be skipped")
+	}
+	if _, ok := g.OverrideDocs["empty"]; ok {
+		t.Error("an empty response_fields list compiles to no override")
+	}
+	if _, ok := g.OverrideDocs["broken"]; ok {
+		t.Error("a failed compile must not leave an override document")
+	}
+	msg := g.OverrideErrors["broken"]["query user"]
+	if !strings.Contains(msg, "nosuch") {
+		t.Errorf("OverrideErrors[broken][query user] = %q, want it to name the path", msg)
+	}
+	if len(g.OverrideErrors) != 1 {
+		t.Errorf("OverrideErrors = %v, want only the broken toolset", g.OverrideErrors)
+	}
+	// The default documents are untouched.
+	if d := toolByKey(t, m, "query user").GraphQL.Document; strings.Contains(d, "{ id } }") {
+		t.Errorf("the default document was replaced: %q", d)
+	}
+}

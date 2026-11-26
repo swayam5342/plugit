@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -45,8 +46,10 @@ const operationPrefix = "PlugIt_"
 //   - Names follow naming's rules with every query named before every
 //     mutation, so "query user" keeps user and "mutation user" gets user_2.
 //
-// Manifest.GraphQL.NormalizedSDL is s printed back to SDL without built-ins;
-// OverrideDocs is left nil. Title, Version and Endpoints stay empty: a schema
+// Manifest.GraphQL.NormalizedSDL is s printed back to SDL without built-ins.
+// opts.ResponseFields (toolset -> tool key -> paths) is compiled into
+// OverrideDocs, or into OverrideErrors for paths that don't compile (see
+// compileOverrides). Title, Version and Endpoints stay empty: a schema
 // carries none of them. The output is deterministic, tools sorted by key.
 func Build(s *ast.Schema, format string, opts ingest.Options) (*model.Manifest, error) {
 	if s == nil || s.Query == nil {
@@ -56,7 +59,7 @@ func Build(s *ast.Schema, format string, opts ingest.Options) (*model.Manifest, 
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrUnsupportedSpec, err)
 	}
-	b := &builder{s: s, opts: opts, rules: rules.NewDefaultRules()}
+	b := &builder{s: s, opts: opts, rules: rules.NewDefaultRules(), ops: map[model.OpKey]opParts{}}
 	b.m = model.Manifest{
 		Protocol: model.GraphQL,
 		Format:   format,
@@ -97,7 +100,66 @@ func Build(s *ast.Schema, format string, opts ingest.Options) (*model.Manifest, 
 		b.m.Tools = append(b.m.Tools, *t)
 	}
 	slices.SortFunc(b.m.Tools, func(x, y model.Tool) int { return cmp.Compare(x.Key, y.Key) })
+	b.compileOverrides()
 	return &b.m, nil
+}
+
+// compileOverrides compiles each toolset's response_fields for a tool into
+// that tool's operation with the selection replaced (same operation name,
+// variables and arguments), validated like the default document. A list
+// that fails to compile or validate is recorded in OverrideErrors, cleaned,
+// and leaves no document: the failure belongs to that toolset's entry, not
+// to the schema, so the rest of the manifest still builds. A key that isn't
+// one of the built tools is skipped (curation reports it as missing), as is
+// an empty list. Paths arrive as GraphQL field paths: the CLI strips REST's
+// [*] list markers first, since a selection follows lists anyway.
+func (b *builder) compileOverrides() {
+	for _, ts := range slices.Sorted(maps.Keys(b.opts.ResponseFields)) {
+		byKey := b.opts.ResponseFields[ts]
+		for _, key := range slices.Sorted(maps.Keys(byKey)) {
+			paths := byKey[key]
+			parts, ok := b.ops[model.OpKey(key)]
+			if !ok || len(paths) == 0 {
+				continue
+			}
+			doc, err := b.overrideDoc(parts, paths)
+			if err != nil {
+				setNested(&b.m.GraphQL.OverrideErrors, ts, key, naming.CleanText(err.Error(), maxIssueLen))
+				continue
+			}
+			setNested(&b.m.GraphQL.OverrideDocs, ts, key, doc)
+		}
+	}
+}
+
+func (b *builder) overrideDoc(p opParts, paths []string) (string, error) {
+	sel, err := SelectionFromPaths(b.s, p.ret, paths)
+	if err != nil {
+		return "", err
+	}
+	doc := document(p.op, p.field, p.vars, p.args, sel.Render())
+	if err := b.validate(doc); err != nil {
+		return "", fmt.Errorf("response_fields %s: the compiled document failed validation: %w", strings.Join(paths, ", "), err)
+	}
+	return doc, nil
+}
+
+func setNested(m *map[string]map[string]string, outer, inner, v string) {
+	if *m == nil {
+		*m = map[string]map[string]string{}
+	}
+	if (*m)[outer] == nil {
+		(*m)[outer] = map[string]string{}
+	}
+	(*m)[outer][inner] = v
+}
+
+// opParts is what a tool's document is rendered from, kept so a
+// response_fields override can be rendered the same way.
+type opParts struct {
+	op, field  string
+	vars, args []string
+	ret        *ast.Type
 }
 
 type builder struct {
@@ -106,6 +168,7 @@ type builder struct {
 	rules      *rules.Rules
 	m          model.Manifest
 	extraWarns int
+	ops        map[model.OpKey]opParts
 }
 
 func (b *builder) warn(msg string) {
@@ -196,6 +259,7 @@ func (b *builder) tool(op string, f *ast.FieldDefinition) (*model.Tool, error) {
 		return nil, err
 	}
 	t.GraphQL = &model.GraphQLOp{Operation: op, Field: f.Name, Document: doc, Selection: sel.Paths()}
+	b.ops[key] = opParts{op: op, field: f.Name, vars: vars, args: args, ret: f.Type}
 	return t, nil
 }
 

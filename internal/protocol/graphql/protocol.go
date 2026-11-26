@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"mime"
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -101,11 +103,11 @@ func (g GraphQL) Encode(ctx context.Context, c protocol.Call) (*http.Request, er
 	}
 
 	byName := make(map[string]*model.Param, len(c.Tool.Params))
-	declared := make(map[string]bool, len(c.Tool.Params))
+	declared := make(map[string]*model.Param, len(c.Tool.Params))
 	for i := range c.Tool.Params {
 		p := &c.Tool.Params[i]
 		if p.Bind.In == model.InVariable {
-			declared[p.Bind.Upstream] = true
+			declared[p.Bind.Upstream] = p
 		}
 		if !p.Hidden {
 			byName[p.Name] = p
@@ -130,10 +132,14 @@ func (g GraphQL) Encode(ctx context.Context, c protocol.Call) (*http.Request, er
 	for _, f := range g.Target.Fixed {
 		switch f.In {
 		case model.InVariable:
-			// Sent only if the document declares the variable; Task 11 warns at
+			// Sent only if the document declares the variable; serve warns at
 			// load time about fixed variables a tool doesn't declare.
-			if declared[f.Name] {
-				vars[f.Name] = f.Value
+			if p := declared[f.Name]; p != nil {
+				v, err := FixedVariableValue(p.Schema, f.Value)
+				if err != nil {
+					return nil, fmt.Errorf("%w: fixed variable %q: %w", ErrBuild, f.Name, err)
+				}
+				vars[f.Name] = v
 			}
 		case model.InHeader:
 			if schema.IsForbiddenHeader(f.Name) {
@@ -169,6 +175,48 @@ func (g GraphQL) Encode(ctx context.Context, c protocol.Call) (*http.Request, er
 		req.Header.Set("User-Agent", g.Target.UserAgent)
 	}
 	return req, nil
+}
+
+// FixedVariableValue converts a fixed variable's config string to the JSON
+// type of the variable's param schema: integer, number and boolean are
+// parsed, anything else (string, enum, ID, custom scalar) is sent as the
+// string. An error never repeats the value, which may be a secret.
+func FixedVariableValue(paramSchema json.RawMessage, value string) (any, error) {
+	switch t := SchemaType(paramSchema); t {
+	case "integer":
+		n, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		if err != nil {
+			return nil, errors.New("the value is not an integer")
+		}
+		return n, nil
+	case "number":
+		f, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+			return nil, errors.New("the value is not a finite number")
+		}
+		return f, nil
+	case "boolean":
+		b, err := strconv.ParseBool(strings.TrimSpace(value))
+		if err != nil {
+			return nil, errors.New("the value is not true or false")
+		}
+		return b, nil
+	default:
+		return value, nil
+	}
+}
+
+// SchemaType is the "type" of a param's JSON Schema, or "" when it has none
+// (an enum, or a degraded {}) or isn't a single string.
+func SchemaType(paramSchema json.RawMessage) string {
+	var s struct {
+		Type any `json:"type"`
+	}
+	if json.Unmarshal(paramSchema, &s) != nil {
+		return ""
+	}
+	t, _ := s.Type.(string)
+	return t
 }
 
 func checkEndpoint(u *url.URL) error {
