@@ -1,0 +1,157 @@
+package graphql
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+
+	"github.com/vektah/gqlparser/v2"
+	"github.com/vektah/gqlparser/v2/ast"
+	"github.com/vektah/gqlparser/v2/parser"
+)
+
+// Format names (SPEC §3.5 P4).
+const (
+	FormatSDL           = "graphql-sdl"
+	FormatIntrospection = "graphql-introspection"
+)
+
+// ErrUnsupportedSpec wraps every LoadSchema failure: the input is not a GraphQL
+// schema PlugIt can load.
+var ErrUnsupportedSpec = errors.New("unsupported spec: need a GraphQL SDL schema or introspection result")
+
+// sdlKeywords are the tokens a type-system document can start with.
+var sdlKeywords = [...]string{"type", "schema", "interface", "enum", "input", "scalar", "union", "directive", "extend"}
+
+var utf8BOM = []byte{0xef, 0xbb, 0xbf}
+
+// DetectSDL reports whether data is a GraphQL SDL document. The cheap token
+// check runs first; only input that passes it is fully parsed.
+func DetectSDL(data []byte) (ok bool) {
+	if !sdlKeywordFirst(data) {
+		return false
+	}
+	defer func() {
+		if recover() != nil {
+			ok = false
+		}
+	}()
+	_, err := parser.ParseSchema(&ast.Source{Name: "schema.graphql", Input: string(data)})
+	return err == nil
+}
+
+// sdlKeywordFirst reports whether the first token after an optional BOM,
+// whitespace, commas and # comments is an SDL keyword or a """ description.
+// It does not allocate.
+func sdlKeywordFirst(data []byte) bool {
+	data = bytes.TrimPrefix(data, utf8BOM)
+	for i := 0; i < len(data); {
+		switch data[i] {
+		case ' ', '\t', '\n', '\r', ',':
+			i++
+		case '#':
+			for i < len(data) && data[i] != '\n' && data[i] != '\r' {
+				i++
+			}
+		default:
+			rest := data[i:]
+			if len(rest) >= 3 && rest[0] == '"' && rest[1] == '"' && rest[2] == '"' {
+				return true
+			}
+			j := 0
+			for j < len(rest) && isNameByte(rest[j], j > 0) {
+				j++
+			}
+			for _, kw := range sdlKeywords {
+				if string(rest[:j]) == kw {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	return false
+}
+
+func isNameByte(c byte, notFirst bool) bool {
+	return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (notFirst && c >= '0' && c <= '9')
+}
+
+// isName reports whether s matches the GraphQL Name grammar.
+func isName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if !isNameByte(s[i], i > 0) {
+			return false
+		}
+	}
+	return true
+}
+
+// DetectIntrospection reports whether data is a JSON introspection result:
+// an object with a top-level "__schema" object, or one under "data".
+func DetectIntrospection(data []byte) bool {
+	trimmed := bytes.TrimLeft(bytes.TrimPrefix(data, utf8BOM), " \t\r\n")
+	if len(trimmed) == 0 || trimmed[0] != '{' || !bytes.Contains(data, []byte(`"__schema"`)) {
+		return false
+	}
+	_, err := introspectionRoot(trimmed)
+	return err == nil
+}
+
+// introspectionRoot returns the raw "__schema" object of an introspection result.
+func introspectionRoot(data []byte) (json.RawMessage, error) {
+	var env struct {
+		Data *struct {
+			Schema json.RawMessage `json:"__schema"`
+		} `json:"data"`
+		Schema json.RawMessage `json:"__schema"`
+	}
+	if err := json.Unmarshal(data, &env); err != nil {
+		return nil, fmt.Errorf("decoding introspection result: %w", err)
+	}
+	raw := env.Schema
+	if env.Data != nil && len(env.Data.Schema) > 0 {
+		raw = env.Data.Schema
+	}
+	if len(raw) == 0 || raw[0] != '{' {
+		return nil, errors.New(`no "__schema" object at the top level or under "data"`)
+	}
+	return raw, nil
+}
+
+// LoadSchema loads data, in the named format (FormatSDL or
+// FormatIntrospection), into a validated schema. Every error wraps
+// ErrUnsupportedSpec, and a gqlparser panic is recovered into one.
+func LoadSchema(data []byte, format string) (s *ast.Schema, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			s, err = nil, fmt.Errorf("%w: GraphQL parser panic: %v", ErrUnsupportedSpec, r)
+		}
+	}()
+	src := &ast.Source{Name: "schema.graphql"}
+	switch format {
+	case FormatSDL:
+		src.Input = string(data)
+	case FormatIntrospection:
+		sdl, cerr := introspectionToSDL(data)
+		if cerr != nil {
+			return nil, fmt.Errorf("%w: %w", ErrUnsupportedSpec, cerr)
+		}
+		src.Name, src.Input = "introspection.graphql", sdl
+	default:
+		return nil, fmt.Errorf("%w: unknown GraphQL format %q", ErrUnsupportedSpec, format)
+	}
+	s, gerr := gqlparser.LoadSchema(src)
+	if gerr != nil {
+		return nil, fmt.Errorf("%w: %w", ErrUnsupportedSpec, gerr)
+	}
+	if s.Query == nil {
+		// The GraphQL spec requires a query root; without one there is nothing to serve.
+		return nil, fmt.Errorf("%w: schema has no query root type", ErrUnsupportedSpec)
+	}
+	return s, nil
+}

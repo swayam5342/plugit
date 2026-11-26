@@ -13,6 +13,7 @@ require (
 	github.com/pb33f/libopenapi v0.42.5
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/spf13/cobra v1.10.2
+	github.com/vektah/gqlparser/v2 v2.5.64
 	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/sys v0.50.0
 	golang.org/x/term v0.48.0
@@ -20,6 +21,7 @@ require (
 )
 
 require (
+	github.com/agnivade/levenshtein v1.2.2 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect

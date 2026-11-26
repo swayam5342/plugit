@@ -1,0 +1,59 @@
+# A small fake schema for tests: users, orgs and a search union.
+"""A custom directive (defined here so the converter's directive path is exercised)."""
+directive @audit(reason: String = "test") repeatable on FIELD_DEFINITION | OBJECT
+
+"""An ISO-8601 timestamp."""
+scalar DateTime @specifiedBy(url: "https://example.test/datetime")
+
+interface Node {
+  id: ID!
+}
+
+"""A user account."""
+type User implements Node {
+  id: ID!
+  name: String
+  email: String @deprecated(reason: "use contact")
+  createdAt: DateTime
+  org: Org
+  role: Role!
+}
+
+type Org implements Node {
+  id: ID!
+  name: String!
+  members(first: Int = 10, roles: [Role!] = [ADMIN]): [User!]!
+}
+
+enum Role {
+  ADMIN
+  MEMBER
+  GUEST @deprecated(reason: "no longer used")
+}
+
+union SearchResult = User | Org
+
+input UserFilter @oneOf {
+  role: Role
+  nameContains: String
+}
+
+input Page {
+  first: Int = 20
+  after: String
+}
+
+type Query {
+  "Fetch one user."
+  user(id: ID!): User
+  users(filter: UserFilter, page: Page = {first: 5}): [User!]!
+  org(id: ID!): Org
+  node(id: ID!): Node
+  search(term: String!): [SearchResult!]!
+  matrix: [[Int!]]
+}
+
+type Mutation {
+  createUser(name: String!, orgId: ID): User!
+  deleteUser(id: ID!): Boolean
+}
