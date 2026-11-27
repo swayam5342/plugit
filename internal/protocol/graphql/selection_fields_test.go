@@ -1,6 +1,7 @@
 package graphql
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -114,8 +115,10 @@ func TestResponseFieldsUnknownPathErrors(t *testing.T) {
 			if err == nil {
 				t.Fatalf("SelectionFromPaths = %q, want an error", sel.Render())
 			}
-			if !strings.Contains(err.Error(), strings.TrimSpace(tt.path)) {
-				t.Errorf("error %q does not name the path %q", err, tt.path)
+			// The quoted form, so the empty path is checked too
+			// (strings.Contains(s, "") is always true).
+			if want := fmt.Sprintf("response_fields path %q", tt.path); !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q does not name the path: want it to contain %s", err, want)
 			}
 		})
 	}

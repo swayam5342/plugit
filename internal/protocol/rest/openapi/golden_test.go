@@ -120,7 +120,7 @@ func checkGolden(t *testing.T, name string, got []byte) {
 	}
 	want = bytes.ReplaceAll(want, []byte("\r\n"), []byte("\n"))
 	if !bytes.Equal(got, want) {
-		t.Errorf("%s differs from golden; run `go test ./internal/openapi -run Golden -update` and review the diff", name)
+		t.Errorf("%s differs from golden; run `go test ./internal/protocol/rest/openapi -run Golden -update` and review the diff", name)
 	}
 }
 
