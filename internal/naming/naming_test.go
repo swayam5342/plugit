@@ -266,3 +266,18 @@ func TestHidden(t *testing.T) {
 		}
 	}
 }
+
+// ValidToolName is the one MCP tool-name rule (1-64 of [A-Za-z0-9_-]) that
+// a rename in the picker and a toolset override name in plugit.yaml share.
+func TestValidToolName(t *testing.T) {
+	for _, ok := range []string{"a", "listPets", "get_pets-2", "A9", strings.Repeat("x", MaxNameLen)} {
+		if !ValidToolName(ok) {
+			t.Errorf("ValidToolName(%q) = false, want true", ok)
+		}
+	}
+	for _, bad := range []string{"", strings.Repeat("x", MaxNameLen+1), "has space", "dot.name", "slash/name", "é", "tab\t", "new\nline", "名前"} {
+		if ValidToolName(bad) {
+			t.Errorf("ValidToolName(%q) = true, want false", bad)
+		}
+	}
+}

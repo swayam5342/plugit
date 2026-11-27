@@ -260,7 +260,7 @@ func (p *Picker) commitInput() tea.Cmd {
 		o := p.over[k]
 		switch p.mode {
 		case modeRename:
-			if v != "" && !toolNameRe.MatchString(v) {
+			if v != "" && !naming.ValidToolName(v) {
 				p.status = "names use 1-64 letters, digits, '_' or '-'"
 				return nil
 			}

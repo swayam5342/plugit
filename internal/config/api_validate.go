@@ -40,7 +40,6 @@ func checkAuthType(proto model.Protocol, t string) error {
 
 var (
 	prefixRe     = regexp.MustCompile(`^[A-Za-z0-9_-]{0,32}$`)
-	toolNameRe   = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 	headerNameRe = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,256}$")
 	sha256Re     = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	retentionRe  = regexp.MustCompile(`^([0-9]{1,5})d$`)
@@ -248,7 +247,7 @@ func (c *API) validateToolset(name string, ts Toolset, bad func(string, string, 
 		if !model.KeyValid(proto, k) || (proto == model.REST && key != k.Method()+" "+k.Path()) {
 			bad(kf, "not a valid %s tool key (REST keys look like \"GET /pets/{id}\")", proto)
 		}
-		if o.Name != "" && !toolNameRe.MatchString(o.Name) {
+		if o.Name != "" && !naming.ValidToolName(o.Name) {
 			bad(kf+".name", "use 1-64 letters, digits, '_' or '-'")
 		}
 		if _, err := policy.ParseOverride(o.Policy); err != nil {

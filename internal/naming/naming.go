@@ -23,6 +23,23 @@ const MaxNameLen = 64
 // DefaultMaxDescription caps tool descriptions, in runes.
 const DefaultMaxDescription = 1024
 
+// ValidToolName reports whether s is a tool name PlugIt accepts: 1 to
+// MaxNameLen characters, each a letter, digit, '_' or '-' (the MCP tool-name
+// rule Sanitize and Assign produce). A rename in the picker and a toolset
+// override's name in plugit.yaml are both checked with it.
+func ValidToolName(s string) bool {
+	if s == "" || len(s) > MaxNameLen {
+		return false
+	}
+	for i := range len(s) {
+		c := s[i]
+		if c != '-' && c != '_' && (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') {
+			return false
+		}
+	}
+	return true
+}
+
 // ToolID returns the first 8 hex characters of sha256(key).
 func ToolID(key model.OpKey) string {
 	sum := sha256.Sum256([]byte(key))

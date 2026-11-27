@@ -9,7 +9,6 @@ import (
 	"errors"
 	"io"
 	"maps"
-	"regexp"
 	"slices"
 	"strings"
 
@@ -34,8 +33,6 @@ const (
 )
 
 const untagged = "(untagged)"
-
-var toolNameRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
 // PickerInput is what the picker edits.
 type PickerInput struct {
