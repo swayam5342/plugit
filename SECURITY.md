@@ -28,7 +28,7 @@ In scope, among other things:
 
 - leaks of credentials or secrets (logs, errors, TUI, client configs, process listings),
 - SSRF or private-network access while `allow_private` is `false`,
-- credentials sent to an origin other than the pinned `base_url`,
+- credentials sent to an origin other than the pinned `endpoint`,
 - external `$ref` resolution or resource-exhaustion problems from a hostile spec,
 - argument injection (path traversal, header CR/LF, unknown argument forwarding),
 - bypasses of read-only mode or per-tool `deny`/`confirm` policy.

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -233,5 +234,36 @@ func TestMaxToolsGuard(t *testing.T) {
 	}
 	if err := checkToolCount(nil, 40); err == nil {
 		t.Error("zero tools must be an error")
+	}
+}
+
+// The PLUGIT_* variables plugit run --help lists are exactly the ones
+// resolveRunSettings reads (the M7 rename made PLUGIT_BASE_URL
+// PLUGIT_ENDPOINT).
+func TestRunHelpListsTheEnvVarsItReads(t *testing.T) {
+	read := map[string]bool{}
+	lookup := func(k string) (string, bool) {
+		read[k] = true
+		if k == "PLUGIT_SPEC" {
+			return "api.json", true
+		}
+		return "", false
+	}
+	if _, err := resolveRunSettings(runFlags{}, nil, lookup); err != nil {
+		t.Fatal(err)
+	}
+	listed := map[string]bool{}
+	for _, v := range regexp.MustCompile(`PLUGIT_[A-Z_]+`).FindAllString(newRunCmd(BuildInfo{}).Long, -1) {
+		listed[strings.TrimRight(v, "_")] = true
+	}
+	for k := range read {
+		if !listed[k] {
+			t.Errorf("run reads %s, but --help doesn't list it", k)
+		}
+	}
+	for k := range listed {
+		if !read[k] {
+			t.Errorf("--help lists %s, but run never reads it", k)
+		}
 	}
 }

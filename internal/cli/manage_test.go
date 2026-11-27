@@ -139,10 +139,14 @@ func TestDoctor(t *testing.T) {
 		"Claude Desktop: \"pets\" serves pets",
 		"claude CLI not on PATH",
 		"codex CLI not on PATH",
+		"endpoint uses http", // the config key since M7 (was base_url)
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("doctor should mention %q:\n%s", want, s)
 		}
+	}
+	if strings.Contains(s, "base_url") {
+		t.Errorf("doctor names the old base_url key:\n%s", s)
 	}
 	if problems != 0 {
 		t.Errorf("problems = %d, want 0 (warnings only)", problems)

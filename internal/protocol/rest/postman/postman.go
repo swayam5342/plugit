@@ -46,7 +46,7 @@ type Options = restutil.Options
 // Parse converts a Postman v2.0/v2.1 collection into a manifest.
 // Requests become tools, top-level folders become tags, and the
 // collection's base URL variables are offered as servers (the user still
-// pins base_url, T3). Collection auth is ignored: plugit's auth applies.
+// pins the endpoint, T3). Collection auth is ignored: plugit's auth applies.
 func Parse(data []byte, opts Options) (*model.Manifest, error) {
 	var col pmCollection
 	if err := json.Unmarshal(data, &col); err != nil {

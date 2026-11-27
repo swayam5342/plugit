@@ -302,7 +302,7 @@ func doctorAPI(d doctorDeps, r *report, name string) {
 		r.warn("log.response_preview is true")
 	}
 	if strings.HasPrefix(cfg.Endpoint, "http://") {
-		r.warn("base_url uses http: credentials and data travel unencrypted")
+		r.warn("endpoint uses http: credentials and data travel unencrypted")
 	}
 
 	res := &secrets.Resolver{LookupEnv: d.lookupEnv, Keyring: d.keyring}

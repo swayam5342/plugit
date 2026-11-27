@@ -77,7 +77,7 @@ func TestDiffManifests(t *testing.T) {
 	}
 }
 
-// Trailing slashes don't count as a server change, and a base_url the new
+// Trailing slashes don't count as a server change, and an endpoint the new
 // spec still lists is reported as such.
 func TestDiffServersNormalized(t *testing.T) {
 	old := &model.Manifest{Endpoints: []string{"https://api.example.test/v1/"}}

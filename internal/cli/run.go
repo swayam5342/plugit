@@ -62,7 +62,7 @@ func newRunCmd(info BuildInfo) *cobra.Command {
 		Long: `Serve a spec's operations as MCP tools on stdio, without saving anything.
 
 Settings come from flags, then PLUGIT_* environment variables (PLUGIT_SPEC,
-PLUGIT_BASE_URL, PLUGIT_PREFIX, PLUGIT_MODE, PLUGIT_TAGS, PLUGIT_METHODS,
+PLUGIT_ENDPOINT, PLUGIT_PREFIX, PLUGIT_MODE, PLUGIT_TAGS, PLUGIT_METHODS,
 PLUGIT_PATHS, PLUGIT_MAX_TOOLS, PLUGIT_TIMEOUT, PLUGIT_ALLOW_PRIVATE,
 PLUGIT_ALLOW_INSECURE, PLUGIT_FORMAT, PLUGIT_INTROSPECT,
 PLUGIT_HEADER, PLUGIT_FIXED), then defaults.

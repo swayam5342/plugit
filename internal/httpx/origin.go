@@ -27,7 +27,7 @@ func Origin(u *url.URL) string {
 
 // SameOrigin reports whether a and b have exactly the same scheme, host and
 // port. Credentials are attached only when this holds against the pinned
-// base_url (SPEC §5.3, T8).
+// endpoint (SPEC §5.3, T8).
 func SameOrigin(a, b *url.URL) bool {
 	oa, ob := Origin(a), Origin(b)
 	return oa != "" && oa == ob

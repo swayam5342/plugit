@@ -374,3 +374,18 @@ func TestL007ChecksSchemaValues(t *testing.T) {
 		t.Errorf("clean values flagged: %+v", *f)
 	}
 }
+
+// L011 names the config key as it is now, endpoint (the M7 rename of
+// base_url), in both severities.
+func TestL011NamesEndpoint(t *testing.T) {
+	for _, insecure := range []bool{false, true} {
+		a := api(all("GET /pets"))
+		a.Endpoint = "http://pets.example.test"
+		a.Auth = config.Auth{Type: config.AuthBearer, Secret: "env:T"}
+		a.Network.AllowInsecure = insecure
+		f := find(Run(Input{API: a, Tools: []model.Tool{tl("GET", "/pets", "listPets", "List pets.")}}), "L011")
+		if f == nil || !strings.HasPrefix(f.Message, "endpoint http://pets.example.test ") || strings.Contains(f.Message, "base_url") {
+			t.Errorf("allow_insecure=%v: L011 = %+v, want a message about the endpoint", insecure, f)
+		}
+	}
+}
