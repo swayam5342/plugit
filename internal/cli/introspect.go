@@ -15,6 +15,7 @@ import (
 	"github.com/swayam5342/plugit/internal/httpx"
 	"github.com/swayam5342/plugit/internal/invoke"
 	"github.com/swayam5342/plugit/internal/protocol/graphql"
+	"github.com/swayam5342/plugit/internal/redact"
 	"github.com/swayam5342/plugit/internal/schema"
 	"github.com/swayam5342/plugit/internal/secrets"
 	"github.com/swayam5342/plugit/internal/spec"
@@ -186,7 +187,10 @@ func introspectAPI(ctx context.Context, cfg *config.API, d runDeps) (raw []byte,
 // time caps, the SSRF guard, allowPrivate honored, same-origin redirects
 // only). invoke.Fetch attaches cred only to the endpoint's origin (T8);
 // fx's header items are set as the GraphQL protocol sets fixed headers. A
-// non-2xx status or a result over the cap is an error.
+// non-2xx status or a result over the cap is an error. So is a result that
+// carries the credential or a secret fixed value in any encoded form (T11):
+// it would become the snapshot, the manifest and tool descriptions, so
+// invoke.Fetch refuses it and nothing is saved.
 func introspect(ctx context.Context, endpoint *url.URL, cred invoke.Credential, fx resolvedFixed, allowPrivate bool) ([]byte, error) {
 	where := safeLocation(endpoint.String())
 	body, err := json.Marshal(map[string]string{"query": introspectionQuery})
@@ -213,8 +217,11 @@ func introspect(ctx context.Context, endpoint *url.URL, cred invoke.Credential, 
 	}
 
 	client := httpx.NewClient(httpx.Options{AllowPrivate: allowPrivate, Timeout: spec.DefaultTimeout, MaxResponseBytes: config.MaxSnapshotBytes})
-	data, truncated, status, err := invoke.Fetch(ctx, invoke.Deps{Doer: client, Cred: cred, Endpoint: endpoint}, req)
+	red := redact.New(redact.Options{Secrets: fx.secretValues()})
+	data, truncated, status, err := invoke.Fetch(ctx, invoke.Deps{Doer: client, Cred: cred, Endpoint: endpoint, Redactor: red}, req)
 	switch {
+	case errors.Is(err, invoke.ErrSecretInResponse):
+		return nil, fmt.Errorf("introspecting %s: %w; refusing to save it or build tools from it", where, invoke.ErrSecretInResponse)
 	case err != nil:
 		return nil, fmt.Errorf("introspecting %s: %w", where, err)
 	case status < 200 || status > 299:

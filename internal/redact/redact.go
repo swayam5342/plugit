@@ -41,6 +41,7 @@ type Redactor struct {
 	opts     Options
 	headers  map[string]bool
 	params   map[string]bool
+	forms    []string
 	replacer *strings.Replacer
 }
 
@@ -58,10 +59,10 @@ func New(opts Options) *Redactor {
 		r.params[normalizeName(p)] = true
 	}
 
-	forms := secretForms(opts.Secrets)
-	if len(forms) > 0 {
-		pairs := make([]string, 0, 2*len(forms))
-		for _, f := range forms {
+	r.forms = secretForms(opts.Secrets)
+	if len(r.forms) > 0 {
+		pairs := make([]string, 0, 2*len(r.forms))
+		for _, f := range r.forms {
 			pairs = append(pairs, f, Mask)
 		}
 		r.replacer = strings.NewReplacer(pairs...)
@@ -96,6 +97,20 @@ func (r *Redactor) String(s string) string {
 		s = p.re.ReplaceAllString(s, p.repl)
 	}
 	return s
+}
+
+// ContainsSecret reports whether s contains a configured secret in any form
+// String masks (raw, percent-encoded, base64 or JSON-escaped). Known token
+// formats that were never configured don't count. It is for text that must
+// be refused rather than masked, such as an introspection result that
+// becomes spec text.
+func (r *Redactor) ContainsSecret(s string) bool {
+	for _, f := range r.forms {
+		if strings.Contains(s, f) {
+			return true
+		}
+	}
+	return false
 }
 
 // Bytes is String for byte slices. It always returns a new slice.

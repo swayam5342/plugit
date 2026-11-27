@@ -32,7 +32,9 @@ type Credential struct {
 
 // SecretValues lists every credential value that must be redacted wherever it
 // appears (SPEC T11): the credential, the password part of a Basic credential
-// on its own (an upstream may echo just that), and Extra.
+// on its own, the bare token of a header credential written as
+// "<scheme> <token>" ("Bearer x"; an upstream may echo just those), and
+// Extra.
 func (c Credential) SecretValues() []string {
 	var out []string
 	add := func(s string) {
@@ -42,14 +44,33 @@ func (c Credential) SecretValues() []string {
 	}
 	if c.Type != credNone && c.Type != "" {
 		add(c.Secret)
-		if c.Type == credBasic {
+		switch c.Type {
+		case credBasic:
 			if _, pass, ok := strings.Cut(c.Secret, ":"); ok {
 				add(pass)
 			}
+		case credHeader:
+			add(schemeToken(c.Secret))
 		}
 	}
 	for _, e := range c.Extra {
 		add(e)
 	}
 	return out
+}
+
+// schemeToken returns the token of an auth header value "<scheme> <token>"
+// whose scheme is a single word of ASCII letters ("Bearer", "token"), or ""
+// for any other value.
+func schemeToken(v string) string {
+	scheme, tok, ok := strings.Cut(v, " ")
+	if !ok || scheme == "" {
+		return ""
+	}
+	for _, c := range scheme {
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') {
+			return ""
+		}
+	}
+	return strings.TrimSpace(tok)
 }

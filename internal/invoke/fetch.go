@@ -8,7 +8,12 @@ import (
 	"net/http"
 
 	"github.com/swayam5342/plugit/internal/httpx"
+	"github.com/swayam5342/plugit/internal/redact"
 )
+
+// ErrSecretInResponse means a Fetch response body carried a secret in play,
+// so it was refused rather than returned (it would become spec text).
+var ErrSecretInResponse = errors.New("the result contains the API credential or a secret fixed value")
 
 // Fetch sends one request that isn't a tool call (plugit add --introspect)
 // through the same credential step as Perform: the credential is attached
@@ -16,8 +21,16 @@ import (
 // httpx guards and response cap apply) and the body is read. A body over the
 // client's cap is returned truncated, not as an error. Errors describe the
 // failure without the request URL or any credential, and keep the httpx
-// sentinel errors for errors.Is. d.Proto, d.Redactor and d.Timeout are not
-// used.
+// sentinel errors for errors.Is. A 401 calls cred.Unauthorized, as Perform
+// does, so a stale OAuth token is dropped.
+//
+// The body is refused with ErrSecretInResponse when it contains a secret in
+// play, in any form d.Redactor would mask (raw, percent-encoded, base64,
+// JSON-escaped): the credential (an OAuth access token included, which only
+// Fetch knows) and every secret d.Redactor holds (the caller passes the
+// resolved secret fixed values there). The caller turns the body into spec
+// text, which reaches disk, the TUI and the model, so it is refused rather
+// than masked (SPEC T11). d.Proto and d.Timeout are not used.
 func Fetch(ctx context.Context, d Deps, req *http.Request) (body []byte, truncated bool, status int, err error) {
 	cred := d.Cred
 	if cred.Token != nil {
@@ -40,6 +53,16 @@ func Fetch(ctx context.Context, d Deps, req *http.Request) (body []byte, truncat
 	if err != nil && !truncated {
 		err = fmt.Errorf("reading response: %w", err)
 		return nil, false, resp.StatusCode, fetchError{msg: describeTransportError(ctx, err), err: err}
+	}
+	if resp.StatusCode == http.StatusUnauthorized && cred.Unauthorized != nil {
+		cred.Unauthorized()
+	}
+	red := d.Redactor
+	if red == nil {
+		red = redact.New(redact.Options{})
+	}
+	if red.With(cred.SecretValues()...).ContainsSecret(string(body)) {
+		return nil, false, resp.StatusCode, ErrSecretInResponse
 	}
 	return body, truncated, resp.StatusCode, nil
 }

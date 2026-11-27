@@ -324,3 +324,37 @@ func TestWith(t *testing.T) {
 		t.Error("With() without secrets should return the receiver")
 	}
 }
+
+// ContainsSecret detects a configured secret in every form String masks
+// (raw, percent-encoded, base64, JSON-escaped), so a caller can refuse text
+// instead of masking it (an introspection result that becomes spec text).
+// Well-known token formats that were never configured don't count: a schema
+// may document an example token.
+func TestContainsSecret(t *testing.T) {
+	const secret = `s3cr+t/=x y"q\z`
+	r := New(Options{Secrets: []string{secret}})
+	jsonForm, err := json.Marshal(secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, form := range map[string]string{
+		"raw":          secret,
+		"query-escape": url.QueryEscape(secret),
+		"path-escape":  url.PathEscape(secret),
+		"base64-std":   base64.StdEncoding.EncodeToString([]byte(secret)),
+		"base64-url":   base64.RawURLEncoding.EncodeToString([]byte(secret)),
+		"json-escaped": strings.Trim(string(jsonForm), `"`),
+	} {
+		if !r.ContainsSecret(`{"description":"key ` + form + ` here"}`) {
+			t.Errorf("ContainsSecret missed the %s form", name)
+		}
+	}
+	for _, s := range []string{"", "ordinary text", "example " + fakeGitHub, "Bearer abcdefghijkl"} {
+		if r.ContainsSecret(s) {
+			t.Errorf("ContainsSecret(%q) = true, want false (no configured secret)", s)
+		}
+	}
+	if New(Options{}).ContainsSecret(secret) {
+		t.Error("a Redactor without secrets reported one")
+	}
+}
