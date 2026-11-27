@@ -59,6 +59,31 @@ func findings(fs []Finding, rule string) []Finding {
 	return out
 }
 
+// L001 for GraphQL: a field without a description gets the OpKey as its
+// fallback description ("query bare"), which is flagged like REST's
+// "METHOD /path" fallback; a described field is not.
+func TestL001GraphQLMissingDescription(t *testing.T) {
+	m := gqlManifest(t, `
+type Query {
+  "Look up one thing."
+  described: Int
+  bare: Int
+}
+type Mutation { touch: Int }
+`, ingest.Options{})
+	got := findings(Run(gqlInput(m)), "L001")
+	var tools []string
+	for _, f := range got {
+		if f.Severity != Warn {
+			t.Errorf("L001 = %+v, want a warning", f)
+		}
+		tools = append(tools, string(f.Tool))
+	}
+	if slices.Sort(tools); !slices.Equal(tools, []string{"mutation touch", "query bare"}) {
+		t.Errorf("L001 on %q, want mutation touch and query bare", tools)
+	}
+}
+
 // L020: a default selection cut short by graphql.max_fields is a warning on
 // that tool, naming the cap; a selection that fits is not flagged.
 func TestL020GraphQLTruncated(t *testing.T) {

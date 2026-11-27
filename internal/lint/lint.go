@@ -167,6 +167,16 @@ func warningFindings(warnings []string) []Finding {
 	return out
 }
 
+// missingDescription reports whether t's description is only the builder's
+// fallback: "METHOD /path" for REST, the OpKey ("query user") for every
+// other protocol (L001).
+func missingDescription(t model.Tool) bool {
+	if t.Key.Method() == "" {
+		return t.Description == string(t.Key)
+	}
+	return t.Description == t.Key.Method()+" "+t.Key.Path()
+}
+
 // writeName returns the name and path writeLike checks: a GraphQL tool's root
 // field (its safety comes from the operation type, so a write-like name only
 // matters on a query), else the tool name without the API prefix and the
@@ -216,7 +226,7 @@ func toolset(in Input, name string) (kept []Finding, n int) {
 			squashed[squash(t.Name)] = t
 		}
 
-		if t.Description == t.Key.Method()+" "+t.Key.Path() {
+		if missingDescription(t) {
 			l.add("L001", Warn, "no description in the spec; add one with `plugit edit`")
 		}
 		if o := ts.Tools[string(t.Key)]; utf8.RuneCountInString(o.Description) > maxDescription {
