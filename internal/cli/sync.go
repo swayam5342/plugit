@@ -131,6 +131,17 @@ func syncAPI(ctx context.Context, p config.Paths, name string, s syncSettings) e
 		}
 		return err
 	}
+	if cfg.Source.Format == "" {
+		// A config from before M8 (no source.format): the format was
+		// detected. Detection may land on another protocol; the config can't
+		// follow it there (its format, auth and toolsets belong to its
+		// protocol, and serve refuses a mismatched manifest), so refuse
+		// before anything is written.
+		if got, want := cmp.Or(updated.Protocol, model.REST), model.Protocol(cmp.Or(cfg.Protocol, string(model.REST))); got != want {
+			return fmt.Errorf("%s is a %s API, but its new source was detected as %s (protocol %s); nothing changed (to switch protocols, remove the API and add it again with plugit add)",
+				name, want, cmp.Or(updated.Format, "another format"), got)
+		}
+	}
 	diff := curate.DiffManifests(old, updated, *cfg)
 
 	findings := lint.Run(lint.Input{API: *cfg, Tools: updated.Tools, Hidden: hiddenParams(cfg.Auth, cfg.Fixed), Warnings: updated.Warnings})
@@ -166,6 +177,15 @@ func syncAPI(ctx context.Context, p config.Paths, name string, s syncSettings) e
 	}
 
 	cfg.Source.SHA256 = sum
+	if cfg.Source.Format == "" {
+		// Record the detected format with the adopted result, so the next
+		// sync and serve's re-parse force it instead of detecting again
+		// (SPEC P4). A format that is already set is never changed.
+		cfg.Source.Format = updated.Format
+		if cfg.Protocol == "" {
+			cfg.Protocol = string(cmp.Or(updated.Protocol, model.REST))
+		}
+	}
 	if s.spec != "" {
 		cfg.Source.URL = sourceLocation(s.spec)
 	}

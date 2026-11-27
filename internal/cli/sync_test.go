@@ -14,6 +14,7 @@ import (
 
 	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/curate"
+	"github.com/swayam5342/plugit/internal/ingest"
 	"github.com/swayam5342/plugit/internal/isolate"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/tui"
@@ -328,4 +329,121 @@ func TestSyncRevalidatesDocuments(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "query user") {
 		t.Errorf("serve after adopting must refuse the broken response_fields: %v", err)
 	}
+}
+
+// SPEC P4: a config written before M8 has no source.format. Sync detects the
+// format as before, and once the result is adopted it records the format
+// (and protocol) in the same write, so the next sync forces it instead of
+// detecting again. The config version is unchanged: source.format is a
+// version-1 key.
+func TestSyncRecordsDetectedFormat(t *testing.T) {
+	up := newUpstream(t)
+	p := setupSyncAPI(t, up.URL)
+	cfgPath, _ := p.APIConfig("pets")
+	if raw, _ := os.ReadFile(cfgPath); strings.Contains(string(raw), "format:") || strings.Contains(string(raw), "protocol:") {
+		t.Fatalf("fixture is not a pre-M8 config:\n%s", raw)
+	}
+	var formats []string
+	s := syncDeps(&bytes.Buffer{})
+	s.parse = func(ctx context.Context, data []byte, format string, opts ingest.Options) (*model.Manifest, error) {
+		formats = append(formats, format)
+		return isolate.Parse(ctx, data, format, opts)
+	}
+	s.spec, s.yes = writeSpec(t, petSpecV2), true
+	if err := syncAPI(t.Context(), p, "pets", s); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadAPI(p, "pets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Source.Format != "openapi" || cfg.Protocol != string(model.REST) || cfg.Version != config.CurrentVersion {
+		t.Errorf("after sync: format %q, protocol %q, version %d; want openapi, rest, %d",
+			cfg.Source.Format, cfg.Protocol, cfg.Version, config.CurrentVersion)
+	}
+	if raw, _ := os.ReadFile(cfgPath); !strings.Contains(string(raw), "format: openapi") {
+		t.Errorf("source.format not written:\n%s", raw)
+	}
+	// The new source is the last parse of a sync (the saved one may be
+	// re-parsed first, to diff against).
+	if got := formats[len(formats)-1]; got != "" {
+		t.Errorf("first sync parsed the new source with format %q, want detection", got)
+	}
+
+	// The next sync forces the recorded format.
+	formats = nil
+	s.spec = writeSpec(t, strings.Replace(petSpecV2, "version: '2'", "version: '3'", 1))
+	if err := syncAPI(t.Context(), p, "pets", s); err != nil {
+		t.Fatal(err)
+	}
+	if len(formats) == 0 || slices.Contains(formats, "") {
+		t.Errorf("parse formats = %q, want every parse forced to openapi", formats)
+	}
+}
+
+// Sync never changes a source.format that is already set, whatever the
+// manifest says.
+func TestSyncKeepsSetFormat(t *testing.T) {
+	up := newUpstream(t)
+	p := setupSyncAPI(t, up.URL)
+	cfgPath, _ := p.APIConfig("pets")
+	raw, _ := os.ReadFile(cfgPath)
+	withFormat := strings.Replace(string(raw), "openapi.yaml}", "openapi.yaml, format: openapi}", 1)
+	if err := config.WriteFileAtomic(cfgPath, []byte(withFormat)); err != nil {
+		t.Fatal(err)
+	}
+	s := syncDeps(&bytes.Buffer{})
+	s.parse = func(ctx context.Context, data []byte, format string, opts ingest.Options) (*model.Manifest, error) {
+		m, err := isolate.Parse(ctx, data, format, opts)
+		if m != nil {
+			m.Format = "postman"
+		}
+		return m, err
+	}
+	s.spec, s.yes = writeSpec(t, petSpecV2), true
+	if err := syncAPI(t.Context(), p, "pets", s); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, _ := config.LoadAPI(p, "pets"); cfg.Source.Format != "openapi" {
+		t.Errorf("source.format = %q, want the saved openapi", cfg.Source.Format)
+	}
+}
+
+// A pre-M8 REST config whose new source is detected as another protocol is
+// refused before anything is written: the config would otherwise record a
+// format its protocol doesn't have, against a manifest of another protocol.
+func TestSyncRefusesDetectedProtocolChange(t *testing.T) {
+	up := newUpstream(t)
+	p := setupSyncAPI(t, up.URL)
+	// Build the manifest cache first, as any earlier serve would have.
+	cfg, err := config.LoadAPI(p, "pets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadManifest(t.Context(), p, cfg, runDeps{parse: isolate.Parse}, slog.New(slog.DiscardHandler)); err != nil {
+		t.Fatal(err)
+	}
+	before := map[string][]byte{}
+	for _, path := range apiFilesOf(t, p, "pets") {
+		before[path], _ = os.ReadFile(path)
+	}
+	s := syncDeps(&bytes.Buffer{})
+	s.spec, s.yes = writeSpec(t, gqlSDL), true
+	err = syncAPI(t.Context(), p, "pets", s)
+	if err == nil || !strings.Contains(err.Error(), "graphql") || !strings.Contains(err.Error(), "plugit add") {
+		t.Fatalf("err = %v, want the protocol change refused", err)
+	}
+	for path, want := range before {
+		if got, _ := os.ReadFile(path); !bytes.Equal(got, want) {
+			t.Errorf("%s changed after a refused sync", path)
+		}
+	}
+}
+
+func apiFilesOf(t *testing.T, p config.Paths, name string) []string {
+	t.Helper()
+	cfgPath, _ := p.APIConfig(name)
+	snap, _ := p.SpecSnapshot(name)
+	cache, _ := p.Manifest(name)
+	return []string{cfgPath, snap, cache}
 }
