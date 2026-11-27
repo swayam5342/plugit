@@ -286,7 +286,7 @@ func TestRequestCarriesGraphQLCaps(t *testing.T) {
 // An SDL source parsed through the real child comes back as a GraphQL
 // manifest, built with the caller's selection caps.
 func TestParseGraphQLSDLThroughChild(t *testing.T) {
-	data, err := os.ReadFile("../protocol/graphql/testdata/user.graphql")
+	data, err := os.ReadFile("../../testdata/specs/graphql/user.graphql")
 	if err != nil {
 		t.Fatal(err)
 	}

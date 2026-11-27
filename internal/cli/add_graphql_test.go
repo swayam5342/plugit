@@ -29,7 +29,7 @@ func writeSDL(t *testing.T, content string) string {
 
 func introspectionFixture(t *testing.T) []byte {
 	t.Helper()
-	b, err := os.ReadFile("../protocol/graphql/testdata/user.introspection.json")
+	b, err := os.ReadFile("../../testdata/specs/graphql/user.introspection.json")
 	if err != nil {
 		t.Fatal(err)
 	}

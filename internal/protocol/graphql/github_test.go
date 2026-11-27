@@ -121,7 +121,7 @@ func TestGitHubSDLGolden(t *testing.T) {
 		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%d\n", tl.Key, tl.Name, tl.Safety, strings.Join(params, ","), len(tl.GraphQL.Selection))
 	}
 	got := []byte(b.String())
-	path := filepath.Join("testdata", "github.graphql.txt")
+	path := filepath.Join("../../../testdata/golden/graphql", "github.graphql.txt")
 	if *update {
 		if err := os.WriteFile(path, got, 0o600); err != nil {
 			t.Fatal(err)

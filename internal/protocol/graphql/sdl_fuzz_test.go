@@ -25,7 +25,7 @@ import (
 // selection within max_fields, every document valid against the schema, the
 // normalized SDL reloadable, and the build deterministic.
 func FuzzSDL(f *testing.F) {
-	for _, glob := range []string{"testdata/*.graphql", "testdata/*.json", hostileDir + "/*.graphql"} {
+	for _, glob := range []string{fixtureDir + "/*.graphql", fixtureDir + "/*.json", hostileDir + "/*.graphql"} {
 		files, err := filepath.Glob(glob)
 		if err != nil {
 			f.Fatal(err)

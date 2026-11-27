@@ -22,7 +22,7 @@ const swaggerYAML = "swagger: '2.0'\ninfo: {title: t, version: '1'}\npaths: {}\n
 const postmanDoc = `{"info":{"name":"c","schema":"https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
 "item":[{"name":"list","request":{"method":"GET","url":{"raw":"https://api.example.test/pets","host":["api","example","test"],"path":["pets"]}}}]}`
 
-const graphqlTestdata = "../protocol/graphql/testdata"
+const graphqlTestdata = "../../testdata/specs/graphql"
 
 func readFixture(t *testing.T, path string) []byte {
 	t.Helper()

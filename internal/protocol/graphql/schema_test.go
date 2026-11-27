@@ -13,9 +13,12 @@ import (
 	"github.com/vektah/gqlparser/v2/ast"
 )
 
+// fixtureDir holds the hand-written GraphQL fixtures shared with other packages.
+const fixtureDir = "../../../testdata/specs/graphql"
+
 func readFixture(t *testing.T, name string) []byte {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("testdata", name))
+	data, err := os.ReadFile(filepath.Join(fixtureDir, name))
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}

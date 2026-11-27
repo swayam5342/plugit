@@ -238,7 +238,7 @@ func TestL007Credentials(t *testing.T) {
 // The L007 suite: every tool in every poisoned fixture is caught (SPEC M4
 // exit criterion).
 func TestL007PoisonedFixtures(t *testing.T) {
-	for _, path := range []string{"../../testdata/hostile/poisoned-description.yaml", "testdata/poisoned-instructions.yaml"} {
+	for _, path := range []string{"../../testdata/hostile/poisoned-description.yaml", "../../testdata/hostile/lint/poisoned-instructions.yaml"} {
 		t.Run(filepath.Base(path), func(t *testing.T) {
 			data, err := os.ReadFile(path)
 			if err != nil {

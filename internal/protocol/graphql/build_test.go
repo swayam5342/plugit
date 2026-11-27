@@ -27,7 +27,7 @@ func build(t *testing.T, sdl string, opts ingest.Options) *model.Manifest {
 
 func userFixture(t *testing.T) string {
 	t.Helper()
-	b, err := os.ReadFile("testdata/user.graphql")
+	b, err := os.ReadFile(fixtureDir + "/user.graphql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,10 +281,10 @@ func TestBuildNormalizedSDLRoundTrip(t *testing.T) {
 			var err error
 			format := FormatSDL
 			if name == "sdl" {
-				s1Data, err = os.ReadFile("testdata/user.graphql")
+				s1Data, err = os.ReadFile(fixtureDir + "/user.graphql")
 			} else {
 				format = FormatIntrospection
-				s1Data, err = os.ReadFile("testdata/user.introspection.json")
+				s1Data, err = os.ReadFile(fixtureDir + "/user.introspection.json")
 			}
 			if err != nil {
 				t.Fatal(err)
