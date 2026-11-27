@@ -42,7 +42,8 @@ const operationPrefix = "PlugIt_"
 //     tools, so introspection is not exposed.
 //   - Subscription fields become no tool, only a manifest warning (lint L013).
 //   - A field whose generated document fails validation is dropped with a
-//     manifest warning; the rest still build.
+//     manifest warning (add prints it; lint L013 reads it); the rest still
+//     build.
 //   - Names follow naming's rules with every query named before every
 //     mutation, so "query user" keeps user and "mutation user" gets user_2.
 //

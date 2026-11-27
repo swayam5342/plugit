@@ -174,6 +174,38 @@ func TestAddFromRun(t *testing.T) {
 	}
 }
 
+// add prints the manifest's warnings (operations that became no tool, and
+// the like) to stderr for every protocol, since no other command shows
+// them; stdout, which carries the summary, doesn't change.
+func TestAddPrintsManifestWarnings(t *testing.T) {
+	restSpec := fmt.Sprintf(petSpec, "https://api.example.test") + `    trace:
+      operationId: tracePets
+      responses: {'200': {description: ok}}
+`
+	cases := []struct {
+		name, spec, want string
+	}{
+		{"rest", writeSpec(t, restSpec), "warning: TRACE /pets/{id} skipped"},
+		{"graphql", writeSDL(t, gqlSDL+"type Subscription { onEvent: String }"), `warning: subscription "onEvent": subscriptions aren't supported yet`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, d, out := addEnv(t)
+			if err := addAPI(t.Context(), addSettingsFor(tc.spec, func(s *addSettings) {
+				s.fromRun, s.baseURL = true, "https://api.example.test/graphql"
+			}), d); err != nil {
+				t.Fatal(err)
+			}
+			if stderr := d.stderr.(*bytes.Buffer).String(); !strings.Contains(stderr, tc.want) {
+				t.Errorf("stderr = %q, want a line starting %q", stderr, tc.want)
+			}
+			if strings.Contains(out.String(), "warning") {
+				t.Errorf("stdout carries the warnings: %s", out)
+			}
+		})
+	}
+}
+
 func must(s string, err error) string {
 	if err != nil {
 		panic(err)

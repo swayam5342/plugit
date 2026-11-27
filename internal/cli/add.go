@@ -170,6 +170,7 @@ func addAPI(ctx context.Context, s addSettings, d addDeps) error {
 		return err
 	}
 	m := src.m
+	printManifestWarnings(d.stderr, m.Warnings)
 	baseURL := src.endpoint
 	if baseURL == "" {
 		if baseURL, err = pinBaseURL(s, m.Endpoints, d.confirm); err != nil {
@@ -257,6 +258,23 @@ func addAPI(ctx context.Context, s addSettings, d addDeps) error {
 	}
 	return printAddSummary(d.out, cfg, active)
 }
+
+// printManifestWarnings writes each manifest warning (an operation skipped,
+// a construct ignored) to w as a "warning: " line, cleaned again since it
+// carries spec text. add is the only command that shows them in full; lint
+// reports the GraphQL ones that drop an operation as L013.
+func printManifestWarnings(w io.Writer, warnings []string) {
+	if w == nil {
+		return
+	}
+	for _, msg := range warnings {
+		_, _ = fmt.Fprintf(w, "warning: %s\n", naming.CleanText(msg, maxWarningPrint))
+	}
+}
+
+// maxWarningPrint caps one printed manifest warning (the builders cap them
+// at 300 characters already).
+const maxWarningPrint = 300
 
 // addSource is a parsed source for add: the snapshot to save and its
 // sha256, the manifest, and the endpoint when it is already pinned

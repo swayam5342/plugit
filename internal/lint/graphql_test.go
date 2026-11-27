@@ -137,9 +137,34 @@ type Subscription { onEvent: String onOther(id: ID!): Int }
 
 	// Other manifest warnings are not L013.
 	other := gqlInput(m)
-	other.Warnings = []string{`query "x" skipped: the generated document failed validation: boom`, "... and 3 more warnings"}
+	other.Warnings = []string{"... and 3 more warnings", `query "x": something else`}
 	if got := findings(Run(other), "L013"); len(got) != 0 {
-		t.Errorf("non-subscription warnings produced L013: %+v", got)
+		t.Errorf("unrelated warnings produced L013: %+v", got)
+	}
+}
+
+// L013 for a dropped GraphQL operation: a root field whose generated
+// document failed validation becomes no tool, only a manifest warning, which
+// no command showed. lint turns each into an API-wide info naming the
+// operation (not the validator's text, which echoes schema content).
+func TestL013GraphQLSkippedOperation(t *testing.T) {
+	m := gqlManifest(t, `type Query { now: Int }`, ingest.Options{})
+	in := gqlInput(m)
+	in.Warnings = []string{
+		`query "broken" skipped: the generated document failed validation: input: boom`,
+		`mutation "alsoBroken" skipped: the generated document failed validation: validator panic: x`,
+		"... and 3 more warnings",
+	}
+	got := findings(Run(in), "L013")
+	if len(got) != 2 {
+		t.Fatalf("L013 findings = %+v, want two", got)
+	}
+	for i, want := range []string{`mutation "alsoBroken" has no tool`, `query "broken" has no tool`} { // findings are sorted
+		f := got[i]
+		if f.Severity != Info || f.Toolset != "" || f.Tool != "" || !strings.Contains(f.Message, want) ||
+			!strings.Contains(f.Message, "failed validation") || strings.Contains(f.Message, "boom") {
+			t.Errorf("L013 = %+v, want an API-wide info containing %s", f, want)
+		}
 	}
 }
 

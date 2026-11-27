@@ -75,7 +75,8 @@ type Input struct {
 	Tools  []model.Tool
 	Hidden []string
 	// Warnings are the manifest's warnings. Run reads the GraphQL ones for
-	// operations that became no tool (L013 for a subscription).
+	// operations that became no tool (L013 for a subscription or a root
+	// field whose generated document failed validation).
 	Warnings []string
 }
 
@@ -154,14 +155,25 @@ func ignoredByAPI(a config.API, f Finding) bool {
 // writes for a Subscription field, which becomes no tool.
 var subscriptionWarning = regexp.MustCompile(`^subscription "([_A-Za-z][_0-9A-Za-z]*)": subscriptions aren't supported yet \(L013\)$`)
 
+// skippedWarning matches the manifest warning the GraphQL builder writes for
+// a root field whose generated document failed validation, which becomes no
+// tool. Only the prefix is matched: the validator's text after it is cut to
+// the warning length and echoes schema content.
+var skippedWarning = regexp.MustCompile(`^(query|mutation) "([_A-Za-z][_0-9A-Za-z]*)" skipped: the generated document failed validation`)
+
 // warningFindings are the API-wide findings read from manifest warnings:
-// L013 for each GraphQL subscription that has no tool.
+// L013 ("unsupported feature", the rule for an operation that has no tool)
+// for each GraphQL subscription, and for each root field dropped because its
+// generated document failed validation.
 func warningFindings(warnings []string) []Finding {
 	var out []Finding
 	for _, w := range warnings {
 		if m := subscriptionWarning.FindStringSubmatch(w); m != nil {
 			out = append(out, Finding{Rule: "L013", Severity: Info,
 				Message: fmt.Sprintf("subscription %q has no tool: subscriptions aren't supported yet", m[1])})
+		} else if m := skippedWarning.FindStringSubmatch(w); m != nil {
+			out = append(out, Finding{Rule: "L013", Severity: Info,
+				Message: fmt.Sprintf("%s %q has no tool: its generated document failed validation against the schema", m[1], m[2])})
 		}
 	}
 	return out
