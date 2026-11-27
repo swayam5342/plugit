@@ -11,16 +11,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/swayam5342/plugit/internal/invoke"
-
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
 	"github.com/swayam5342/plugit/internal/config"
+	"github.com/swayam5342/plugit/internal/invoke"
 	"github.com/swayam5342/plugit/internal/isolate"
 	"github.com/swayam5342/plugit/internal/mcpserver"
 	"github.com/swayam5342/plugit/internal/oauth"
 	"github.com/swayam5342/plugit/internal/policy"
+	"github.com/swayam5342/plugit/internal/redact"
 	"github.com/swayam5342/plugit/internal/secrets"
 	"github.com/swayam5342/plugit/internal/store"
 )
@@ -209,13 +209,18 @@ type fixedItem struct {
 }
 
 // secretValues lists the resolved fixed values that must be redacted wherever
-// they appear (SPEC T11): every non-empty secret value, in config order. It
-// is protocol-neutral, so redaction doesn't depend on which target was built.
+// they appear (SPEC T11): every non-empty secret value, in config order,
+// each followed by its bare token when it is written "<scheme> <token>"
+// (redact.SchemeToken), as for a header credential. It is protocol-neutral,
+// so redaction doesn't depend on which target was built.
 func (fx resolvedFixed) secretValues() []string {
 	var out []string
 	for _, it := range fx.items {
 		if it.Secret && it.Value != "" {
 			out = append(out, it.Value)
+			if tok := redact.SchemeToken(it.Value); tok != "" {
+				out = append(out, tok)
+			}
 		}
 	}
 	return out

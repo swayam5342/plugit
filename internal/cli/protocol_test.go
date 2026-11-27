@@ -105,16 +105,20 @@ func TestResolveProtoBindsGraphQLTarget(t *testing.T) {
 }
 
 // The redaction list for a serve's fixed params is protocol-neutral: every
-// non-empty secret value, in config order, and nothing else.
+// non-empty secret value, in config order, and nothing else. A secret value
+// written "<scheme> <token>" ("Bearer x") also lists its bare token, as a
+// header credential does: an upstream may echo just the token.
 func TestResolvedFixedSecretValues(t *testing.T) {
 	fx := resolvedFixed{items: []fixedItem{
 		{Name: "a", Value: "test-token-123", Secret: true},
 		{Name: "b", Value: "public"},
 		{Name: "c", Value: "", Secret: true},
 		{Name: "d", Value: "test-token-456", Secret: true},
+		{Name: "Authorization", In: "header", Value: "Bearer test-token-789", Secret: true},
+		{Name: "X-Public", In: "header", Value: "Bearer public-123"},
 	}}
 	got := fx.secretValues()
-	want := []string{"test-token-123", "test-token-456"}
+	want := []string{"test-token-123", "test-token-456", "Bearer test-token-789", "test-token-789"}
 	if !slices.Equal(got, want) {
 		t.Errorf("secretValues() = %q, want %q", got, want)
 	}

@@ -27,6 +27,7 @@ import (
 
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/protocol/rest/restutil"
+	"github.com/swayam5342/plugit/internal/redact"
 	"github.com/swayam5342/plugit/internal/schema"
 	"github.com/swayam5342/plugit/internal/utils"
 )
@@ -52,27 +53,23 @@ type Target struct {
 	BaseURL   *url.URL
 	Fixed     []Fixed
 	UserAgent string
-	Extra     []string
 }
 
-// SecretValues lists the target's values that must be redacted wherever they
-// appear (SPEC T11): secret fixed values and Extra. The credential's own values
-// come from invoke.Credential.SecretValues. literal:
-// fixed values are not secrets.
+// SecretValues lists the target's secret fixed values, which must be
+// redacted wherever they appear (SPEC T11), with the same bare-token rule as
+// the CLI's protocol-neutral list (redact.SchemeToken). The CLI builds its
+// redactor from that list; this one is mcpserver.New's default when a
+// Config has no Redactor. The credential's own values come from
+// invoke.Credential.SecretValues; literal: fixed values are not secrets.
 func (tg Target) SecretValues() []string {
 	var out []string
-	add := func(s string) {
-		if s != "" {
-			out = append(out, s)
-		}
-	}
 	for _, f := range tg.Fixed {
-		if f.Secret {
-			add(f.Value)
+		if f.Secret && f.Value != "" {
+			out = append(out, f.Value)
+			if tok := redact.SchemeToken(f.Value); tok != "" {
+				out = append(out, tok)
+			}
 		}
-	}
-	for _, e := range tg.Extra {
-		add(e)
 	}
 	return out
 }

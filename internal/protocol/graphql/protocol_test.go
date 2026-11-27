@@ -210,18 +210,6 @@ func TestEncodeErrorsWithoutPanic(t *testing.T) {
 	}
 }
 
-func TestTargetSecretValues(t *testing.T) {
-	tg := Target{Fixed: []Fixed{
-		{Name: "a", In: model.InHeader, Value: "test-secret-1", Secret: true},
-		{Name: "b", In: model.InVariable, Value: "public"},
-		{Name: "c", In: model.InVariable, Value: "", Secret: true},
-	}}
-	got := tg.SecretValues()
-	if len(got) != 1 || got[0] != "test-secret-1" {
-		t.Errorf("SecretValues() = %q, want [test-secret-1]", got)
-	}
-}
-
 func TestDescribe(t *testing.T) {
 	badge, target := GraphQL{}.Describe(userTool())
 	if badge != "query" || target != "user" {

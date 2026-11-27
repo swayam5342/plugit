@@ -94,6 +94,21 @@ func TestAttachSkippedCrossOrigin(t *testing.T) {
 	}
 }
 
+// A nil pinned endpoint (an mcpserver.Config with neither Endpoint nor
+// Target.BaseURL) fails closed: httpx.Origin(nil) matches no request.
+func TestAttachNilEndpointFailsClosed(t *testing.T) {
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://api.example.test/me", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := attachAuth(req, Credential{Type: "bearer", Secret: attachSecret}, nil); !errors.Is(err, errBuild) {
+		t.Errorf("err = %v, want errBuild", err)
+	}
+	if req.Header.Get("Authorization") != "" {
+		t.Error("credential was attached with no pinned endpoint")
+	}
+}
+
 func TestAttachRejectsControlChars(t *testing.T) {
 	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://api.example.test/me", nil)
 	if err := attachAuth(req, Credential{Type: "bearer", Secret: "a" + string([]byte{13, 10}) + "X-Evil: 1"}, pinned); !errors.Is(err, errBuild) {

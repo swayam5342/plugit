@@ -3,6 +3,8 @@ package invoke
 import (
 	"context"
 	"strings"
+
+	"github.com/swayam5342/plugit/internal/redact"
 )
 
 // Credential types. They match the config auth types (SPEC §3.6); oauth2
@@ -50,27 +52,11 @@ func (c Credential) SecretValues() []string {
 				add(pass)
 			}
 		case credHeader:
-			add(schemeToken(c.Secret))
+			add(redact.SchemeToken(c.Secret))
 		}
 	}
 	for _, e := range c.Extra {
 		add(e)
 	}
 	return out
-}
-
-// schemeToken returns the token of an auth header value "<scheme> <token>"
-// whose scheme is a single word of ASCII letters ("Bearer", "token"), or ""
-// for any other value.
-func schemeToken(v string) string {
-	scheme, tok, ok := strings.Cut(v, " ")
-	if !ok || scheme == "" {
-		return ""
-	}
-	for _, c := range scheme {
-		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') {
-			return ""
-		}
-	}
-	return strings.TrimSpace(tok)
 }

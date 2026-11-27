@@ -53,18 +53,6 @@ type Target struct {
 	UserAgent string
 }
 
-// SecretValues lists the secret fixed values, which must be redacted
-// wherever they appear (SPEC T11).
-func (tg Target) SecretValues() []string {
-	var out []string
-	for _, f := range tg.Fixed {
-		if f.Secret && f.Value != "" {
-			out = append(out, f.Value)
-		}
-	}
-	return out
-}
-
 // GraphQL serves GraphQL tools (SPEC §3.5 P7). It is constructed directly by
 // the CLI (cli.resolveProto), like every protocol.
 type GraphQL struct {

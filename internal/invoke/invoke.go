@@ -88,9 +88,11 @@ func Perform(ctx context.Context, d Deps, t model.Tool, args map[string]any, pic
 	res := d.Proto.Decode(protocol.Call{Tool: t}, resp, body, truncated)
 	// A JSON body may spell a secret with escapes ("tok\/en", or \uXXXX for
 	// any character) that match no secret form as bytes, yet the model
-	// decodes them. When
-	// its canonical spelling holds something to mask, show that spelling so
-	// red.String masks it (T11). Other bodies are shown exactly as sent.
+	// decodes them. When its canonical spelling holds something to mask,
+	// show that spelling so red.String masks it (T11). A body that is not
+	// valid JSON (truncated at the cap, or with trailing junk) has each
+	// complete string literal re-spelled instead. Other bodies are shown
+	// exactly as sent.
 	res.Value = red.JSON(res.Value)
 	if res.Value == nil && res.Binary == nil {
 		res.Text = string(red.JSON([]byte(res.Text)))

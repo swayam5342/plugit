@@ -454,6 +454,41 @@ func TestJSONCanonicalOnlyWhenMasked(t *testing.T) {
 	}
 }
 
+// A body that is not one valid JSON document (cut at the response cap, or
+// with trailing junk) still has each complete "..." string literal decoded
+// and checked: a secret behind escapes inside one is re-spelled so String
+// masks it, and ContainsSecret reports it. Bodies with nothing to mask are
+// returned unchanged.
+func TestJSONLenientOnInvalidBodies(t *testing.T) {
+	const secret = "tok/en+123="
+	r := New(Options{Secrets: []string{secret}})
+	for name, body := range map[string]string{
+		"truncated after the secret": `{"d":"tok\/en+123=","e":"more`,
+		"trailing junk":              `{"d":"` + jsonU(secret) + `"} trailing`,
+		"two documents":              `{} {"d":"tok\/en+123="}`,
+		"in markup":                  `<p>"tok\/en+123="</p>`,
+		"token pattern":              `{"d":"` + jsonU(fakeGitHub) + `",`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := r.String(string(r.JSON([]byte(body))))
+			if strings.Contains(got, secret) || strings.Contains(got, fakeGitHub) || !strings.Contains(got, Mask) {
+				t.Errorf("JSON(%s) then String = %s; want the secret masked", body, got)
+			}
+			if name != "token pattern" && !r.ContainsSecret(body) {
+				t.Errorf("ContainsSecret(%s) = false, want true", body)
+			}
+		})
+	}
+	for _, body := range []string{`{"d":"café","e":`, `"a\/b" "c`, `"\x"`, `{"d":"tok\/en+123=`} {
+		if got := r.JSON([]byte(body)); string(got) != body {
+			t.Errorf("JSON(%s) = %s; want it unchanged", body, got)
+		}
+		if r.ContainsSecret(body) {
+			t.Errorf("ContainsSecret(%s) = true, want false", body)
+		}
+	}
+}
+
 // CanonicalJSON accepts exactly the valid JSON documents, and its output is
 // valid JSON that decodes to the same value.
 func FuzzCanonicalJSON(f *testing.F) {
@@ -479,6 +514,43 @@ func FuzzCanonicalJSON(f *testing.F) {
 		}
 		if !json.Valid(c) || !reflect.DeepEqual(decode(b), decode(c)) {
 			t.Fatalf("CanonicalJSON(%q) = %q: not the same value", b, c)
+		}
+		// The canonical spelling is a fixed point.
+		if again, ok := CanonicalJSON(c); !ok || !bytes.Equal(again, c) {
+			t.Fatalf("CanonicalJSON is not idempotent: %q -> %q", c, again)
+		}
+	})
+}
+
+// A fixed secret spelled with any mix of per-rune escapes (\uXXXX, "\/")
+// inside a JSON string is always caught by ContainsSecret and masked by
+// JSON then String, whether the document is valid or cut short. The fuzz
+// input picks which runes are escaped and the bytes around the document.
+func FuzzEscapedSecretCaught(f *testing.F) {
+	f.Add([]byte{0}, []byte(""))
+	f.Add([]byte{0xff, 0x0f}, []byte(" junk"))
+	f.Add([]byte{0xaa, 0x55, 0x33}, []byte(`,"x":"`))
+	const secret = "tok/en+123=é"
+	r := New(Options{Secrets: []string{secret}})
+	f.Fuzz(func(t *testing.T, mask, tail []byte) {
+		var lit strings.Builder
+		for i, c := range secret {
+			bit := len(mask) > 0 && mask[(i/8)%len(mask)]&(1<<(i%8)) != 0
+			switch {
+			case bit:
+				fmt.Fprintf(&lit, `\u%04x`, c)
+			case c == '/' && len(mask) > 1 && mask[1]&1 != 0:
+				lit.WriteString(`\/`)
+			default:
+				lit.WriteRune(c)
+			}
+		}
+		body := `{"d":"` + lit.String() + `"}` + string(tail)
+		if !r.ContainsSecret(body) {
+			t.Fatalf("ContainsSecret(%q) = false", body)
+		}
+		if got := r.String(string(r.JSON([]byte(body)))); strings.Contains(got, secret) || !strings.Contains(got, Mask) {
+			t.Fatalf("JSON then String(%q) = %q; want the secret masked", body, got)
 		}
 	})
 }

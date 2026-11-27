@@ -63,6 +63,8 @@ jobs:
       matrix:
         target:
           - { pkg: ./internal/redact, fn: FuzzStringNeverLeaksSecret }
+          - { pkg: ./internal/redact, fn: FuzzCanonicalJSON }
+          - { pkg: ./internal/redact, fn: FuzzEscapedSecretCaught }
           - { pkg: ./internal/protocol/rest/openapi, fn: FuzzParse }
           - { pkg: ./internal/protocol/rest/openapi, fn: FuzzRefCheck }
           - { pkg: ./internal/protocol/rest/openapi, fn: FuzzIsOpenAPI }

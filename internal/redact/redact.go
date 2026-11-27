@@ -111,7 +111,8 @@ func (r *Redactor) String(s string) string {
 // When s is a JSON document with escapes, its canonical spelling
 // (CanonicalJSON) is checked too, so every JSON-escape spelling of every
 // form counts ("tok\/en", \uXXXX escapes, or a mix): a JSON parser decodes them
-// all back to the secret.
+// all back to the secret. Text that is not one valid JSON document has each
+// complete string literal checked the same way (canonicalStrings).
 func (r *Redactor) ContainsSecret(s string) bool {
 	if len(r.forms) == 0 {
 		return false
@@ -123,7 +124,10 @@ func (r *Redactor) ContainsSecret(s string) bool {
 		return false
 	}
 	c, ok := CanonicalJSON([]byte(s))
-	return ok && r.containsForm(string(c))
+	if !ok {
+		c = canonicalStrings([]byte(s))
+	}
+	return r.containsForm(string(c))
 }
 
 func (r *Redactor) containsForm(s string) bool {
@@ -255,6 +259,25 @@ func maskCookieValues(v string) string {
 		}
 	}
 	return strings.Join(parts, ";")
+}
+
+// SchemeToken returns the token of an auth header value "<scheme> <token>"
+// whose scheme is a single word of ASCII letters ("Bearer", "token"), or ""
+// for any other value. Callers list it as a secret of its own next to the
+// whole value: an upstream may echo just the token. A short token (as in
+// "Bearer x") then masks every occurrence of those bytes, which over-masks
+// but never leaks.
+func SchemeToken(v string) string {
+	scheme, tok, ok := strings.Cut(v, " ")
+	if !ok || scheme == "" {
+		return ""
+	}
+	for _, c := range scheme {
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') {
+			return ""
+		}
+	}
+	return strings.TrimSpace(tok)
 }
 
 // secretForms expands each secret into every encoding it may appear in,
@@ -441,16 +464,63 @@ func CanonicalJSON(b []byte) ([]byte, bool) {
 // reaches the model, which (like any JSON-parsing client) would decode the
 // escapes. A body without a backslash is returned at once: with no escapes,
 // its strings already read as they decode.
+//
+// A body that is not one valid JSON document (cut at the response cap, or
+// with trailing junk) gets canonicalStrings instead: each complete string
+// literal is re-spelled on its own.
 func (r *Redactor) JSON(b []byte) []byte {
 	if !bytes.ContainsRune(b, '\\') {
 		return b
 	}
 	c, ok := CanonicalJSON(b)
 	if !ok {
-		return b
+		c = canonicalStrings(b)
 	}
 	if s := string(c); r.String(s) == s {
 		return b
 	}
 	return c
+}
+
+// canonicalStrings is the lenient fallback of CanonicalJSON for bytes that
+// are not one valid JSON document: it re-spells each complete "..." string
+// literal that holds an escape and decodes as a JSON string, with Go's
+// escapes and no HTML escaping, and leaves every other byte as it is. A
+// literal cut off at the end of b, or with an invalid escape, is left
+// alone. It is linear in len(b) and returns b itself when nothing changed.
+func canonicalStrings(b []byte) []byte {
+	var out bytes.Buffer
+	enc := json.NewEncoder(&out)
+	enc.SetEscapeHTML(false)
+	last := 0
+	for i := 0; i < len(b); i++ {
+		if b[i] != '"' {
+			continue
+		}
+		j, escaped := i+1, false
+		for ; j < len(b) && b[j] != '"'; j++ {
+			if b[j] == '\\' {
+				escaped = true
+				j++
+			}
+		}
+		if j >= len(b) {
+			break // an unterminated literal
+		}
+		var s string
+		if escaped && json.Unmarshal(b[i:j+1], &s) == nil {
+			out.Write(b[last:i])
+			if enc.Encode(s) != nil {
+				return b
+			}
+			out.Truncate(out.Len() - 1) // Encode's trailing newline
+			last = j + 1
+		}
+		i = j
+	}
+	if last == 0 {
+		return b
+	}
+	out.Write(b[last:])
+	return out.Bytes()
 }
