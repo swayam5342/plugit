@@ -18,9 +18,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/swayam5342/plugit/internal/httpx"
+	"github.com/swayam5342/plugit/internal/invoke"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/policy"
-	"github.com/swayam5342/plugit/internal/protocol/rest"
 	"github.com/swayam5342/plugit/internal/redact"
 	"github.com/swayam5342/plugit/internal/schema"
 )
@@ -110,7 +110,7 @@ func setupFull(t *testing.T, cfg Config, upstream http.HandlerFunc, opts *mcp.Cl
 		cfg.Doer = httpx.NewClient(httpx.Options{AllowPrivate: true})
 	}
 	if cfg.Redactor == nil {
-		cfg.Redactor = redact.New(redact.Options{Secrets: cfg.Target.SecretValues()})
+		cfg.Redactor = redact.New(redact.Options{Secrets: append(cfg.Cred.SecretValues(), cfg.Target.SecretValues()...)})
 	}
 	cfg.Logger = slog.New(slog.NewTextHandler(r.logs, nil))
 	if cfg.Name == "" {
@@ -312,7 +312,7 @@ func (p *panicDoer) Do(req *http.Request) (*http.Response, error) {
 
 func TestPanicIsRecoveredAsToolError(t *testing.T) {
 	r := setup(t, Config{Tools: served(listPets), Mode: policy.ReadOnly, Doer: &panicDoer{},
-		Target: rest.Target{Auth: rest.Auth{Type: rest.AuthBearer, Secret: secret}}}, nil)
+		Cred: invoke.Credential{Type: "bearer", Secret: secret}}, nil)
 	res, err := r.call(t, "listPets", map[string]any{})
 	if err != nil {
 		t.Fatal(err)
@@ -335,7 +335,7 @@ func TestSecretsNeverReachResultsOrLogs(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":"bad token ` + r.Header.Get("Authorization") + `"}`))
 	}
 	r := setup(t, Config{Tools: served(listPets), Mode: policy.ReadOnly,
-		Target: rest.Target{Auth: rest.Auth{Type: rest.AuthBearer, Secret: secret}}}, echo)
+		Cred: invoke.Credential{Type: "bearer", Secret: secret}}, echo)
 	res, err := r.call(t, "listPets", map[string]any{"limit": 1})
 	if err != nil {
 		t.Fatal(err)

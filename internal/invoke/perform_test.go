@@ -54,22 +54,19 @@ func decodeArgs(t *testing.T, raw string) map[string]any {
 
 // perform runs the pipeline the way serve/try do: one hardened client, the
 // target's secrets registered for redaction, Perform around rest.REST.
-func perform(t *testing.T, srvURL string, tl model.Tool, rawArgs string, tg rest.Target, opts httpx.Options, pick *jsonpick.Picker) Result {
+func perform(t *testing.T, srvURL string, tl model.Tool, rawArgs string, cred Credential, opts httpx.Options, pick *jsonpick.Picker) Result {
 	t.Helper()
 	opts.AllowPrivate = true
-	if tg.BaseURL == nil {
-		u, err := url.Parse(srvURL)
-		if err != nil {
-			t.Fatal(err)
-		}
-		tg.BaseURL = u
+	u, err := url.Parse(srvURL)
+	if err != nil {
+		t.Fatal(err)
 	}
-	red := redact.New(redact.Options{Secrets: tg.SecretValues()})
+	red := redact.New(redact.Options{Secrets: cred.SecretValues()})
 	d := Deps{
-		Proto:    rest.REST{Target: tg},
+		Proto:    rest.REST{Target: rest.Target{BaseURL: u}},
 		Doer:     httpx.NewClient(opts),
-		Target:   tg,
-		Endpoint: tg.BaseURL,
+		Cred:     cred,
+		Endpoint: u,
 		Redactor: red,
 		Timeout:  opts.Timeout,
 	}
@@ -88,7 +85,7 @@ func TestPerformJSONPrettyPrinted(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"items":[{"id":1}],"q":"` + r.URL.Query().Get("q") + `"}`))
 	})
-	res := perform(t, s.URL, listThings, `{"q": "cats"}`, rest.Target{}, httpx.Options{}, nil)
+	res := perform(t, s.URL, listThings, `{"q": "cats"}`, Credential{}, httpx.Options{}, nil)
 	if res.IsError {
 		t.Fatalf("unexpected error result: %s", res.Text)
 	}
@@ -106,7 +103,7 @@ func TestPerformHTTPErrorIsToolError(t *testing.T) {
 	s := serve(t, func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
 	})
-	res := perform(t, s.URL, listThings, `{}`, rest.Target{}, httpx.Options{}, nil)
+	res := perform(t, s.URL, listThings, `{}`, Credential{}, httpx.Options{}, nil)
 	if !res.IsError {
 		t.Fatal("HTTP 404 must be an isError result")
 	}
@@ -139,7 +136,7 @@ func TestPerformEmptyAndBinaryAndText(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			res := perform(t, serve(t, tc.h).URL, listThings, `{}`, rest.Target{}, httpx.Options{}, nil)
+			res := perform(t, serve(t, tc.h).URL, listThings, `{}`, Credential{}, httpx.Options{}, nil)
 			if res.IsError || !strings.Contains(res.Text, tc.want) {
 				t.Errorf("isError=%v text=%q, want it to contain %q", res.IsError, res.Text, tc.want)
 			}
@@ -152,7 +149,7 @@ func TestPerformTruncatedResponse(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"data":"` + strings.Repeat("x", 5000) + `"}`))
 	})
-	res := perform(t, s.URL, listThings, `{}`, rest.Target{}, httpx.Options{MaxResponseBytes: 1000}, nil)
+	res := perform(t, s.URL, listThings, `{}`, Credential{}, httpx.Options{MaxResponseBytes: 1000}, nil)
 	if !res.Truncated || !strings.Contains(res.Text, "[truncated: response exceeded 1000 bytes]") {
 		t.Errorf("truncated=%v text tail=%q", res.Truncated, tail(res.Text))
 	}
@@ -180,14 +177,14 @@ func TestPerformEchoSecret(t *testing.T) {
 		base64.StdEncoding.EncodeToString([]byte("alice:" + testSecret))}
 
 	for _, status := range []int{200, 401} {
-		for _, auth := range []rest.Auth{
-			{Type: rest.AuthBearer, Secret: testSecret},
-			{Type: rest.AuthQuery, Param: "key", Secret: testSecret},
-			{Type: rest.AuthBasic, Secret: "alice:" + testSecret},
+		for _, auth := range []Credential{
+			{Type: "bearer", Secret: testSecret},
+			{Type: "query", Param: "key", Secret: testSecret},
+			{Type: "basic", Secret: "alice:" + testSecret},
 		} {
-			t.Run(string(auth.Type)+"/"+http.StatusText(status), func(t *testing.T) {
+			t.Run(auth.Type+"/"+http.StatusText(status), func(t *testing.T) {
 				s := serve(t, echo(status))
-				res := perform(t, s.URL, listThings, `{}`, rest.Target{Auth: auth}, httpx.Options{}, nil)
+				res := perform(t, s.URL, listThings, `{}`, auth, httpx.Options{}, nil)
 				for _, f := range forms {
 					if strings.Contains(res.Text, f) {
 						t.Errorf("result leaks %q:\n%s", f, res.Text)
@@ -209,7 +206,7 @@ func TestPerformNetworkErrorsAreToolErrors(t *testing.T) {
 		s := httptest.NewServer(http.NotFoundHandler())
 		addr := s.URL
 		s.Close()
-		res := perform(t, addr, listThings, `{"q": "x"}`, rest.Target{Auth: rest.Auth{Type: rest.AuthQuery, Param: "key", Secret: testSecret}}, httpx.Options{}, nil)
+		res := perform(t, addr, listThings, `{"q": "x"}`, Credential{Type: "query", Param: "key", Secret: testSecret}, httpx.Options{}, nil)
 		if !res.IsError || !strings.HasPrefix(res.Text, "listThings: ") {
 			t.Errorf("isError=%v text=%q", res.IsError, res.Text)
 		}
@@ -226,7 +223,7 @@ func TestPerformNetworkErrorsAreToolErrors(t *testing.T) {
 			}
 		})
 		defer close(release)
-		res := perform(t, s.URL, listThings, `{}`, rest.Target{}, httpx.Options{Timeout: 150 * time.Millisecond}, nil)
+		res := perform(t, s.URL, listThings, `{}`, Credential{}, httpx.Options{Timeout: 150 * time.Millisecond}, nil)
 		if !res.IsError || !strings.Contains(res.Text, "timed out") {
 			t.Errorf("isError=%v text=%q", res.IsError, res.Text)
 		}
@@ -235,7 +232,7 @@ func TestPerformNetworkErrorsAreToolErrors(t *testing.T) {
 		s := serve(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("hi")) })
 		u, _ := url.Parse(s.URL)
 		red := redact.New(redact.Options{})
-		d := Deps{Proto: rest.REST{Target: rest.Target{BaseURL: u}}, Doer: httpx.NewClient(httpx.Options{}), Target: rest.Target{BaseURL: u}, Endpoint: u, Redactor: red}
+		d := Deps{Proto: rest.REST{Target: rest.Target{BaseURL: u}}, Doer: httpx.NewClient(httpx.Options{}), Endpoint: u, Redactor: red}
 		res := Perform(t.Context(), d, listThings, decodeArgs(t, `{}`), nil)
 		if !res.IsError || !strings.Contains(res.Text, "blocked") || !strings.Contains(res.Text, "allow_private") {
 			t.Errorf("isError=%v text=%q", res.IsError, res.Text)
@@ -245,7 +242,7 @@ func TestPerformNetworkErrorsAreToolErrors(t *testing.T) {
 		var hits atomic.Int32
 		other := serve(t, func(http.ResponseWriter, *http.Request) { hits.Add(1) })
 		s := serve(t, func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, other.URL, http.StatusFound) })
-		res := perform(t, s.URL, listThings, `{}`, rest.Target{Auth: rest.Auth{Type: rest.AuthBearer, Secret: testSecret}}, httpx.Options{}, nil)
+		res := perform(t, s.URL, listThings, `{}`, Credential{Type: "bearer", Secret: testSecret}, httpx.Options{}, nil)
 		if !res.IsError || !strings.Contains(res.Text, "redirect") || hits.Load() != 0 {
 			t.Errorf("isError=%v hits=%d text=%q", res.IsError, hits.Load(), res.Text)
 		}
@@ -256,7 +253,7 @@ func TestPerformBadArgumentsAreToolErrors(t *testing.T) {
 	var hits atomic.Int32
 	s := serve(t, func(http.ResponseWriter, *http.Request) { hits.Add(1) })
 	tl := model.Tool{Name: "getFile", HTTP: &model.HTTPOp{Method: "GET", Path: "/files/{name}"}, Params: []model.Param{paramIn("name", model.InPath, true)}}
-	res := perform(t, s.URL, tl, `{"name": ".."}`, rest.Target{}, httpx.Options{}, nil)
+	res := perform(t, s.URL, tl, `{"name": ".."}`, Credential{}, httpx.Options{}, nil)
 	if !res.IsError || !strings.HasPrefix(res.Text, "getFile: ") || hits.Load() != 0 {
 		t.Errorf("isError=%v hits=%d text=%q", res.IsError, hits.Load(), res.Text)
 	}
@@ -284,7 +281,7 @@ func pick(t *testing.T, fields ...string) *jsonpick.Picker {
 func TestPerformFilterBehaviors(t *testing.T) {
 	t.Run("filters", func(t *testing.T) {
 		s := serve(t, jsonReply(200, `[{"id":1,"name":"a","owner":{"login":"me","avatar":"x"},"body":"`+strings.Repeat("x", 500)+`"}]`))
-		r := perform(t, s.URL, listRepos, `{}`, rest.Target{}, httpx.Options{}, pick(t, "id", "owner.login"))
+		r := perform(t, s.URL, listRepos, `{}`, Credential{}, httpx.Options{}, pick(t, "id", "owner.login"))
 		if r.IsError {
 			t.Fatal(r.Text)
 		}
@@ -297,7 +294,7 @@ func TestPerformFilterBehaviors(t *testing.T) {
 	})
 	t.Run("errors are not filtered", func(t *testing.T) {
 		s := serve(t, jsonReply(422, `{"message":"bad","errors":[{"field":"name"}]}`))
-		r := perform(t, s.URL, listRepos, `{}`, rest.Target{}, httpx.Options{}, pick(t, "id"))
+		r := perform(t, s.URL, listRepos, `{}`, Credential{}, httpx.Options{}, pick(t, "id"))
 		if !r.IsError || !strings.Contains(r.Text, "errors") || strings.Contains(r.Text, "fields:") {
 			t.Errorf("error response filtered:\n%s", r.Text)
 		}
@@ -307,13 +304,13 @@ func TestPerformFilterBehaviors(t *testing.T) {
 			w.Header().Set("Content-Type", "text/plain")
 			_, _ = w.Write([]byte("plain words"))
 		}
-		if r := perform(t, serve(t, text).URL, listRepos, `{}`, rest.Target{}, httpx.Options{}, pick(t, "id")); !strings.Contains(r.Text, "plain words") || strings.Contains(r.Text, "fields:") {
+		if r := perform(t, serve(t, text).URL, listRepos, `{}`, Credential{}, httpx.Options{}, pick(t, "id")); !strings.Contains(r.Text, "plain words") || strings.Contains(r.Text, "fields:") {
 			t.Errorf("non-JSON: %s", r.Text)
 		}
-		if r := perform(t, serve(t, jsonReply(200, `{"id":1,`)).URL, listRepos, `{}`, rest.Target{}, httpx.Options{}, pick(t, "id")); !strings.Contains(r.Text, `{"id":1,`) {
+		if r := perform(t, serve(t, jsonReply(200, `{"id":1,`)).URL, listRepos, `{}`, Credential{}, httpx.Options{}, pick(t, "id")); !strings.Contains(r.Text, `{"id":1,`) {
 			t.Errorf("invalid JSON should pass through: %s", r.Text)
 		}
-		if r := perform(t, serve(t, jsonReply(200, `{"id":1,"x":2}`)).URL, listRepos, `{}`, rest.Target{}, httpx.Options{}, nil); !strings.Contains(r.Text, `"x": 2`) {
+		if r := perform(t, serve(t, jsonReply(200, `{"id":1,"x":2}`)).URL, listRepos, `{}`, Credential{}, httpx.Options{}, nil); !strings.Contains(r.Text, `"x": 2`) {
 			t.Errorf("no fields means no filtering: %s", r.Text)
 		}
 	})
@@ -332,11 +329,10 @@ func TestPerformWithTokenSource(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":"expired token ` + strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ") + `"}`))
 	}
 	s := serve(t, echo)
-	u, _ := url.Parse(s.URL)
-	tg := rest.Target{BaseURL: u, Auth: rest.Auth{Type: rest.AuthBearer,
+	tg := Credential{Type: "bearer",
 		Token:        func(context.Context) (string, error) { return accessToken, nil },
 		Unauthorized: func() { invalidated.Add(1) },
-	}}
+	}
 	res := perform(t, s.URL, listRepos, `{}`, tg, httpx.Options{}, nil)
 	if !res.IsError || res.Status != 401 {
 		t.Fatalf("result = %+v", res)
@@ -352,13 +348,40 @@ func TestPerformWithTokenSource(t *testing.T) {
 func TestPerformTokenSourceFails(t *testing.T) {
 	var hits atomic.Int32
 	s := serve(t, func(_ http.ResponseWriter, _ *http.Request) { hits.Add(1) })
-	u, _ := url.Parse(s.URL)
-	tg := rest.Target{BaseURL: u, Auth: rest.Auth{Type: rest.AuthBearer,
+	tg := Credential{Type: "bearer",
 		Token: func(context.Context) (string, error) {
 			return "", errors.New("OAuth token request failed: invalid_client")
-		}}}
+		}}
 	res := perform(t, s.URL, listRepos, `{}`, tg, httpx.Options{}, nil)
 	if !res.IsError || !strings.Contains(res.Text, "invalid_client") || hits.Load() != 0 {
 		t.Errorf("result = %+v, hits = %d", res, hits.Load())
+	}
+}
+
+// T11 for JSON escapes: an upstream body that spells the credential with
+// JSON escapes ("\u0074est-...", a mix) matches no secret form as bytes, but
+// the model (or a client that parses the JSON) decodes it to the credential.
+// Perform masks it, in a JSON success body and in an error body shown as
+// text. A body with escapes and no secret is shown exactly as it came.
+func TestPerformEchoSecretJSONEscaped(t *testing.T) {
+	cred := Credential{Type: "bearer", Secret: testSecret}
+	for _, spelling := range []string{uEscape(testSecret), "test" + uEscape("-") + "token-123"} {
+		for _, status := range []int{200, 401} {
+			t.Run(http.StatusText(status), func(t *testing.T) {
+				s := serve(t, jsonReply(status, `{"error":"bad key","echo":"`+spelling+`","n":1.50}`))
+				res := perform(t, s.URL, listThings, `{}`, cred, httpx.Options{}, nil)
+				if strings.Contains(res.Text, spelling) || strings.Contains(res.Text, testSecret) || !strings.Contains(res.Text, redact.Mask) {
+					t.Errorf("result leaks the escaped credential:\n%s", res.Text)
+				}
+				if !strings.Contains(res.Text, "1.50") {
+					t.Errorf("numbers must keep their spelling:\n%s", res.Text)
+				}
+			})
+		}
+	}
+	plain := `{"name":"caf` + uEscape("é") + `","path":"a\/b"}`
+	res := perform(t, serve(t, jsonReply(200, plain)).URL, listThings, `{}`, cred, httpx.Options{}, nil)
+	if !strings.Contains(res.Text, `"name": "caf`+uEscape("é")+`"`) || !strings.Contains(res.Text, `"path": "a\/b"`) || strings.Contains(res.Text, redact.Mask) {
+		t.Errorf("a body without a secret changed:\n%s", res.Text)
 	}
 }

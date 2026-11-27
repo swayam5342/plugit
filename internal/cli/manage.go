@@ -40,7 +40,7 @@ func newListCmd(g *globalFlags) *cobra.Command {
 
 type apiSummary struct {
 	Name     string         `json:"name"`
-	BaseURL  string         `json:"base_url,omitempty"`
+	Endpoint string         `json:"endpoint,omitempty"`
 	Mode     string         `json:"mode,omitempty"`
 	Toolsets map[string]int `json:"toolsets,omitempty"`
 	Error    string         `json:"error,omitempty"`
@@ -58,7 +58,7 @@ func listAPIs(p config.Paths, asJSON bool, w io.Writer) error {
 		if err != nil {
 			s.Error = err.Error()
 		} else {
-			s.BaseURL, s.Mode, s.Toolsets = cfg.Endpoint, cfg.Policy.Mode, map[string]int{}
+			s.Endpoint, s.Mode, s.Toolsets = cfg.Endpoint, cfg.Policy.Mode, map[string]int{}
 			for tn, ts := range cfg.Toolsets {
 				s.Toolsets[tn] = len(ts.Tools)
 			}
@@ -75,13 +75,13 @@ func listAPIs(p config.Paths, asJSON bool, w io.Writer) error {
 		return err
 	}
 	tw := tabwriter.NewWriter(w, 2, 4, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "NAME\tTOOLS\tMODE\tBASE URL")
+	_, _ = fmt.Fprintln(tw, "NAME\tTOOLS\tMODE\tENDPOINT")
 	for _, s := range sums {
 		if s.Error != "" {
 			_, _ = fmt.Fprintf(tw, "%s\t-\t-\terror: %s\n", s.Name, firstLine(s.Error))
 			continue
 		}
-		_, _ = fmt.Fprintf(tw, "%s\t%d\t%s\t%s\n", s.Name, s.Toolsets[defaultToolset], s.Mode, s.BaseURL)
+		_, _ = fmt.Fprintf(tw, "%s\t%d\t%s\t%s\n", s.Name, s.Toolsets[defaultToolset], s.Mode, s.Endpoint)
 	}
 	return tw.Flush()
 }
@@ -275,14 +275,14 @@ func doctorAPI(d doctorDeps, r *report, name string) {
 		r.fail("plugit.yaml: %s", strings.ReplaceAll(err.Error(), "\n", "; "))
 		return
 	}
-	r.ok("plugit.yaml valid, base URL %s, %d toolset(s)", cfg.Endpoint, len(cfg.Toolsets))
+	r.ok("plugit.yaml valid, endpoint %s, %d toolset(s)", cfg.Endpoint, len(cfg.Toolsets))
 
 	snap, _ := d.paths.SpecSnapshot(name)
 	if _, sum, err := config.ReadSnapshot(snap); err != nil {
 		r.fail("spec snapshot: %v", err)
 	} else {
 		cache, _ := d.paths.Manifest(name)
-		if _, err := config.ReadManifest(cache, config.CacheKey{SpecSHA256: sum, Prefix: cfg.Prefix, Parser: parserID(d.info), UnsafePaths: cfg.Network.AllowInsecure}); err != nil {
+		if _, err := config.ReadManifest(cache, cfg.CacheKey(sum, parserID(d.info))); err != nil {
 			r.warn("manifest cache missing or stale: the next serve parses the spec once (slower start)")
 		} else {
 			r.ok("manifest cache fresh")
@@ -302,7 +302,7 @@ func doctorAPI(d doctorDeps, r *report, name string) {
 		r.warn("log.response_preview is true")
 	}
 	if strings.HasPrefix(cfg.Endpoint, "http://") {
-		r.warn("base_url uses http: credentials and data travel unencrypted")
+		r.warn("endpoint uses http: credentials and data travel unencrypted")
 	}
 
 	res := &secrets.Resolver{LookupEnv: d.lookupEnv, Keyring: d.keyring}

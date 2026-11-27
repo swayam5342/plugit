@@ -27,6 +27,7 @@ import (
 
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/naming"
+	"github.com/swayam5342/plugit/internal/protocol/rest/restutil"
 )
 
 // Limits on untrusted spec structure.
@@ -34,25 +35,19 @@ const (
 	MaxSchemaDepth = 12
 	MaxSchemaNodes = 5000
 	MaxRefDepth    = 32
-	maxWarnings    = 25
 )
 
 // Sentinel errors callers can match with errors.Is.
 var (
-	ErrUnsupportedSpec = errors.New("unsupported spec: need OpenAPI 3.0, 3.1 or Swagger 2.0")
+	ErrUnsupportedSpec = restutil.ErrUnsupportedSpec
 	ErrRefTooDeep      = errors.New("$ref chain too deep")
 	ErrRefCycle        = errors.New("$ref cycle")
 	ErrParserPanic     = errors.New("spec parser failed")
 	ErrInvalidSpec     = errors.New("invalid spec")
 )
 
-// Options configures Parse.
-type Options struct {
-	Prefix           string
-	MaxDescription   int
-	AllowUnsafePaths bool
-	Logger           *slog.Logger
-}
+// Options configures Parse. It is the options type the REST parsers share.
+type Options = restutil.Options
 
 // Parse builds a Manifest from spec bytes (JSON or YAML).
 func Parse(data []byte, opts Options) (m *model.Manifest, err error) {
@@ -89,7 +84,7 @@ func Parse(data []byte, opts Options) (m *model.Manifest, err error) {
 	if info == nil || info.RootNode == nil {
 		return nil, fmt.Errorf("parsing spec: %w", ErrUnsupportedSpec)
 	}
-	b := &builder{opts: opts}
+	b := &builder{Builder: restutil.Builder{Opts: opts}}
 	switch {
 	case info.SpecType == utils.OpenApi3 && (strings.HasPrefix(info.Version, "3.0") || strings.HasPrefix(info.Version, "3.1")):
 		b.is30 = strings.HasPrefix(info.Version, "3.0")
@@ -108,11 +103,13 @@ func Parse(data []byte, opts Options) (m *model.Manifest, err error) {
 		return nil, fmt.Errorf("parsing spec: %w", err)
 	}
 	if external > 0 {
-		b.warn(fmt.Sprintf("%d external $ref(s) ignored: only local #/ references are resolved", external))
+		b.Warn(fmt.Sprintf("%d external $ref(s) ignored: only local #/ references are resolved", external))
 	}
 
+	// Format is the ingest format name for both versions ("swagger" is no
+	// format a user can name); SpecVersion says which version it was.
+	b.M.Format = "openapi"
 	if info.SpecType == utils.OpenApi2 {
-		b.m.Format = "swagger"
 		v2, err := doc.BuildV2Model()
 		if v2 == nil {
 			return nil, fmt.Errorf("building Swagger 2.0 model: %w", errOrUnknown(err))
@@ -120,7 +117,6 @@ func Parse(data []byte, opts Options) (m *model.Manifest, err error) {
 		b.warnErr(err)
 		b.fromV2(&v2.Model)
 	} else {
-		b.m.Format = "openapi"
 		v3, err := doc.BuildV3Model()
 		if v3 == nil {
 			return nil, fmt.Errorf("building OpenAPI model: %w", errOrUnknown(err))
@@ -128,8 +124,8 @@ func Parse(data []byte, opts Options) (m *model.Manifest, err error) {
 		b.warnErr(err)
 		b.fromV3(&v3.Model)
 	}
-	b.m.SpecVersion = info.Version
-	return b.finish(), nil
+	b.M.SpecVersion = info.Version
+	return b.Finish(), nil
 }
 
 func errOrUnknown(err error) error {

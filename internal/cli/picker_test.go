@@ -19,7 +19,11 @@ func TestProtoDescribe(t *testing.T) {
 	if protoDescribe("") == nil {
 		t.Error("an empty protocol is a pre-field manifest: it should default to REST, not nil")
 	}
-	if protoDescribe("bogus") != nil {
-		t.Error("an unknown protocol should resolve to nil so the TUI falls back to REST method/path")
+	gql := model.Tool{Key: "query user", GraphQL: &model.GraphQLOp{Operation: "query", Field: "user"}}
+	if b, tg := protoDescribe(model.GraphQL)(gql); b != "query" || tg != "user" {
+		t.Errorf("GraphQL Describe = %q %q, want %q %q", b, tg, "query", "user")
+	}
+	if b, tg := protoDescribe("bogus")(restTool); b != "" || tg != "GET /pets" {
+		t.Errorf("an unknown protocol should fall back to the bare key, got %q %q", b, tg)
 	}
 }

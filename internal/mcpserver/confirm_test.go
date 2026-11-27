@@ -11,9 +11,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/swayam5342/plugit/internal/invoke"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/policy"
-	"github.com/swayam5342/plugit/internal/protocol/rest"
 	"github.com/swayam5342/plugit/internal/store"
 )
 
@@ -49,7 +49,7 @@ func accept(confirm any) func() (*mcp.ElicitResult, error) {
 func confirmRig(t *testing.T, e *elicitor, rec *recorded) *rig {
 	t.Helper()
 	cfg := Config{Tools: served(createPetBody), Mode: policy.ConfirmWrites,
-		Target: rest.Target{Auth: rest.Auth{Type: rest.AuthBearer, Secret: secret}}}
+		Cred: invoke.Credential{Type: "bearer", Secret: secret}}
 	if rec != nil {
 		cfg.Log = callLog(rec, "redacted", false)
 	}

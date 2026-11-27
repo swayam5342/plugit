@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/swayam5342/plugit/internal/ingest"
 	"github.com/swayam5342/plugit/internal/model"
+	"github.com/swayam5342/plugit/internal/protocol/graphql"
 	"github.com/swayam5342/plugit/internal/protocol/rest/openapi"
 )
 
@@ -73,12 +76,12 @@ paths:
 `
 
 func TestParseMatchesInProcess(t *testing.T) {
-	opts := openapi.Options{Prefix: "pets", MaxDescription: 100}
-	want, err := openapi.Parse([]byte(spec), opts)
+	opts := ingest.Options{Prefix: "pets", MaxDescription: 100}
+	want, err := openapi.Parse([]byte(spec), openapi.Options{Prefix: opts.Prefix, MaxDescription: opts.MaxDescription})
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := runner("parse").Parse(t.Context(), []byte(spec), opts)
+	got, err := runner("parse").Parse(t.Context(), []byte(spec), "", opts)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -105,10 +108,14 @@ func TestParseKeepsSentinelErrors(t *testing.T) {
 		want error
 	}{
 		"deep ref":    {chain.String(), openapi.ErrRefTooDeep},
-		"unsupported": {"asyncapi: 2.6.0\ninfo: {title: t, version: '1'}\nchannels: {}\n", openapi.ErrUnsupportedSpec},
+		"unsupported": {"openapi: 4.0.0\ninfo: {title: t, version: '1'}\npaths: {}\n", openapi.ErrUnsupportedSpec},
+		// No format claims an AsyncAPI document.
+		"unsupported format": {"asyncapi: 2.6.0\ninfo: {title: t, version: '1'}\nchannels: {}\n", ingest.ErrUnsupportedFormat},
+		// Valid SDL syntax, so graphql-sdl claims it, but there is no Query root.
+		"graphql unsupported": {"type User {\n  id: ID!\n}\n", graphql.ErrUnsupportedSpec},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := runner("parse").Parse(t.Context(), []byte(tc.src), openapi.Options{})
+			_, err := runner("parse").Parse(t.Context(), []byte(tc.src), "", ingest.Options{})
 			if !errors.Is(err, tc.want) {
 				t.Errorf("err = %v, want %v", err, tc.want)
 			}
@@ -129,7 +136,7 @@ paths:
 `
 
 func TestParseKnownLibopenapiCrasherIsRejected(t *testing.T) {
-	_, err := runner("parse").Parse(t.Context(), []byte(libopenapiCrasher), openapi.Options{})
+	_, err := runner("parse").Parse(t.Context(), []byte(libopenapiCrasher), "", ingest.Options{})
 	if !errors.Is(err, openapi.ErrInvalidSpec) {
 		t.Fatalf("err = %v, want openapi.ErrInvalidSpec", err)
 	}
@@ -174,7 +181,7 @@ func TestParseExternalRefMapEntriesNeverCrash(t *testing.T) {
 	for name, src := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			_, err := runner("parse").Parse(t.Context(), []byte(src), openapi.Options{})
+			_, err := runner("parse").Parse(t.Context(), []byte(src), "", ingest.Options{})
 			if errors.Is(err, ErrParserCrashed) {
 				t.Errorf("parser crashed: %v", err)
 			}
@@ -191,7 +198,7 @@ func TestParseChildFailures(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			r := runner(mode)
 			r.MaxOutput = 1 << 20
-			_, err := r.Parse(t.Context(), []byte(spec), openapi.Options{})
+			_, err := r.Parse(t.Context(), []byte(spec), "", ingest.Options{})
 			if !errors.Is(err, want) {
 				t.Errorf("err = %v, want %v", err, want)
 			}
@@ -203,7 +210,7 @@ func TestParseTimeout(t *testing.T) {
 	r := runner("hang")
 	r.Timeout = 500 * time.Millisecond
 	start := time.Now()
-	_, err := r.Parse(t.Context(), []byte(spec), openapi.Options{})
+	_, err := r.Parse(t.Context(), []byte(spec), "", ingest.Options{})
 	if !errors.Is(err, ErrParseTimeout) {
 		t.Errorf("err = %v, want ErrParseTimeout", err)
 	}
@@ -215,7 +222,7 @@ func TestParseTimeout(t *testing.T) {
 func TestChildGetsNoParentEnvironment(t *testing.T) {
 	t.Setenv("PLUGIT_SECRET_FOR_TEST", "test-token-123")
 	t.Setenv("GITHUB_TOKEN", "test-token-456")
-	_, err := runner("dumpenv").Parse(t.Context(), []byte(spec), openapi.Options{})
+	_, err := runner("dumpenv").Parse(t.Context(), []byte(spec), "", ingest.Options{})
 	if err == nil {
 		t.Fatal("dumpenv child returns its environment as an error")
 	}
@@ -247,12 +254,142 @@ paths:
   /v1/%2e%2e/secret: {get: {responses: {'200': {description: ok}}}}
 `
 	for on, want := range map[bool]int{false: 1, true: 2} {
-		m, err := runner("parse").Parse(t.Context(), []byte(src), openapi.Options{AllowUnsafePaths: on})
+		m, err := runner("parse").Parse(t.Context(), []byte(src), "", ingest.Options{AllowUnsafePaths: on})
 		if err != nil {
 			t.Fatalf("Parse: %v", err)
 		}
 		if len(m.Tools) != want {
 			t.Errorf("AllowUnsafePaths=%v: %d tools, want %d", on, len(m.Tools), want)
 		}
+	}
+}
+
+func TestRequestCarriesGraphQLCaps(t *testing.T) {
+	in := ingest.Options{Prefix: "p", MaxDescription: 7, AllowUnsafePaths: true, SelectionDepth: 4, MaxFields: 99,
+		ResponseFields: map[string]map[string][]string{"default": {"query user": {"id", "org.name"}}}}
+	b, err := json.Marshal(newRequest([]byte("x"), graphql.FormatSDL, in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req request
+	if err := json.Unmarshal(b, &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.Format != graphql.FormatSDL {
+		t.Errorf("format after round trip = %q", req.Format)
+	}
+	if got := req.options(); !reflect.DeepEqual(got, in) {
+		t.Errorf("options after round trip = %+v, want %+v", got, in)
+	}
+}
+
+// An SDL source parsed through the real child comes back as a GraphQL
+// manifest, built with the caller's selection caps.
+func TestParseGraphQLSDLThroughChild(t *testing.T) {
+	data, err := os.ReadFile("../../testdata/specs/graphql/user.graphql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := ingest.Options{Prefix: "gh", SelectionDepth: 1, MaxFields: 2}
+	got, err := runner("parse").Parse(t.Context(), data, "", opts)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got.Protocol != model.GraphQL || got.Format != graphql.FormatSDL {
+		t.Fatalf("got %q/%q, want %q/%q", got.Protocol, got.Format, model.GraphQL, graphql.FormatSDL)
+	}
+	if len(got.Tools) == 0 {
+		t.Fatal("no tools built")
+	}
+
+	s, err := graphql.LoadSchema(data, graphql.FormatSDL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := graphql.Build(s, graphql.FormatSDL, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wb, _ := json.Marshal(want)
+	gb, _ := json.Marshal(got)
+	if !bytes.Equal(wb, gb) {
+		t.Errorf("child result differs from in-process build:\n got %s\nwant %s", gb, wb)
+	}
+
+	// The caps must have reached Build: MaxFields 2 truncates a selection
+	// that the default caps leave whole.
+	truncated := func(m *model.Manifest) bool {
+		for _, tool := range m.Tools {
+			for _, is := range tool.Issues {
+				if is.Kind == model.IssueSelectionTruncated {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	if !truncated(got) {
+		t.Error("MaxFields 2 truncated no selection: the caps did not reach Build")
+	}
+	def, err := runner("parse").Parse(t.Context(), data, "", ingest.Options{})
+	if err != nil {
+		t.Fatalf("Parse with default caps: %v", err)
+	}
+	if truncated(def) {
+		t.Error("default caps truncated a selection; this fixture can't tell the caps apart")
+	}
+
+	// SelectionDepth on its own must reach Build too: the child's result
+	// with only the depth cap matches the in-process build with it and
+	// differs from the default-caps result.
+	depthOnly := ingest.Options{SelectionDepth: 1}
+	dgot, err := runner("parse").Parse(t.Context(), data, "", depthOnly)
+	if err != nil {
+		t.Fatalf("Parse with SelectionDepth 1: %v", err)
+	}
+	dwant, err := graphql.Build(s, graphql.FormatSDL, depthOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mustJSON(t, dgot) != mustJSON(t, dwant) {
+		t.Errorf("SelectionDepth 1: child result differs from in-process build")
+	}
+	if mustJSON(t, dgot) == mustJSON(t, def) {
+		t.Error("SelectionDepth 1 built the same manifest as the default depth: the cap did not reach Build")
+	}
+}
+
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return string(b)
+}
+
+const userSDL = `type User { id: ID! name: String }
+type Query { user(id: ID!): User }
+`
+
+// The forced format and the GraphQL response_fields travel to the child:
+// a forced format skips detection, and each toolset's response_fields come
+// back compiled into Manifest.GraphQL.OverrideDocs (SPEC P7, T2: compiled in
+// the child, never in the parent).
+func TestParseCarriesFormatAndResponseFields(t *testing.T) {
+	opts := ingest.Options{ResponseFields: map[string]map[string][]string{"default": {"query user": {"id"}}}}
+	m, err := runner("parse").Parse(t.Context(), []byte(userSDL), graphql.FormatSDL, opts)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if m.Format != graphql.FormatSDL || m.GraphQL == nil {
+		t.Fatalf("format = %q, graphql = %v", m.Format, m.GraphQL)
+	}
+	if got := m.GraphQL.OverrideDocs["default"]["query user"]; got != "query PlugIt_user($id: ID!) { user(id: $id) { id } }" {
+		t.Errorf("override = %q", got)
+	}
+	// Forcing a format the source isn't fails instead of falling back to detection.
+	if _, err := runner("parse").Parse(t.Context(), []byte(userSDL), graphql.FormatIntrospection, ingest.Options{}); err == nil {
+		t.Error("forcing graphql-introspection on SDL must fail")
 	}
 }

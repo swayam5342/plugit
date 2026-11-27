@@ -23,6 +23,23 @@ const MaxNameLen = 64
 // DefaultMaxDescription caps tool descriptions, in runes.
 const DefaultMaxDescription = 1024
 
+// ValidToolName reports whether s is a tool name PlugIt accepts: 1 to
+// MaxNameLen characters, each a letter, digit, '_' or '-' (the MCP tool-name
+// rule Sanitize and Assign produce). A rename in the picker and a toolset
+// override's name in plugit.yaml are both checked with it.
+func ValidToolName(s string) bool {
+	if s == "" || len(s) > MaxNameLen {
+		return false
+	}
+	for i := range len(s) {
+		c := s[i]
+		if c != '-' && c != '_' && (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') {
+			return false
+		}
+	}
+	return true
+}
+
 // ToolID returns the first 8 hex characters of sha256(key).
 func ToolID(key model.OpKey) string {
 	sum := sha256.Sum256([]byte(key))
@@ -79,10 +96,16 @@ type Candidate struct {
 func Assign(cands []Candidate, prefix string) map[model.OpKey]string {
 	sorted := slices.Clone(cands)
 	slices.SortStableFunc(sorted, func(a, b Candidate) int { return cmp.Compare(a.Key, b.Key) })
+	return AssignInOrder(sorted, prefix)
+}
 
-	names := make(map[model.OpKey]string, len(sorted))
-	used := make(map[string]bool, len(sorted))
-	for _, c := range sorted {
+// AssignInOrder names candidates by Assign's rules but in the order given,
+// so an earlier candidate claims a contested name. The caller makes the
+// order deterministic (GraphQL puts every query before every mutation).
+func AssignInOrder(cands []Candidate, prefix string) map[model.OpKey]string {
+	names := make(map[model.OpKey]string, len(cands))
+	used := make(map[string]bool, len(cands))
+	for _, c := range cands {
 		if _, done := names[c.Key]; done {
 			continue
 		}

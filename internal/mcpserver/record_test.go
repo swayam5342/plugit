@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/swayam5342/plugit/internal/config"
+	"github.com/swayam5342/plugit/internal/invoke"
 	"github.com/swayam5342/plugit/internal/policy"
-	"github.com/swayam5342/plugit/internal/protocol/rest"
 	"github.com/swayam5342/plugit/internal/store"
 )
 
@@ -65,7 +65,7 @@ func TestRecordsAreRedacted(t *testing.T) {
 	withSecretArg := tool("GET /pets", "listPets", qparam("limit", false, `{"type":"integer"}`), qparam("note", false, `{"type":"string"}`), qparam("api_key", false, `{"type":"string"}`))
 	rec := &recorded{}
 	r := setup(t, Config{Tools: served(withSecretArg), Mode: policy.ReadOnly, Log: callLog(rec, config.LogArgsRedacted, true),
-		Target: rest.Target{Auth: rest.Auth{Type: rest.AuthBearer, Secret: secret}}}, echo)
+		Cred: invoke.Credential{Type: "bearer", Secret: secret}}, echo)
 	if _, err := r.call(t, "listPets", map[string]any{"note": "my " + secret, "api_key": "xyz-not-a-real-key"}); err != nil {
 		t.Fatal(err)
 	}

@@ -26,7 +26,10 @@ import (
 	"strings"
 
 	"github.com/swayam5342/plugit/internal/model"
+	"github.com/swayam5342/plugit/internal/protocol/rest/restutil"
+	"github.com/swayam5342/plugit/internal/redact"
 	"github.com/swayam5342/plugit/internal/schema"
+	"github.com/swayam5342/plugit/internal/utils"
 )
 
 // Sentinel errors callers can match with errors.Is.
@@ -34,28 +37,6 @@ var (
 	ErrBadArgument = errors.New("bad argument")
 	ErrBuild       = errors.New("cannot build request")
 )
-
-// AuthType is how the credential is attached.
-type AuthType string
-
-// Auth types (SPEC §3.6).
-const (
-	AuthNone   AuthType = "none"
-	AuthBearer AuthType = "bearer"
-	AuthHeader AuthType = "header"
-	AuthQuery  AuthType = "query"
-	AuthBasic  AuthType = "basic"
-)
-
-// Auth is a resolved credential.
-type Auth struct {
-	Type         AuthType
-	Header       string
-	Param        string
-	Secret       string
-	Token        func(context.Context) (string, error)
-	Unauthorized func()
-}
 
 // Fixed is a resolved fixed parameter. If the tool declares a parameter with
 // this name, the spec's location wins; otherwise In is used (query when
@@ -70,38 +51,25 @@ type Fixed struct {
 // Target is everything about the upstream that isn't per call.
 type Target struct {
 	BaseURL   *url.URL
-	Auth      Auth
 	Fixed     []Fixed
 	UserAgent string
-	Extra     []string
 }
 
-// SecretValues lists every value that must be redacted wherever it appears
-// (SPEC T11): the credential, the password part of a Basic credential on its
-// own (an upstream may echo just that), and secret fixed values. literal:
-// fixed values are not secrets.
+// SecretValues lists the target's secret fixed values, which must be
+// redacted wherever they appear (SPEC T11), with the same bare-token rule as
+// the CLI's protocol-neutral list (redact.SchemeToken). The CLI builds its
+// redactor from that list; this one is mcpserver.New's default when a
+// Config has no Redactor. The credential's own values come from
+// invoke.Credential.SecretValues; literal: fixed values are not secrets.
 func (tg Target) SecretValues() []string {
 	var out []string
-	add := func(s string) {
-		if s != "" {
-			out = append(out, s)
-		}
-	}
-	if tg.Auth.Type != AuthNone && tg.Auth.Type != "" {
-		add(tg.Auth.Secret)
-		if tg.Auth.Type == AuthBasic {
-			if _, pass, ok := strings.Cut(tg.Auth.Secret, ":"); ok {
-				add(pass)
+	for _, f := range tg.Fixed {
+		if f.Secret && f.Value != "" {
+			out = append(out, f.Value)
+			if tok := redact.SchemeToken(f.Value); tok != "" {
+				out = append(out, tok)
 			}
 		}
-	}
-	for _, f := range tg.Fixed {
-		if f.Secret {
-			add(f.Value)
-		}
-	}
-	for _, e := range tg.Extra {
-		add(e)
 	}
 	return out
 }
@@ -233,9 +201,6 @@ func Encode(ctx context.Context, t model.Tool, args map[string]any, tg Target) (
 	}
 
 	u := joinURL(tg.BaseURL, path)
-	if tg.Auth.Type == AuthQuery && tg.Auth.Param != "" {
-		query.Del(tg.Auth.Param)
-	}
 	u.RawQuery = query.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, strings.ToUpper(t.HTTP.Method), u.String(), bytesReader(body))
@@ -313,7 +278,7 @@ func pathSegment(name string, v any) (string, error) {
 		decoded = s
 	}
 	for _, c := range []string{s, decoded} {
-		if c == "" || c == "." || c == ".." || strings.ContainsAny(c, `/\`) || hasControl(c) {
+		if c == "" || c == "." || c == ".." || strings.ContainsAny(c, `/\`) || utils.HasControl(c) {
 			return "", fmt.Errorf("%w: path parameter %q must not be empty, '.', '..', contain '/', '\\' or control characters (also when percent-decoded)", ErrBadArgument, name)
 		}
 	}
@@ -378,7 +343,7 @@ func headerValue(v any) (string, error) {
 			return "", errors.New("header values must be strings, numbers or booleans")
 		}
 	}
-	if hasControl(s) {
+	if utils.HasControl(s) {
 		return "", errors.New("header values must not contain CR, LF or other control characters")
 	}
 	return s, nil
@@ -402,16 +367,10 @@ func scalar(v any) (string, bool) {
 	return "", false
 }
 
-func hasControl(s string) bool {
-	return strings.IndexFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0
-}
-
-var cookieNameRe = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$")
-
 // cookieValue formats a scalar as a cookie value and refuses anything that
 // could end the value or start another cookie (RFC 6265 cookie-octets).
 func cookieValue(name string, v any) (string, error) {
-	if !cookieNameRe.MatchString(name) {
+	if !restutil.ValidCookieName(name) {
 		return "", fmt.Errorf("%q isn't a valid cookie name", name)
 	}
 	s, ok := formScalar(v)

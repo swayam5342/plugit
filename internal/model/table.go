@@ -1,6 +1,7 @@
 package model
 
 import (
+	"maps"
 	"slices"
 	"strings"
 )
@@ -61,6 +62,12 @@ func KnownProtocol(p Protocol) bool {
 	return ok
 }
 
+// Protocols lists every protocol the P3 table defines, sorted by name. The
+// slice is fresh on each call. Callers that must handle each protocol (the
+// CLI's resolveProto and describeFor switches, and the test that keeps them
+// exhaustive) iterate this rather than keeping their own list.
+func Protocols() []Protocol { return slices.Sorted(maps.Keys(protoTable)) }
+
 // KeyValid reports whether k is a well-formed OpKey for protocol p (SPEC
 // §8.1.4 grammar). REST is "METHOD /path"; every other protocol is
 // "<word> <rest>" where <word> is one of that protocol's reserved words.
@@ -87,6 +94,9 @@ func FixedInAllowed(p Protocol, in string) bool { return slices.Contains(protoTa
 
 // AuthTypeAllowed reports whether t is an auth.type p accepts.
 func AuthTypeAllowed(p Protocol, t string) bool { return slices.Contains(protoTable[p].authTypes, t) }
+
+// AuthTypes lists the auth.type values p accepts, in table order.
+func AuthTypes(p Protocol) []string { return slices.Clone(protoTable[p].authTypes) }
 
 // MethodsFilterAllowed reports whether toolsets for p may use the methods: filter.
 func MethodsFilterAllowed(p Protocol) bool { return protoTable[p].methodsFilter }

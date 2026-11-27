@@ -23,7 +23,7 @@ var getThing = model.Tool{Key: "GET /things/{id}", Name: "getThing", HTTP: &mode
 	Params: []model.Param{{Name: "id", Bind: model.Binding{Upstream: "id", In: model.InPath}, Required: true, Schema: []byte(`{"type":"string"}`)}}}
 
 func TestRESTEncodeNoCredentials(t *testing.T) {
-	r := REST{Target: Target{Auth: Auth{Type: AuthBearer, Secret: "test-token-123"}}}
+	r := REST{Target: Target{}}
 	req, err := r.Encode(context.Background(), protocol.Call{
 		Tool: getThing, Args: map[string]any{"id": "42"}, Endpoint: mustURL(t, "https://api.example.test"),
 	})

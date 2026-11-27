@@ -131,7 +131,8 @@ func tryTool(ctx context.Context, s serveSettings, toolName string, f tryFlags, 
 			return fmt.Errorf("%s: %s and needs confirmation: run it from a terminal, or pass --yes", t.Name, dec.Reason)
 		}
 		if !ok {
-			if ok, err = d.confirm(fmt.Sprintf("%s (%s %s) %s. Make this call?", t.Name, t.Key.Method(), t.Key.Path(), dec.Reason)); err != nil {
+			badge, target := describeFor(model.Protocol(a.cfg.Protocol), t)
+			if ok, err = d.confirm(fmt.Sprintf("%s (%s %s) %s. Make this call?", t.Name, badge, target, dec.Reason)); err != nil {
 				return err
 			}
 		}
@@ -174,8 +175,8 @@ func callTool(ctx context.Context, a *active, st mcpserver.Tool, kv []string, re
 	}
 	rec := &printingDoer{next: a.doer, out: reqOut, red: a.red}
 	ir := invoke.Perform(ctx, invoke.Deps{
-		Proto: a.proto, Doer: rec, Target: a.target,
-		Endpoint: a.target.BaseURL, Redactor: a.red,
+		Proto: a.proto, Doer: rec, Cred: a.cred,
+		Endpoint: a.endpoint, Redactor: a.red,
 	}, t, decoded, st.Fields)
 	r := ir
 	if !rec.printed {

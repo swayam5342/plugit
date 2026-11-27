@@ -7,7 +7,6 @@ import (
 	"mime"
 	"net/http"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/protocol"
@@ -56,7 +55,7 @@ func (REST) Decode(_ protocol.Call, resp *http.Response, body []byte, truncated 
 	switch {
 	case len(body) == 0:
 		res.Text = fmt.Sprintf("(empty response, status %d)", resp.StatusCode)
-	case isBinary(ct, body):
+	case protocol.IsBinary(ct, body):
 		typ := ct
 		if typ == "" {
 			typ = "unknown"
@@ -69,17 +68,6 @@ func (REST) Decode(_ protocol.Call, resp *http.Response, body []byte, truncated 
 		res.Text = string(body)
 	}
 	return res
-}
-
-func isBinary(ct string, body []byte) bool {
-	mt, _, _ := mime.ParseMediaType(ct)
-	switch {
-	case strings.HasPrefix(mt, "image/"), strings.HasPrefix(mt, "audio/"), strings.HasPrefix(mt, "video/"),
-		strings.HasPrefix(mt, "font/"), mt == "application/octet-stream", mt == "application/pdf",
-		mt == "application/zip", mt == "application/gzip":
-		return true
-	}
-	return !utf8.Valid(body) || bytes.IndexByte(body, 0) >= 0
 }
 
 func looksJSON(ct string, body []byte) bool {

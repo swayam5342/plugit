@@ -25,7 +25,7 @@ type TryInput struct {
 	Send    func(ctx context.Context, args map[string]string) TryResult
 	// Describe returns the tool's per-protocol badge and target for the
 	// subtitle (SPEC §2.3). When nil it falls back to the REST method and
-	// path; the cli layer injects protocol.For(..).Describe.
+	// path; the cli layer injects it (cli.describeFor).
 	Describe func(model.Tool) (badge, target string)
 }
 

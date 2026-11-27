@@ -20,7 +20,7 @@ func addSeeds(f *testing.F) {
 	f.Add([]byte(petstore30))
 	f.Add([]byte(swagger2))
 	f.Add([]byte(refChain(3)))
-	f.Add([]byte(petsCollection))
+	f.Add(petsCollection(f))
 	for _, dir := range []string{hostileDir, specsDir} {
 		entries, _ := os.ReadDir(dir)
 		for _, e := range entries {
@@ -38,6 +38,17 @@ func addSeeds(f *testing.F) {
 // parses must yield valid, clean tools.
 func FuzzParse(f *testing.F) {
 	addSeeds(f)
+	// Regression inputs found by fuzzing, formerly the corpus files in
+	// testdata/fuzz/FuzzParse (named by their hash below). Each literal is
+	// the file's "go test fuzz v1" value verbatim.
+	// 203f9c7d2d851b36
+	f.Add([]byte("openapi: 3.0\no: e\n#\npaths:\n e:\n  t:\n      requestBody:\n       content:\n        a: {$ref: '/comprnents/schemas/Tree'}\n      responses: {'200': {description: ok}}\ncomponents:\n  schemas:\n    Tree:\n      type: object\n      properties:\n        children: {type: array, items: {$ref: '#/components/sc99hemas/Tree'}}\n        other: {$ref: '#/components/schemas/Forest'}\n    Forest:"))
+	// 2e86b8e3bffd3ebb
+	f.Add([]byte("swagger: \"2.0\"\npaths:\n  /:\n    put:\n      'arameters:\n        - in: body\n          schema: {$ref: '#User'}\nUser: \n properties:\n  kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkme:"))
+	// 3f7289e623353678
+	f.Add([]byte("swagger: \"2.0\"\npaths:\n  /\x7f:\n    put:"))
+	// a01e7be48f5454ca
+	f.Add([]byte("openapi: 3.0\no: {e}#\npaths:\n e:\n  t:\n      requestBody:\n       content:\n        n:\n        a: {$ref: '/components/schemas/Trema: {$e'}\n      responses: {'200': {description: ok}}\ncomponents:\n  schemas:\n    Tree:\n      type: object\n      properties:\n        children: {type: Qrray, items: {$ref: '#/coWponents/schemas/Tree'}}\n        other: {$ref: '#/components/schemas/Forest'}\n    Forest:\n      type: object\n      properties:\n        trees: {type: array, items: {$ref: '#/components/schemas/Tree'}}"))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if len(data) > 256<<10 {
 			t.Skip()

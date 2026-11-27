@@ -25,9 +25,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/swayam5342/plugit/internal/formats"
 	"github.com/swayam5342/plugit/internal/ingest"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/naming"
+	"github.com/swayam5342/plugit/internal/protocol/graphql"
 	"github.com/swayam5342/plugit/internal/protocol/rest/openapi"
 )
 
@@ -53,6 +55,25 @@ type request struct {
 	Prefix         string `json:"prefix,omitempty"`
 	MaxDescription int    `json:"maxDescription,omitempty"`
 	UnsafePaths    bool   `json:"unsafePaths,omitempty"`
+	SelectionDepth int    `json:"selectionDepth,omitempty"`
+	MaxFields      int    `json:"maxFields,omitempty"`
+	// ResponseFields is toolset -> tool key -> GraphQL response_fields,
+	// compiled into override documents in the child.
+	ResponseFields map[string]map[string][]string `json:"responseFields,omitempty"`
+}
+
+func newRequest(data []byte, format string, opts ingest.Options) request {
+	return request{
+		Spec: data, Format: format, Prefix: opts.Prefix, MaxDescription: opts.MaxDescription, UnsafePaths: opts.AllowUnsafePaths,
+		SelectionDepth: opts.SelectionDepth, MaxFields: opts.MaxFields, ResponseFields: opts.ResponseFields,
+	}
+}
+
+func (r request) options() ingest.Options {
+	return ingest.Options{
+		Prefix: r.Prefix, MaxDescription: r.MaxDescription, AllowUnsafePaths: r.UnsafePaths,
+		SelectionDepth: r.SelectionDepth, MaxFields: r.MaxFields, ResponseFields: r.ResponseFields,
+	}
 }
 
 type response struct {
@@ -66,10 +87,12 @@ var errorKinds = []struct {
 	err  error
 }{
 	{"unsupported", openapi.ErrUnsupportedSpec},
+	{"unsupported-format", ingest.ErrUnsupportedFormat},
 	{"ref-too-deep", openapi.ErrRefTooDeep},
 	{"ref-cycle", openapi.ErrRefCycle},
 	{"panic", openapi.ErrParserPanic},
 	{"invalid", openapi.ErrInvalidSpec},
+	{"graphql-unsupported", graphql.ErrUnsupportedSpec},
 }
 
 // Runner starts parse children.
@@ -90,17 +113,19 @@ func NewRunner() (*Runner, error) {
 	return &Runner{Exe: exe, Args: []string{ChildArg}}, nil
 }
 
-// Parse is openapi.Parse in a child process. opts.Logger is not used.
-func Parse(ctx context.Context, data []byte, opts openapi.Options) (*model.Manifest, error) {
+// Parse is a format parse (openapi, postman, graphql-sdl, …) in a child
+// process. format names the format to use, skipping detection; "" detects.
+// opts.Logger is not used.
+func Parse(ctx context.Context, data []byte, format string, opts ingest.Options) (*model.Manifest, error) {
 	r, err := NewRunner()
 	if err != nil {
 		return nil, err
 	}
-	return r.Parse(ctx, data, opts)
+	return r.Parse(ctx, data, format, opts)
 }
 
-// Parse runs one parse child.
-func (r *Runner) Parse(ctx context.Context, data []byte, opts openapi.Options) (*model.Manifest, error) {
+// Parse runs one parse child; format is as for the package-level Parse.
+func (r *Runner) Parse(ctx context.Context, data []byte, format string, opts ingest.Options) (*model.Manifest, error) {
 	timeout, maxOut := r.Timeout, r.MaxOutput
 	if timeout <= 0 {
 		timeout = DefaultTimeout
@@ -108,7 +133,7 @@ func (r *Runner) Parse(ctx context.Context, data []byte, opts openapi.Options) (
 	if maxOut <= 0 {
 		maxOut = DefaultMaxOutput
 	}
-	req, err := json.Marshal(request{Spec: data, Prefix: opts.Prefix, MaxDescription: opts.MaxDescription, UnsafePaths: opts.AllowUnsafePaths})
+	req, err := json.Marshal(newRequest(data, format, opts))
 	if err != nil {
 		return nil, fmt.Errorf("encoding parse request: %w", err)
 	}
@@ -162,7 +187,7 @@ func ChildMain(stdin io.Reader, stdout io.Writer) int {
 		return 2
 	}
 
-	m, err := ingest.Dispatch(req.Spec, req.Format, openapi.Options{Prefix: req.Prefix, MaxDescription: req.MaxDescription, AllowUnsafePaths: req.UnsafePaths})
+	m, err := ingest.Dispatch(formats.Ordered(), req.Spec, req.Format, req.options())
 	if err != nil {
 		resp := response{Err: err.Error()}
 		for _, k := range errorKinds {

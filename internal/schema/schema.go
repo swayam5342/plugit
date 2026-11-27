@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/swayam5342/plugit/internal/model"
+	"github.com/swayam5342/plugit/internal/utils"
 )
 
 // Options configures Prepare.
@@ -98,11 +99,11 @@ func bodyParams(t *model.Tool, fx fixed, ns *namespace) []model.Param {
 		trial := ns.clone()
 		var fields []model.Param
 		collided := false
-		for _, k := range sortedKeys(props) {
+		for _, k := range slices.Sorted(maps.Keys(props)) {
 			f := model.Param{
 				Bind:     model.Binding{Upstream: k, In: model.InBody},
 				Required: t.HTTP.Body.Required && required[k],
-				Schema:   mustJSON(props[k]),
+				Schema:   utils.MustJSON(props[k]),
 			}
 			if fx.has(k, model.InBody) {
 				f.Hidden, f.Name = true, k
@@ -189,7 +190,7 @@ func InputSchema(t model.Tool) json.RawMessage {
 	if len(required) > 0 {
 		out["required"] = required
 	}
-	return mustJSON(out)
+	return utils.MustJSON(out)
 }
 
 type namespace struct {
@@ -321,23 +322,4 @@ func decode(raw json.RawMessage) map[string]any {
 		return map[string]any{}
 	}
 	return m
-}
-
-// mustJSON encodes v, which always came from json.Unmarshal, so encoding
-// cannot fail; a permissive {} is the fallback rather than a panic.
-func mustJSON(v any) json.RawMessage {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return json.RawMessage(`{}`)
-	}
-	return b
-}
-
-func sortedKeys(m map[string]any) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	return keys
 }

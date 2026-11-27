@@ -1,19 +1,13 @@
 package cli
 
 import (
-	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
-	"net/url"
 	"os"
 	"path/filepath"
-	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -21,19 +15,12 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/swayam5342/plugit/internal/config"
-	"github.com/swayam5342/plugit/internal/curate"
-	"github.com/swayam5342/plugit/internal/httpx"
+	"github.com/swayam5342/plugit/internal/invoke"
 	"github.com/swayam5342/plugit/internal/isolate"
-	"github.com/swayam5342/plugit/internal/jsonpick"
 	"github.com/swayam5342/plugit/internal/mcpserver"
-	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/oauth"
 	"github.com/swayam5342/plugit/internal/policy"
-	"github.com/swayam5342/plugit/internal/protocol"
-	"github.com/swayam5342/plugit/internal/protocol/rest"
-	"github.com/swayam5342/plugit/internal/protocol/rest/openapi"
 	"github.com/swayam5342/plugit/internal/redact"
-	"github.com/swayam5342/plugit/internal/schema"
 	"github.com/swayam5342/plugit/internal/secrets"
 	"github.com/swayam5342/plugit/internal/store"
 )
@@ -109,7 +96,7 @@ func serveAPI(ctx context.Context, s serveSettings, d runDeps) error {
 	}
 	logger.Info("plugit serve serving",
 		"api", a.cfg.Name, "toolset", a.toolset, "selected", len(a.tools), "listed", listed, "mode", a.cfg.Policy.Mode,
-		"endpoint", a.target.BaseURL.String())
+		"endpoint", a.endpoint.String())
 	var apiLimit *policy.Limiter
 	if r, err := policy.ParseRate(a.cfg.Policy.RateLimit); err == nil {
 		apiLimit = policy.NewLimiter(r, nil)
@@ -124,7 +111,8 @@ func serveAPI(ctx context.Context, s serveSettings, d runDeps) error {
 		Version:  d.info.withDefaults().Version,
 		Tools:    a.tools,
 		Mode:     a.cfg.PolicyMode(),
-		Target:   a.target,
+		Cred:     a.cred,
+		Endpoint: a.endpoint,
 		Proto:    a.proto,
 		Doer:     a.doer,
 		Redactor: a.red,
@@ -206,208 +194,64 @@ func openCallLog(ctx context.Context, p config.Paths, a *active, logger *slog.Lo
 	}
 }
 
-type active struct {
-	cfg     *config.API
-	toolset string
-	tools   []mcpserver.Tool
-	target  rest.Target
-	proto   protocol.Protocol
-	red     *redact.Redactor
-	doer    httpx.Doer
+// resolvedFixed is the protocol-neutral result of resolving the configured
+// fixed params: values are resolved, locations are the config strings
+// ("query", "header", "cookie"), and a protocol maps them to its own Target.
+type resolvedFixed struct {
+	items     []fixedItem
+	userAgent string
 }
 
-// resolveProto picks the serving protocol from the registry (SPEC §3.7 P5) and
-// binds the per-serve target. A protocol with no registered impl is refused —
-// "needs a newer plugit" — never served as REST by accident (T-rules: one serve
-// = one protocol). An empty name is a pre-field manifest, which is REST.
-func resolveProto(name model.Protocol, tg rest.Target) (protocol.Protocol, error) {
-	if name == "" {
-		name = model.REST
-	}
-	p, ok := protocol.For(name)
-	if !ok {
-		return nil, fmt.Errorf("this plugit build can't serve the %q protocol; it may need a newer version of plugit", name)
-	}
-	// REST is the only impl in M7 and carries its config on the value; bind it.
-	if r, isREST := p.(rest.REST); isREST {
-		r.Target = tg
-		return r, nil
-	}
-	return p, nil
+// fixedItem is one resolved fixed parameter. In is the P3 location string.
+type fixedItem struct {
+	Name, In, Value string
+	Secret          bool
 }
 
-// loadActive loads plugit.yaml, the manifest (from cache when fresh), the
-// toolset and the credentials. Shared by serve and try.
-func loadActive(ctx context.Context, s serveSettings, d runDeps, logger *slog.Logger) (*active, error) {
-	cfg, err := config.LoadAPI(s.paths, s.name)
-	if err != nil {
-		return nil, err
-	}
-	tsName := cmp.Or(s.toolset, defaultToolset)
-	ts, ok := cfg.Toolsets[tsName]
-	if !ok {
-		return nil, fmt.Errorf("API %s has no toolset %q (it has: %s)", cfg.Name, tsName,
-			strings.Join(slices.Sorted(maps.Keys(cfg.Toolsets)), ", "))
-	}
-
-	m, err := loadManifest(ctx, s.paths, cfg, d, logger)
-	if err != nil {
-		return nil, err
-	}
-	sel, err := curate.Apply(m.Tools, ts, cfg.Prefix)
-	if err != nil {
-		return nil, fmt.Errorf("toolset %q: %w", tsName, err)
-	}
-	if len(sel.Missing) > 0 {
-		keys := make([]string, 0, len(sel.Missing))
-		for _, k := range sel.Missing {
-			keys = append(keys, string(k))
-		}
-		logger.Warn("toolset lists operations the spec no longer has", "toolset", tsName, "missing", strings.Join(keys, ", "))
-	}
-	if len(sel.Tools) == 0 {
-		return nil, fmt.Errorf("toolset %q selects no tools: add operations with `plugit edit %s`", tsName, cfg.Name)
-	}
-
-	baseURL, err := url.Parse(cfg.Endpoint)
-	if err != nil {
-		return nil, fmt.Errorf("endpoint: %w", err)
-	}
-	target, hidden, err := buildTarget(cfg, baseURL, d, "plugit/"+d.info.withDefaults().Version)
-	if err != nil {
-		return nil, err
-	}
-	proto, err := resolveProto(m.Protocol, target)
-	if err != nil {
-		return nil, err
-	}
-	tools := make([]mcpserver.Tool, 0, len(sel.Tools))
-	for _, st := range sel.Tools {
-		mt := mcpserver.Tool{Tool: schema.Prepare(st.Tool, schema.Options{Fixed: hidden}), Override: st.Override}
-		if r, err := policy.ParseRate(ts.Tools[string(st.Tool.Key)].RateLimit); err == nil {
-			mt.Limit = policy.NewLimiter(r, nil)
-		}
-		if p, err := jsonpick.Parse(ts.Tools[string(st.Tool.Key)].ResponseFields); err == nil {
-			mt.Fields = p
-		}
-		tools = append(tools, mt)
-	}
-	return &active{
-		cfg:     cfg,
-		toolset: tsName,
-		tools:   tools,
-		target:  target,
-		proto:   proto,
-		red: redact.New(redact.Options{
-			Secrets:           target.SecretValues(),
-			SecretHeaders:     hidden,
-			SecretQueryParams: hidden,
-		}),
-		doer: httpx.NewClient(httpx.Options{
-			AllowPrivate:     cfg.Network.AllowPrivate,
-			Timeout:          cfg.Network.Timeout,
-			MaxResponseBytes: cfg.Network.MaxResponseBytes,
-		}),
-	}, nil
-}
-
-// loadManifest returns the parsed spec snapshot, from manifest.json when it
-// was built from this snapshot, prefix and plugit build. Otherwise it parses
-// the snapshot once in the isolate child and rewrites the cache (SPEC §3.6).
-func loadManifest(ctx context.Context, p config.Paths, cfg *config.API, d runDeps, logger *slog.Logger) (*model.Manifest, error) {
-	snapPath, err := p.SpecSnapshot(cfg.Name)
-	if err != nil {
-		return nil, err
-	}
-	data, sum, err := config.ReadSnapshot(snapPath)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("API %s has no spec snapshot (%s); run `plugit sync %s`", cfg.Name, snapPath, cfg.Name)
-	}
-	if err != nil {
-		return nil, err
-	}
-	cachePath, err := p.Manifest(cfg.Name)
-	if err != nil {
-		return nil, err
-	}
-	key := config.CacheKey{SpecSHA256: sum, Prefix: cfg.Prefix, Parser: parserID(d.info), UnsafePaths: cfg.Network.AllowInsecure}
-	m, err := config.ReadManifest(cachePath, key)
-	if err == nil {
-		return checkProtocol(cfg, m)
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		logger.Info("re-parsing the spec snapshot", "reason", err.Error())
-	}
-	m, err = d.parse(ctx, data, openapi.Options{Prefix: cfg.Prefix, AllowUnsafePaths: cfg.Network.AllowInsecure})
-	if err != nil {
-		return nil, fmt.Errorf("parsing %s: %w", snapPath, err)
-	}
-	if err := config.WriteManifest(cachePath, key, m); err != nil {
-		logger.Warn("could not write the manifest cache; the next start will parse again", "error", err.Error())
-	}
-	return checkProtocol(cfg, m)
-}
-
-// checkProtocol rejects a config whose protocol disagrees with the manifest
-// it is paired with (a hand edit, or a sync whose source changed format).
-func checkProtocol(cfg *config.API, m *model.Manifest) (*model.Manifest, error) {
-	want := cfg.Protocol
-	if want == "" {
-		want = string(model.REST)
-	}
-	got := string(m.Protocol)
-	if got == "" {
-		got = string(model.REST) // a manifest with no protocol predates the field; it is REST
-	}
-	if want != got {
-		return nil, fmt.Errorf("config protocol %q does not match the %q manifest; re-run `plugit sync %s`", want, got, cfg.Name)
-	}
-	return m, nil
-}
-
-// parserID identifies the plugit build that parses, so an upgrade
-// invalidates the cache. Development builds share a version string, so the
-// executable's size and modification time are included too.
-func parserID(info BuildInfo) string {
-	info = info.withDefaults()
-	id := info.Version + "+" + info.Commit
-	if exe, err := os.Executable(); err == nil {
-		if fi, err := os.Stat(exe); err == nil {
-			id += "+" + strconv.FormatInt(fi.Size(), 10) + "." + strconv.FormatInt(fi.ModTime().UnixNano(), 10)
+// secretValues lists the resolved fixed values that must be redacted wherever
+// they appear (SPEC T11): every non-empty secret value, in config order,
+// each followed by its bare token when it is written "<scheme> <token>"
+// (redact.SchemeToken), as for a header credential. It is protocol-neutral,
+// so redaction doesn't depend on which target was built.
+func (fx resolvedFixed) secretValues() []string {
+	var out []string
+	for _, it := range fx.items {
+		if it.Secret && it.Value != "" {
+			out = append(out, it.Value)
+			if tok := redact.SchemeToken(it.Value); tok != "" {
+				out = append(out, tok)
+			}
 		}
 	}
-	return id
+	return out
 }
 
-// buildTarget resolves the credential and fixed params. It returns the
-// names to hide from the model and to redact by name.
-func buildTarget(cfg *config.API, baseURL *url.URL, d runDeps, userAgent string) (rest.Target, []string, error) {
-	res := d.resolver
-	tg := rest.Target{BaseURL: baseURL, UserAgent: userAgent}
+// buildCredential resolves the configured credential. It returns the names to
+// hide from the model and to redact by name.
+func buildCredential(cfg *config.API, res *secrets.Resolver, d runDeps) (invoke.Credential, []string, error) {
+	var cred invoke.Credential
 	var hidden []string
-
 	a := cfg.Auth
 	switch a.Type {
 	case config.AuthNone:
 	case config.AuthOAuth2:
 		oc, err := oauthConfig(cfg, res)
 		if err != nil {
-			return tg, nil, err
+			return cred, nil, err
 		}
 		store := keyringStore{get: res.Keyring, set: d.keyring, api: cfg.Name}
 		src := oauth.NewSource(oc, oauthDoer(cfg), store, nil)
-		tg.Auth = rest.Auth{Type: rest.AuthBearer, Token: src.Token, Unauthorized: src.Invalidate}
-		tg.Extra = append(tg.Extra, oc.ClientSecret)
+		cred = invoke.Credential{Type: "bearer", Token: src.Token, Unauthorized: src.Invalidate, Extra: []string{oc.ClientSecret}}
 	default:
 		ref, err := secrets.ParseSecretRef(a.Secret)
 		if err != nil {
-			return tg, nil, fmt.Errorf("auth.secret: %w", err)
+			return cred, nil, fmt.Errorf("auth.secret: %w", err)
 		}
 		v, err := res.Resolve(ref)
 		if err != nil {
-			return tg, nil, fmt.Errorf("auth.secret: %w", err)
+			return cred, nil, fmt.Errorf("auth.secret: %w", err)
 		}
-		tg.Auth = rest.Auth{Type: rest.AuthType(a.Type), Header: a.Header, Param: a.Param, Secret: v}
+		cred = invoke.Credential{Type: string(a.Type), Header: a.Header, Param: a.Param, Secret: v}
 		switch a.Type {
 		case config.AuthHeader:
 			hidden = append(hidden, a.Header)
@@ -415,24 +259,25 @@ func buildTarget(cfg *config.API, baseURL *url.URL, d runDeps, userAgent string)
 			hidden = append(hidden, a.Param)
 		}
 	}
+	return cred, hidden, nil
+}
+
+// buildFixedTarget resolves the configured fixed params. It returns the names
+// to hide from the model and to redact by name.
+func buildFixedTarget(cfg *config.API, res *secrets.Resolver) (resolvedFixed, []string, error) {
+	var fx resolvedFixed
+	var hidden []string
 	for i, f := range cfg.Fixed {
 		ref, err := secrets.ParseRef(f.Value)
 		if err != nil {
-			return tg, nil, fmt.Errorf("fixed[%d].value: %w", i, err)
+			return fx, nil, fmt.Errorf("fixed[%d].value: %w", i, err)
 		}
 		v, err := res.Resolve(ref)
 		if err != nil {
-			return tg, nil, fmt.Errorf("fixed %s: %w", f.Name, err)
+			return fx, nil, fmt.Errorf("fixed %s: %w", f.Name, err)
 		}
-		in := model.InQuery
-		switch f.In {
-		case "header":
-			in = model.InHeader
-		case "cookie":
-			in = model.InCookie
-		}
-		tg.Fixed = append(tg.Fixed, rest.Fixed{Name: f.Name, In: in, Value: v, Secret: ref.IsSecret()})
+		fx.items = append(fx.items, fixedItem{Name: f.Name, In: f.In, Value: v, Secret: ref.IsSecret()})
 		hidden = append(hidden, f.Name)
 	}
-	return tg, hidden, nil
+	return fx, hidden, nil
 }

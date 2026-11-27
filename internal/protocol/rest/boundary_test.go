@@ -3,7 +3,7 @@ package rest
 import (
 	"go/parser"
 	"go/token"
-	"os"
+	"io/fs"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,10 +16,11 @@ import (
 // this at lint time; this test guards it in the suite so a bad import is caught
 // even where the linter is not run.
 //
-// Note: this scans the package's own (non-test) source files for *direct*
-// imports. net/http is allowed (the Protocol seam returns *http.Request); the
-// raw "net" dialer package is not. When a grpc protocol lands behind the `grpc`
-// build tag (SPEC §3.5 P8), it gets an explicit, tested exception here.
+// Note: this scans the (non-test) source files of rest and of every package
+// below it (openapi, postman, restutil) for *direct* imports. net/http is
+// allowed (the Protocol seam returns *http.Request); the raw "net" dialer
+// package is not. When a grpc protocol lands behind the `grpc` build tag
+// (SPEC §3.5 P8), it gets an explicit, tested exception here.
 func TestBoundaryRESTNoNetworkImports(t *testing.T) {
 	banned := map[string]string{
 		"net": "a protocol must not dial; invoke owns the dialer in internal/httpx",
@@ -27,26 +28,41 @@ func TestBoundaryRESTNoNetworkImports(t *testing.T) {
 		"github.com/swayam5342/plugit/internal/secrets": "a protocol must not resolve a secret; invoke attaches credentials",
 	}
 
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("read package dir: %v", err)
-	}
-
 	fset := token.NewFileSet()
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		file, err := parser.ParseFile(fset, filepath.Clean(name), nil, parser.ImportsOnly)
+	dirs := map[string]bool{}
+	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			t.Fatalf("parse %s: %v", name, err)
+			return err
 		}
-		for _, imp := range file.Imports {
-			path := strings.Trim(imp.Path.Value, `"`)
-			if why, bad := banned[path]; bad {
-				t.Errorf("%s imports %q — %s (T17)", name, path, why)
+		name := d.Name()
+		if d.IsDir() {
+			if name == "testdata" {
+				return filepath.SkipDir
 			}
+			return nil
+		}
+		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			return nil
+		}
+		file, err := parser.ParseFile(fset, filepath.Clean(path), nil, parser.ImportsOnly)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		dirs[filepath.ToSlash(filepath.Dir(path))] = true
+		for _, imp := range file.Imports {
+			p := strings.Trim(imp.Path.Value, `"`)
+			if why, bad := banned[p]; bad {
+				t.Errorf("%s imports %q — %s (T17)", path, p, why)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk package tree: %v", err)
+	}
+	for _, want := range []string{".", "openapi", "postman", "restutil"} {
+		if !dirs[want] {
+			t.Errorf("package %s was not scanned", want)
 		}
 	}
 }

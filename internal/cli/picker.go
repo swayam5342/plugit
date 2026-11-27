@@ -9,22 +9,14 @@ import (
 
 	"github.com/swayam5342/plugit/internal/clients"
 	"github.com/swayam5342/plugit/internal/model"
-	"github.com/swayam5342/plugit/internal/protocol"
 	"github.com/swayam5342/plugit/internal/tui"
 )
 
 // protoDescribe returns the per-protocol badge/target function the TUI uses
-// (SPEC §2.3). An empty name is a pre-field manifest and means REST. A
-// protocol with no registered impl returns nil, so the TUI falls back to the
-// REST method and path rather than refusing to draw.
+// (SPEC §2.3), bound to the API's protocol through describeFor. An empty name
+// is a pre-field manifest and means REST.
 func protoDescribe(name model.Protocol) func(model.Tool) (string, string) {
-	if name == "" {
-		name = model.REST
-	}
-	if p, ok := protocol.For(name); ok {
-		return p.Describe
-	}
-	return nil
+	return func(t model.Tool) (string, string) { return describeFor(name, t) }
 }
 
 // runPicker runs the terminal picker (SPEC §2.3). The picker draws on

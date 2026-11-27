@@ -29,11 +29,23 @@ type SyncDiff struct {
 	ServersBefore, ServersAfter []string
 	ServersChanged              bool
 	BaseURLListed               bool
+	// FieldErrors are the toolset response_fields (GraphQL) that don't
+	// compile against the new source (SPEC P7: sync re-validates saved
+	// documents), sorted by toolset then key.
+	FieldErrors []FieldError
+}
+
+// FieldError is one toolset entry whose response_fields no longer compile.
+// Err is the parse child's cleaned message, naming the path.
+type FieldError struct {
+	Toolset string
+	Key     model.OpKey
+	Err     string
 }
 
 // Empty reports whether nothing changed.
 func (d SyncDiff) Empty() bool {
-	return len(d.Added) == 0 && len(d.Removed) == 0 && len(d.Changed) == 0 && !d.ServersChanged
+	return len(d.Added) == 0 && len(d.Removed) == 0 && len(d.Changed) == 0 && !d.ServersChanged && len(d.FieldErrors) == 0
 }
 
 // DiffManifests compares the manifest plugit has with a newly parsed one.
@@ -98,6 +110,14 @@ func DiffManifests(old, updated *model.Manifest, cfg config.API) SyncDiff {
 	}
 	d.ServersChanged = !slices.Equal(norm(old.Endpoints), norm(updated.Endpoints))
 	d.BaseURLListed = slices.Contains(norm(updated.Endpoints), strings.TrimRight(cfg.Endpoint, "/"))
+	if updated.GraphQL != nil {
+		for _, ts := range slices.Sorted(maps.Keys(updated.GraphQL.OverrideErrors)) {
+			byKey := updated.GraphQL.OverrideErrors[ts]
+			for _, k := range slices.Sorted(maps.Keys(byKey)) {
+				d.FieldErrors = append(d.FieldErrors, FieldError{Toolset: ts, Key: model.OpKey(k), Err: byKey[k]})
+			}
+		}
+	}
 	return d
 }
 
@@ -119,8 +139,11 @@ func differences(o, n *model.Tool) []string {
 	if !same(o.Params, n.Params) {
 		out = append(out, "parameters")
 	}
-	if !same(o.HTTP.Body, n.HTTP.Body) {
+	if !same(httpBody(o), httpBody(n)) {
 		out = append(out, "request body")
+	}
+	if o.GraphQL != nil && n.GraphQL != nil && o.GraphQL.Document != n.GraphQL.Document {
+		out = append(out, "document")
 	}
 	if !slices.Equal(o.Tags, n.Tags) {
 		out = append(out, "tags")
@@ -132,6 +155,14 @@ func differences(o, n *model.Tool) []string {
 		out = append(out, "ingest issues")
 	}
 	return out
+}
+
+// httpBody is a REST tool's request body; other protocols have none.
+func httpBody(t *model.Tool) *model.Body {
+	if t.HTTP == nil {
+		return nil
+	}
+	return t.HTTP.Body
 }
 
 // AddToToolset lists keys in a toolset (creating it if needed). Keys

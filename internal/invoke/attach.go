@@ -11,52 +11,50 @@ import (
 	"strings"
 
 	"github.com/swayam5342/plugit/internal/httpx"
-	"github.com/swayam5342/plugit/internal/protocol/rest"
+	"github.com/swayam5342/plugit/internal/utils"
 )
+
+// errBuild marks a request that cannot be built or credentialed.
+var errBuild = errors.New("cannot build request")
 
 // attachAuth attaches the resolved credential, only when the request origin
 // matches the pinned base URL (T8). It is invoke's step (SPEC §3.7): a protocol
 // package never attaches a credential or calls httpx (T17).
-func attachAuth(req *http.Request, tg rest.Target) error {
-	a := tg.Auth
-	if a.Type == "" || a.Type == rest.AuthNone {
+func attachAuth(req *http.Request, a Credential, endpoint *url.URL) error {
+	if a.Type == "" || a.Type == credNone {
 		return nil
 	}
-	if !httpx.SameOrigin(req.URL, tg.BaseURL) {
-		return fmt.Errorf("%w: request origin differs from the pinned base URL", rest.ErrBuild)
+	if !httpx.SameOrigin(req.URL, endpoint) {
+		return fmt.Errorf("%w: request origin differs from the pinned base URL", errBuild)
 	}
-	if hasControl(a.Secret) {
-		return fmt.Errorf("%w: the credential contains control characters", rest.ErrBuild)
+	if utils.HasControl(a.Secret) {
+		return fmt.Errorf("%w: the credential contains control characters", errBuild)
 	}
 	switch a.Type {
-	case rest.AuthBearer:
+	case credBearer:
 		req.Header.Set("Authorization", "Bearer "+a.Secret)
-	case rest.AuthHeader:
+	case credHeader:
 		if a.Header == "" {
-			return fmt.Errorf("%w: auth.header is required for header auth", rest.ErrBuild)
+			return fmt.Errorf("%w: auth.header is required for header auth", errBuild)
 		}
 		req.Header.Del(a.Header)
 		req.Header.Set(a.Header, a.Secret)
-	case rest.AuthQuery:
+	case credQuery:
 		if a.Param == "" {
-			return fmt.Errorf("%w: auth.param is required for query auth", rest.ErrBuild)
+			return fmt.Errorf("%w: auth.param is required for query auth", errBuild)
 		}
 		q := req.URL.Query()
 		q.Set(a.Param, a.Secret)
 		req.URL.RawQuery = q.Encode()
-	case rest.AuthBasic:
+	case credBasic:
 		if !strings.Contains(a.Secret, ":") {
-			return fmt.Errorf("%w: basic auth secrets must look like user:password", rest.ErrBuild)
+			return fmt.Errorf("%w: basic auth secrets must look like user:password", errBuild)
 		}
 		req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(a.Secret)))
 	default:
-		return fmt.Errorf("%w: unknown auth type %q", rest.ErrBuild, a.Type)
+		return fmt.Errorf("%w: unknown auth type %q", errBuild, a.Type)
 	}
 	return nil
-}
-
-func hasControl(s string) bool {
-	return strings.IndexFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0
 }
 
 // describeTransportError explains a failed exchange without repeating the

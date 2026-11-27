@@ -23,6 +23,9 @@ var update = flag.Bool("update", false, "rewrite golden files")
 
 const specsDir = "../../../../testdata/specs"
 
+// goldenDir holds the golden outputs; -update rewrites them in place.
+const goldenDir = "../../../../testdata/golden/openapi"
+
 // loadSpec reads a pinned spec, gunzipping *.gz, and checks its SHA-256
 // against SOURCES.md.
 func loadSpec(t *testing.T, file string) []byte {
@@ -101,7 +104,7 @@ func compact(p prepared) []byte {
 
 func checkGolden(t *testing.T, name string, got []byte) {
 	t.Helper()
-	path := filepath.Join("testdata", "golden", name)
+	path := filepath.Join(goldenDir, name)
 	if *update {
 		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			t.Fatal(err)
@@ -117,7 +120,7 @@ func checkGolden(t *testing.T, name string, got []byte) {
 	}
 	want = bytes.ReplaceAll(want, []byte("\r\n"), []byte("\n"))
 	if !bytes.Equal(got, want) {
-		t.Errorf("%s differs from golden; run `go test ./internal/openapi -run Golden -update` and review the diff", name)
+		t.Errorf("%s differs from golden; run `go test ./internal/protocol/rest/openapi -run Golden -update` and review the diff", name)
 	}
 }
 

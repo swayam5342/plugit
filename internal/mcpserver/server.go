@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -54,7 +55,9 @@ type Config struct {
 	Version  string
 	Tools    []Tool
 	Mode     policy.Mode
-	Target   rest.Target
+	Target   rest.Target       // fixed params for the default REST protocol
+	Cred     invoke.Credential // attached only to requests for Endpoint's origin
+	Endpoint *url.URL          // pinned; defaults to Target.BaseURL
 	Proto    protocol.Protocol // the protocol that serves these tools; defaults to REST
 	Doer     httpx.Doer
 	Redactor *redact.Redactor
@@ -80,7 +83,10 @@ func New(cfg Config) *mcp.Server {
 		cfg.Logger = slog.New(slog.DiscardHandler)
 	}
 	if cfg.Redactor == nil {
-		cfg.Redactor = redact.New(redact.Options{Secrets: cfg.Target.SecretValues()})
+		cfg.Redactor = redact.New(redact.Options{Secrets: append(cfg.Cred.SecretValues(), cfg.Target.SecretValues()...)})
+	}
+	if cfg.Endpoint == nil {
+		cfg.Endpoint = cfg.Target.BaseURL
 	}
 	if cfg.Proto == nil {
 		cfg.Proto = rest.REST{Target: cfg.Target}
@@ -202,8 +208,8 @@ func (h *handler) handle(ctx context.Context, req *mcp.CallToolRequest) (res *mc
 	}
 
 	r := invoke.Perform(ctx, invoke.Deps{
-		Proto: h.cfg.Proto, Doer: h.cfg.Doer, Target: h.cfg.Target,
-		Endpoint: h.cfg.Target.BaseURL, Redactor: h.cfg.Redactor,
+		Proto: h.cfg.Proto, Doer: h.cfg.Doer, Cred: h.cfg.Cred,
+		Endpoint: h.cfg.Endpoint, Redactor: h.cfg.Redactor,
 	}, h.tool.Tool, args, h.tool.Fields)
 	h.log(name, start, r.Status, r.IsError, "", "bytes", r.Bytes, "truncated", r.Truncated)
 	rec.Code, rec.Bytes = r.Code, r.Bytes

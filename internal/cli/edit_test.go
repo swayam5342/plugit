@@ -145,3 +145,47 @@ func TestEditPickerLints(t *testing.T) {
 		t.Errorf("findings = %+v", findings)
 	}
 }
+
+// edit --toolset b checks only toolset b's response_fields: a broken
+// toolset a is reported as a warning on stderr (never stdout) and doesn't
+// block the edit; a broken path in the edited toolset still fails it.
+func TestEditChecksOnlyItsToolset(t *testing.T) {
+	p := setupGraphQLAPI(t, "https://api.example.test/graphql")
+	rewriteGraphQLAPI(t, p, `      "query org": {}
+`, `      "query org": {}
+  broken:
+    tools:
+      "query user": {response_fields: ["nosuch"]}
+`)
+	d, out := editDeps(p, pickFields(nil, "id"))
+	stderr := &bytes.Buffer{}
+	d.stderr = stderr
+	if err := editAPI(t.Context(), p, "gh", "b", d); err != nil {
+		t.Fatalf("edit --toolset b with a broken toolset elsewhere: %v", err)
+	}
+	if ts := toolsetsOfAPI(t, p, "gh"); ts["b"].Tools["query user"].ResponseFields == nil {
+		t.Errorf("toolset b not saved: %+v", ts["b"])
+	}
+	for _, want := range []string{"broken", "query user", "nosuch"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("stderr should warn about %q:\n%s", want, stderr)
+		}
+	}
+	if strings.Contains(out.String(), "nosuch") {
+		t.Errorf("the warning went to stdout:\n%s", out)
+	}
+
+	d.pick = pickFields(nil, "alsonosuch")
+	if err := editAPI(t.Context(), p, "gh", "b", d); err == nil || !strings.Contains(err.Error(), "alsonosuch") {
+		t.Errorf("a broken path in the edited toolset must fail: %v", err)
+	}
+}
+
+func toolsetsOfAPI(t *testing.T, p config.Paths, name string) map[string]config.Toolset {
+	t.Helper()
+	cfg, err := config.LoadAPI(p, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg.Toolsets
+}

@@ -238,7 +238,7 @@ func TestL007Credentials(t *testing.T) {
 // The L007 suite: every tool in every poisoned fixture is caught (SPEC M4
 // exit criterion).
 func TestL007PoisonedFixtures(t *testing.T) {
-	for _, path := range []string{"../../testdata/hostile/poisoned-description.yaml", "testdata/poisoned-instructions.yaml"} {
+	for _, path := range []string{"../../testdata/hostile/poisoned-description.yaml", "../../testdata/hostile/lint/poisoned-instructions.yaml"} {
 		t.Run(filepath.Base(path), func(t *testing.T) {
 			data, err := os.ReadFile(path)
 			if err != nil {
@@ -372,5 +372,20 @@ func TestL007ChecksSchemaValues(t *testing.T) {
 	clean.Params = []model.Param{{Name: "q", Bind: model.Binding{Upstream: "q", In: model.InQuery}, Schema: json.RawMessage(`{"type":"string","enum":["asc","desc"],"default":"asc"}`)}}
 	if f := find(Run(Input{API: api(all("GET /pets")), Tools: []model.Tool{clean}}), "L007"); f != nil {
 		t.Errorf("clean values flagged: %+v", *f)
+	}
+}
+
+// L011 names the config key as it is now, endpoint (the M7 rename of
+// base_url), in both severities.
+func TestL011NamesEndpoint(t *testing.T) {
+	for _, insecure := range []bool{false, true} {
+		a := api(all("GET /pets"))
+		a.Endpoint = "http://pets.example.test"
+		a.Auth = config.Auth{Type: config.AuthBearer, Secret: "env:T"}
+		a.Network.AllowInsecure = insecure
+		f := find(Run(Input{API: a, Tools: []model.Tool{tl("GET", "/pets", "listPets", "List pets.")}}), "L011")
+		if f == nil || !strings.HasPrefix(f.Message, "endpoint http://pets.example.test ") || strings.Contains(f.Message, "base_url") {
+			t.Errorf("allow_insecure=%v: L011 = %+v, want a message about the endpoint", insecure, f)
+		}
 	}
 }

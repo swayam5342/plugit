@@ -136,3 +136,22 @@ func TestLintUsageExitCode(t *testing.T) {
 		t.Errorf("unknown flag exit code = %d, want 2", code)
 	}
 }
+
+// plugit lint passes the manifest's warnings to lint, so a GraphQL
+// subscription, which becomes no tool, is reported as L013.
+func TestLintGraphQLSubscription(t *testing.T) {
+	p, d, _ := addEnv(t)
+	schemaPath := writeSDL(t, gqlSDL+"type Subscription { onEvent: String }\n")
+	s := addSettingsFor(schemaPath, func(s *addSettings) { s.name, s.baseURL = "gh", "https://api.example.test/graphql" })
+	d.pick = pickFields(nil)
+	if err := addAPI(t.Context(), s, d); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	out := &bytes.Buffer{}
+	if err := lintAPI(t.Context(), p, "gh", lintDeps(out)); err != nil {
+		t.Fatalf("lint: %v\n%s", err, out)
+	}
+	if !strings.Contains(out.String(), "L013") || !strings.Contains(out.String(), `subscription "onEvent"`) {
+		t.Errorf("output does not report the subscription as L013:\n%s", out)
+	}
+}
