@@ -17,7 +17,9 @@ import (
 // possible type it is valid for, and is an error only if it is valid for
 // none; field names the possible types declare with different types are
 // aliased as in DefaultSelection. A field with a required argument cannot be
-// selected. Duplicate and overlapping paths merge; schema order is kept.
+// selected. Duplicate and overlapping paths merge; schema order is kept. A
+// path has at most maxPathSegments segments, and one call at most
+// maxPathSteps compile steps.
 //
 // A scalar or enum return type takes no paths and yields no selection set;
 // an object, interface or union return type needs at least one path.
@@ -39,6 +41,9 @@ func SelectionFromPaths(s *ast.Schema, returnType *ast.Type, paths []string) (Se
 	root := &selSet{}
 	for _, p := range paths {
 		segs := strings.Split(p, ".")
+		if len(segs) > maxPathSegments {
+			return Selection{}, fmt.Errorf("response_fields path %q: more than %d segments", p, maxPathSegments)
+		}
 		for _, seg := range segs {
 			if !isName(seg) {
 				return Selection{}, fmt.Errorf("response_fields path %q: %q is not a GraphQL field name", p, seg)

@@ -2,8 +2,6 @@ package graphql_test
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -20,6 +18,9 @@ import (
 )
 
 var update = flag.Bool("update", false, "rewrite golden files")
+
+// goldenDir holds the GraphQL golden files.
+const goldenDir = "../../../testdata/golden/graphql"
 
 // The test binary doubles as the isolate parse child, so ingest here runs
 // through the same child path as plugit add and sync.
@@ -42,21 +43,17 @@ func childRunner() *isolate.Runner {
 // default graphql: settings.
 var githubOpts = ingest.Options{Prefix: "github", SelectionDepth: 2, MaxFields: 100}
 
-// TestGitHubSDLPinned: the fixture decompresses to the SHA-256 recorded in
-// SOURCES.md.
+// TestGitHubSDLPinned: the fixture decompresses to the SHA-256 recorded on
+// its SOURCES.md row (GitHubSDL checks both), and is detected as SDL.
 func TestGitHubSDLPinned(t *testing.T) {
 	data := graphql.GitHubSDL(t)
-	sum := sha256.Sum256(data)
-	if got := hex.EncodeToString(sum[:]); got != graphql.GitHubSDLSHA256 {
-		t.Fatalf("SHA-256 = %s, want %s", got, graphql.GitHubSDLSHA256)
-	}
 	if !graphql.DetectSDL(data) {
 		t.Error("the GitHub SDL is not detected as SDL")
 	}
 }
 
-// raceSlowdown scales the time bound under -race, where CI runs this test
-// (it runs only go test -race). Measured on the development machine: about
+// raceSlowdown scales the time bound under -race (CI also runs this test
+// once without -race, for the 2 s bound). Measured on the development machine: about
 // 0.25 s without -race and 1.8 s with it. A 10 s race bound leaves over 5x
 // headroom for a slower CI runner and still fails on an order-of-magnitude
 // regression; the plain build keeps the SPEC's 2 s bound.
@@ -121,7 +118,7 @@ func TestGitHubSDLGolden(t *testing.T) {
 		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%d\n", tl.Key, tl.Name, tl.Safety, strings.Join(params, ","), len(tl.GraphQL.Selection))
 	}
 	got := []byte(b.String())
-	path := filepath.Join("../../../testdata/golden/graphql", "github.graphql.txt")
+	path := filepath.Join(goldenDir, "github.graphql.txt")
 	if *update {
 		if err := os.WriteFile(path, got, 0o600); err != nil {
 			t.Fatal(err)
@@ -152,7 +149,7 @@ func TestHostileFixturesThroughChild(t *testing.T) {
 		}
 		inputs[filepath.Base(f)] = data
 	}
-	inputs["huge-introspection"] = graphql.HugeIntrospection(hugeSize)
+	inputs["huge-introspection"] = graphql.HugeIntrospection(graphql.HugeShape)
 	inputs["deep-typeref-introspection"] = graphql.DeepTypeRefIntrospection(5000)
 
 	for name, data := range inputs {
@@ -177,16 +174,12 @@ func TestHostileFixturesThroughChild(t *testing.T) {
 	}
 }
 
-// hugeSize is the generated introspection result's shape: big enough to
-// exercise every count cap, small enough to stay fast under -race.
-var hugeSize = graphql.HugeSize{Types: 2000, Fields: 20, Roots: 400, Subscriptions: 100, DescriptionRunes: 1 << 20}
-
 // The isolate output cap holds: a manifest bigger than the runner's
 // MaxOutput is an error, not an unbounded read.
 func TestHugeIntrospectionOutputCapped(t *testing.T) {
 	r := childRunner()
 	r.MaxOutput = 64 << 10
-	_, err := r.Parse(t.Context(), graphql.HugeIntrospection(hugeSize), "", ingest.Options{})
+	_, err := r.Parse(t.Context(), graphql.HugeIntrospection(graphql.HugeShape), "", ingest.Options{})
 	if !errors.Is(err, isolate.ErrParserCrashed) || !strings.Contains(err.Error(), "output exceeded") {
 		t.Fatalf("err = %v, want the output cap to stop the child", err)
 	}

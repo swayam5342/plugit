@@ -177,3 +177,20 @@ func TestResponseFieldsExpansionCapped(t *testing.T) {
 	}
 	assertValidDoc(t, s, "u", sel)
 }
+
+// A path with more than maxPathSegments segments is refused before it is
+// compiled: through a one-member union each level would otherwise build a
+// nested error string, O(D^2) work for a path of D segments.
+func TestResponseFieldsPathSegmentsCapped(t *testing.T) {
+	s := loadSDL(t, "union U = N\ntype N { u: U id: ID }\ntype Query { u: U }\n")
+	long := strings.Repeat("u.", maxPathSegments) + "id"
+	_, err := SelectionFromPaths(s, queryField(t, s, "u"), []string{long})
+	if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("more than %d segments", maxPathSegments)) {
+		t.Fatalf("err = %v, want the segment cap", err)
+	}
+	sel, err := SelectionFromPaths(s, queryField(t, s, "u"), []string{"u.u.id"})
+	if err != nil {
+		t.Fatalf("x.y: %v", err)
+	}
+	assertValidDoc(t, s, "u", sel)
+}

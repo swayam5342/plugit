@@ -333,6 +333,10 @@ func TestLoadIntrospectionHostile(t *testing.T) {
 			`{"name":"x","type":{"kind":"SCALAR","name":"Int","ofType":null},"defaultValue":"1) : Int } type Evil { b: Int"}`), false},
 		{"default value comment", introWithField("a", `{"kind":"SCALAR","name":"Int","ofType":null}`,
 			`{"name":"x","type":{"kind":"SCALAR","name":"Int","ofType":null},"defaultValue":"1 # )"}`), true},
+		// gqlparser's nesting limit (1000) rejects this default value
+		// before it can exhaust the stack.
+		{"default value nested very deep", introWithField("a", `{"kind":"SCALAR","name":"Int","ofType":null}`,
+			`{"name":"x","type":{"kind":"SCALAR","name":"Int","ofType":null},"defaultValue":"`+strings.Repeat("[", 2000)+strings.Repeat("]", 2000)+`"}`), false},
 		{"unknown kind", []byte(`{"__schema":{"queryType":{"name":"Query"},"types":[{"kind":"OBJECT","name":"Query","fields":[{"name":"a","args":[],"type":{"kind":"SCALAR","name":"Int","ofType":null}}]},{"kind":"WEIRD","name":"X"}]}}`), false},
 		{"description with quotes", []byte(`{"__schema":{"queryType":{"name":"Query"},"types":[{"kind":"OBJECT","name":"Query","description":"\"\"\" } type Evil { b: Int } \"\\u0000","fields":[{"name":"a","args":[],"type":{"kind":"SCALAR","name":"Int","ofType":null}}]}]}}`), true},
 	}

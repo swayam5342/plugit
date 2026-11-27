@@ -232,7 +232,7 @@ func (b *builder) tool(op string, f *ast.FieldDefinition) (*model.Tool, error) {
 			issues.add(model.IssueHiddenText, d)
 		}
 		if degraded {
-			issues.add(model.IssueSchemaDegraded, "argument "+a.Name+": schema simplified to {} (custom scalar, depth or node budget)")
+			issues.add(model.IssueSchemaDegraded, "argument "+a.Name+": schema simplified to {} ("+strings.Join(mapper.degradedReasons(), ", ")+")")
 		}
 		v := "$" + a.Name + ": " + a.Type.String()
 		if a.DefaultValue != nil {

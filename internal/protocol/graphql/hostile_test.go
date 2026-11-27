@@ -27,6 +27,10 @@ type HugeSize struct {
 	DescriptionRunes                    int
 }
 
+// HugeShape is the shape the huge-introspection tests use: big enough to
+// exercise every count cap, small enough to stay fast under -race.
+var HugeShape = HugeSize{Types: 2000, Fields: 20, Roots: 400, Subscriptions: 100, DescriptionRunes: 1 << 20}
+
 // HugeIntrospection generates an introspection result with sz.Types object
 // types of sz.Fields fields each (half of them pointing at other types, so
 // the graph is full of cycles), sz.Roots Query fields, sz.Subscriptions
@@ -228,7 +232,7 @@ func TestHostileTypeCycle(t *testing.T) {
 // maxWarnings plus a summary line, descriptions are cut to the description
 // cap, and every selection stays within max_fields.
 func TestHostileHugeIntrospection(t *testing.T) {
-	sz := HugeSize{Types: 2000, Fields: 20, Roots: 400, Subscriptions: 100, DescriptionRunes: 1 << 20}
+	sz := HugeShape
 	data := HugeIntrospection(sz)
 	t.Logf("generated %d bytes", len(data))
 	if !DetectIntrospection(data) {

@@ -2,6 +2,7 @@ package graphql
 
 import (
 	"encoding/json"
+	"maps"
 	"math"
 	"slices"
 
@@ -20,6 +21,12 @@ const (
 	// arguments mapped through one argMapper (SPEC 3.5 rule 3); once spent,
 	// the remaining parts become {}.
 	maxSchemaNodes = 5000
+	// maxDefaultLen caps the JSON encoding of an input field's default value
+	// shown as "default"; a longer default is left out. Defaults repeat with
+	// every use of their input type, so this bounds what they add.
+	maxDefaultLen = 256
+	// maxDegradedReasons caps the distinct reasons kept per argument.
+	maxDegradedReasons = 4
 )
 
 // ArgSchema maps the GraphQL type t of one field argument to the JSON Schema
@@ -31,12 +38,12 @@ func ArgSchema(s *ast.Schema, def *ast.Value, t *ast.Type) (schema json.RawMessa
 }
 
 // argMapper maps the arguments of one tool. Its node budget is shared by
-// every arg call on it; the degraded flag and the hidden-text findings are
-// per call.
+// every arg call on it; the degraded reasons and the hidden-text findings
+// are per call.
 type argMapper struct {
 	s          *ast.Schema
 	nodes      int
-	degraded   bool
+	reasons    []string
 	hiddenList []string
 	hiddenSeen map[string]bool
 }
@@ -60,15 +67,24 @@ func newArgMapper(s *ast.Schema) *argMapper {
 // The output is deterministic: object keys are sorted, enum values keep
 // schema order and "required" is sorted.
 func (m *argMapper) arg(def *ast.Value, t *ast.Type) (schema json.RawMessage, required, degraded bool) {
-	m.degraded = false
+	m.reasons = nil
 	m.hiddenList, m.hiddenSeen = nil, nil
 	out := m.mapType(t, 1)
 	b, err := json.Marshal(out)
 	if err != nil {
 		// Only strings, numbers, slices and maps are built, so this cannot fail.
-		b, m.degraded = []byte(`{}`), true
+		b = []byte(`{}`)
+		m.degrade("encoding failed")
 	}
-	return b, t != nil && t.NonNull && def == nil, m.degraded
+	return b, t != nil && t.NonNull && def == nil, len(m.reasons) > 0
+}
+
+// degradedReasons returns why the most recent arg call was degraded: each
+// distinct reason ("custom scalar DateTime", "depth cap", "node budget",
+// ...), in the order met, at most maxDegradedReasons. It is empty when the
+// call was not degraded.
+func (m *argMapper) degradedReasons() []string {
+	return m.reasons
 }
 
 // hidden returns what the most recent arg call's description cleaning
@@ -94,15 +110,23 @@ func (m *argMapper) noteHidden(where, s string) {
 	}
 }
 
-// degrade marks the call degraded and returns the accept-anything schema.
-func (m *argMapper) degrade() map[string]any {
-	m.degraded = true
+// degrade records why the call is degraded and returns the accept-anything
+// schema.
+func (m *argMapper) degrade(reason string) map[string]any {
+	if !slices.Contains(m.reasons, reason) && len(m.reasons) < maxDegradedReasons {
+		m.reasons = append(m.reasons, reason)
+	}
 	return map[string]any{}
 }
 
 func (m *argMapper) mapType(t *ast.Type, depth int) map[string]any {
-	if t == nil || m.s == nil || depth > maxSchemaDepth || m.nodes >= maxSchemaNodes {
-		return m.degrade()
+	switch {
+	case t == nil || m.s == nil:
+		return m.degrade("no type")
+	case depth > maxSchemaDepth:
+		return m.degrade("depth cap")
+	case m.nodes >= maxSchemaNodes:
+		return m.degrade("node budget")
 	}
 	m.nodes++
 	if t.Elem != nil {
@@ -110,7 +134,7 @@ func (m *argMapper) mapType(t *ast.Type, depth int) map[string]any {
 	}
 	d := m.s.Types[t.NamedType]
 	if d == nil {
-		return m.degrade()
+		return m.degrade("unknown type " + t.NamedType)
 	}
 	switch d.Kind {
 	case ast.Scalar:
@@ -121,7 +145,7 @@ func (m *argMapper) mapType(t *ast.Type, depth int) map[string]any {
 		return m.inputObject(d, depth)
 	default:
 		// Objects, interfaces and unions are not valid input types.
-		return m.degrade()
+		return m.degrade("non-input type " + d.Name)
 	}
 }
 
@@ -138,13 +162,13 @@ func (m *argMapper) scalar(name string) map[string]any {
 		return map[string]any{"type": "boolean"}
 	default:
 		// A custom scalar's wire format is unknown.
-		return m.degrade()
+		return m.degrade("custom scalar " + name)
 	}
 }
 
 func (m *argMapper) enum(d *ast.Definition) map[string]any {
 	if len(d.EnumValues) == 0 {
-		return m.degrade()
+		return m.degrade("enum " + d.Name + " without values")
 	}
 	values := make([]string, 0, len(d.EnumValues))
 	for _, v := range d.EnumValues {
@@ -167,15 +191,93 @@ func (m *argMapper) inputObject(d *ast.Definition, depth int) map[string]any {
 		if desc := naming.CleanText(f.Description, 0); desc != "" {
 			ps["description"] = desc
 		}
+		if v, ok := defaultJSON(f.DefaultValue); ok {
+			ps["default"] = v
+			m.noteHiddenValue("input "+d.Name+" field "+f.Name+" default value", v)
+		}
 		props[f.Name] = ps
 		if f.Type != nil && f.Type.NonNull && f.DefaultValue == nil {
 			req = append(req, f.Name)
 		}
 	}
-	out := map[string]any{"type": "object", "properties": props}
+	// A GraphQL input object is closed: the server rejects any other field.
+	out := map[string]any{"type": "object", "properties": props, "additionalProperties": false}
 	if len(req) > 0 {
+		// Field names are unique (the schema loader rejects duplicates).
 		slices.Sort(req)
-		out["required"] = slices.Compact(req)
+		out["required"] = req
 	}
 	return out
+}
+
+// noteHiddenValue records a hidden-text finding for every string in the
+// JSON value v (a default), as for a description.
+func (m *argMapper) noteHiddenValue(where string, v any) {
+	switch x := v.(type) {
+	case string:
+		m.noteHidden(where, x)
+	case []any:
+		for _, e := range x {
+			m.noteHiddenValue(where, e)
+		}
+	case map[string]any:
+		for _, k := range slices.Sorted(maps.Keys(x)) {
+			m.noteHiddenValue(where, k)
+			m.noteHiddenValue(where, x[k])
+		}
+	}
+}
+
+// defaultJSON converts a constant GraphQL default value to its JSON value:
+// numbers as written, enum values as strings, lists and input objects as
+// arrays and objects. It reports false for no default, for a value holding a
+// variable, and for one whose JSON encoding is longer than maxDefaultLen.
+func defaultJSON(v *ast.Value) (any, bool) {
+	out, ok := defaultValueJSON(v)
+	if !ok {
+		return nil, false
+	}
+	b, err := json.Marshal(out)
+	if err != nil || len(b) > maxDefaultLen {
+		return nil, false
+	}
+	return out, true
+}
+
+func defaultValueJSON(v *ast.Value) (any, bool) {
+	if v == nil {
+		return nil, false
+	}
+	switch v.Kind {
+	case ast.IntValue, ast.FloatValue:
+		return json.Number(v.Raw), true
+	case ast.StringValue, ast.BlockValue, ast.EnumValue:
+		return v.Raw, true
+	case ast.BooleanValue:
+		return v.Raw == "true", true
+	case ast.NullValue:
+		return nil, true
+	case ast.ListValue:
+		out := make([]any, 0, len(v.Children))
+		for _, c := range v.Children {
+			e, ok := defaultValueJSON(c.Value)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, e)
+		}
+		return out, true
+	case ast.ObjectValue:
+		out := make(map[string]any, len(v.Children))
+		for _, c := range v.Children {
+			e, ok := defaultValueJSON(c.Value)
+			if !ok {
+				return nil, false
+			}
+			out[c.Name] = e
+		}
+		return out, true
+	default:
+		return nil, false
+	}
 }

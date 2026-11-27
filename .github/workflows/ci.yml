@@ -55,6 +55,10 @@ jobs:
           go-version: ${{ matrix.go }}
       - name: go test -race
         run: go test -race -count=1 ./...
+      - name: go test (race off) for the allocation and time bounds
+        # These checks are skipped or loosened under -race: DetectSDL's
+        # zero-allocation cheap reject and the SPEC's 2 s ingest bounds.
+        run: go test -count=1 -run '^(TestDetectSDLCheapReject|TestGitHubSDLIngestsUnder2s|TestGoldenLargeSpecs)$' ./internal/protocol/graphql ./internal/protocol/rest/openapi
 
   fuzz:
     runs-on: ubuntu-latest

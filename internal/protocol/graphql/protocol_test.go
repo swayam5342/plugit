@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 
@@ -125,10 +127,11 @@ func TestEncodeNoCredentials(t *testing.T) {
 		},
 	}}
 	req, _, _ := encodeReq(t, g, map[string]any{"id": "1"})
-	for _, h := range []string{"Authorization", "Cookie", "Proxy-Authorization"} {
-		if v := req.Header.Get(h); v != "" {
-			t.Errorf("Encode set %s = %q; invoke attaches credentials, not the protocol", h, v)
-		}
+	// The exact header set: nothing beyond the protocol's own headers and
+	// the fixed header, so no credential header can slip in.
+	want := []string{"Accept", "Content-Type", "User-Agent", "X-Tenant"}
+	if got := slices.Sorted(maps.Keys(req.Header)); !slices.Equal(got, want) {
+		t.Errorf("Encode set headers %q, want exactly %q; invoke attaches credentials, not the protocol", got, want)
 	}
 	if req.URL.RawQuery != "" {
 		t.Errorf("Encode added a query string %q; no credential may ride in the URL", req.URL.RawQuery)

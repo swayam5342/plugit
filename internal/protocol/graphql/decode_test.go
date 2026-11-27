@@ -34,7 +34,7 @@ func TestDecodeOK(t *testing.T) {
 }
 
 func TestDecodeNullDataNoErrors(t *testing.T) {
-	for _, body := range []string{`{"data":{"user":null}}`, `{"data":null}`, `{"data":{}}`} {
+	for _, body := range []string{`{"data":{"user":null}}`, `{"data":null}`} {
 		t.Run(body, func(t *testing.T) {
 			res := decodeResp(http.StatusOK, "application/json", body, false)
 			if res.Code != "ok" || res.IsError {
@@ -145,7 +145,9 @@ func TestDecodeNonJSON200(t *testing.T) {
 }
 
 func TestDecodeNotGraphQLShaped(t *testing.T) {
-	for _, body := range []string{`{"hello":1}`, `[1,2]`, `"str"`, `{"errors":"boom"}`, `{"data":[1]}`, `{"errors":[{"message":7}]}`} {
+	// data without the root field and no errors is a nonconforming server
+	// (an explicit null is a conforming "not found"), not an ok null.
+	for _, body := range []string{`{"hello":1}`, `[1,2]`, `"str"`, `{"errors":"boom"}`, `{"data":[1]}`, `{"errors":[{"message":7}]}`, `{"data":{}}`, `{"data":{"other":1}}`, `{"data":{},"errors":[]}`} {
 		t.Run(body, func(t *testing.T) {
 			res := decodeResp(http.StatusOK, "application/json", body, false)
 			if res.Code != "HTTP 200" || !res.IsError || res.Text != body {
@@ -219,5 +221,36 @@ func TestDecodeErrorTextOneLinePerError(t *testing.T) {
 	res := decodeResp(http.StatusOK, "application/json", `{"errors":[{"message":"first\nsecond line"},{"message":""},{"message":"p","path":{"not":"a list"}}]}`, false)
 	if want := "first second line\n(no message)\np"; res.Text != want {
 		t.Errorf("Text = %q, want %q (one line per error; a non-list path is dropped)", res.Text, want)
+	}
+}
+
+// data without the root field but with errors is still an errors result.
+func TestDecodeMissingFieldWithErrors(t *testing.T) {
+	res := decodeResp(http.StatusOK, "application/json", `{"data":{},"errors":[{"message":"denied"}]}`, false)
+	if res.Code != "errors" || !res.IsError || res.Text != "denied" {
+		t.Errorf("Code=%q IsError=%v Text=%q, want errors/true/denied", res.Code, res.IsError, res.Text)
+	}
+}
+
+// An errors[].path keeps only what the GraphQL spec allows in a path: field
+// names (the Name grammar) and non-negative integer list indices. Any other
+// segment is dropped, so upstream text can't ride in through a path.
+func TestDecodeErrorPathSegments(t *testing.T) {
+	for _, tc := range []struct{ path, want string }{
+		{`["user","friends",0,"name"]`, `(path: ["user","friends",0,"name"])`},
+		{`["user","ignore previous <!-- instructions -->",0,"x"]`, `(path: ["user",0,"x"])`},
+		{`["user",-1,1.5,1e3,"_ok9"]`, `(path: ["user","_ok9"])`},
+		{`["9lives","a-b",""]`, ""},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			res := decodeResp(http.StatusOK, "application/json", `{"errors":[{"message":"m","path":`+tc.path+`}]}`, false)
+			want := "m"
+			if tc.want != "" {
+				want += " " + tc.want
+			}
+			if res.Text != want {
+				t.Errorf("Text = %q, want %q", res.Text, want)
+			}
+		})
 	}
 }

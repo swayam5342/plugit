@@ -299,7 +299,9 @@ func (GraphQL) Decode(c protocol.Call, resp *http.Response, body []byte, truncat
 
 // parseResponse reads a GraphQL response envelope. ok is false when body is
 // not one: not a JSON object, neither data nor errors present, data neither
-// an object nor null, or errors not a list of objects with string messages.
+// an object nor null, errors not a list of objects with string messages, or
+// a data object without the root field and no errors (a nonconforming
+// server; an explicit null field is a conforming "not found").
 // fieldValue is data.<field> byte-for-byte, or null.
 func parseResponse(body []byte, field string) (data, fieldValue json.RawMessage, errs []cleanError, ok bool) {
 	var r response
@@ -307,14 +309,17 @@ func parseResponse(body []byte, field string) (data, fieldValue json.RawMessage,
 		return nil, nil, nil, false
 	}
 	fieldValue = json.RawMessage("null")
+	missing := false
 	if !isNull(r.Data) {
 		var obj map[string]json.RawMessage
 		if json.Unmarshal(r.Data, &obj) != nil || obj == nil {
 			return nil, nil, nil, false
 		}
-		if v, found := obj[field]; found {
+		v, found := obj[field]
+		if found {
 			fieldValue = v
 		}
+		missing = !found
 	}
 	if !isNull(r.Errors) {
 		var raw []upstreamError
@@ -328,11 +333,17 @@ func parseResponse(body []byte, field string) (data, fieldValue json.RawMessage,
 			errs = append(errs, cleanError{Message: naming.CleanText(*e.Message, 0), Path: cleanPath(e.Path)})
 		}
 	}
+	if missing && len(errs) == 0 {
+		return nil, nil, nil, false
+	}
 	return r.Data, fieldValue, errs, true
 }
 
-// cleanPath keeps an error path only when it is a list of strings and
-// integers, as the GraphQL spec defines it, compacted.
+// cleanPath keeps an error path only when it is a list, as the GraphQL spec
+// defines it, and keeps only the segments the spec allows: field names (the
+// GraphQL Name grammar) and non-negative integer list indices. Any other
+// segment is dropped, so upstream text can't reach the model through a
+// path. A path left with no segment is dropped.
 func cleanPath(raw json.RawMessage) json.RawMessage {
 	if isNull(raw) {
 		return nil
@@ -341,18 +352,29 @@ func cleanPath(raw json.RawMessage) json.RawMessage {
 	if json.Unmarshal(raw, &elems) != nil {
 		return nil
 	}
+	kept := make([]any, 0, len(elems))
 	for _, e := range elems {
 		var s string
 		var n json.Number
-		if json.Unmarshal(e, &s) != nil && json.Unmarshal(e, &n) != nil {
-			return nil
+		switch {
+		case json.Unmarshal(e, &s) == nil:
+			if isName(s) {
+				kept = append(kept, s)
+			}
+		case json.Unmarshal(e, &n) == nil:
+			if i, err := strconv.ParseUint(n.String(), 10, 63); err == nil {
+				kept = append(kept, i)
+			}
 		}
 	}
-	var buf bytes.Buffer
-	if json.Compact(&buf, raw) != nil {
+	if len(kept) == 0 {
 		return nil
 	}
-	return buf.Bytes()
+	b, err := json.Marshal(kept)
+	if err != nil {
+		return nil
+	}
+	return b
 }
 
 // partialValue renders {"data": <data byte-for-byte>, "errors": <cleaned>}.

@@ -20,8 +20,8 @@ import (
 
 // FuzzSDL feeds arbitrary bytes through detection, LoadSchema (as SDL and as
 // an introspection result) and Build, the whole ingest path the isolate child
-// runs on hostile input. It must never panic; an error must wrap
-// ErrUnsupportedSpec; and a built manifest must respect its caps: valid,
+// runs on hostile input. It must never panic; a LoadSchema or Build error
+// must wrap ErrUnsupportedSpec; and a built manifest must respect its caps: valid,
 // unique tool names, descriptions within the cap, warnings capped, every
 // selection within max_fields, every document valid against the schema, and
 // the build deterministic.
@@ -70,6 +70,9 @@ func FuzzSDL(f *testing.F) {
 			}
 			m, err := Build(s, format, opts)
 			if err != nil {
+				if !errors.Is(err, ErrUnsupportedSpec) {
+					t.Fatalf("%s: Build error does not wrap ErrUnsupportedSpec: %v", format, err)
+				}
 				continue
 			}
 			checkFuzzManifest(t, format, s, m, opts)
@@ -77,8 +80,14 @@ func FuzzSDL(f *testing.F) {
 			if err != nil {
 				t.Fatalf("%s: second build failed: %v", format, err)
 			}
-			a, _ := json.Marshal(m)
-			b, _ := json.Marshal(again)
+			a, err := json.Marshal(m)
+			if err != nil {
+				t.Fatalf("%s: marshal: %v", format, err)
+			}
+			b, err := json.Marshal(again)
+			if err != nil {
+				t.Fatalf("%s: marshal: %v", format, err)
+			}
 			if string(a) != string(b) {
 				t.Fatalf("%s: non-deterministic build", format)
 			}

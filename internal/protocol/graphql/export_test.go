@@ -56,8 +56,16 @@ func GitHubSDL(t testing.TB) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(sources, []byte("`"+GitHubSDLFile+"`")) || !bytes.Contains(sources, []byte(got)) {
-		t.Fatalf("%s and its SHA-256 %s are not listed in SOURCES.md", GitHubSDLFile, got)
+	// The file and its SHA-256 must be on the same SOURCES.md table row.
+	listed := false
+	for line := range bytes.Lines(sources) {
+		if bytes.HasPrefix(line, []byte("| `"+GitHubSDLFile+"`")) && bytes.Contains(line, []byte("`"+got+"`")) {
+			listed = true
+			break
+		}
+	}
+	if !listed {
+		t.Fatalf("%s and its SHA-256 %s are not listed on one row of SOURCES.md", GitHubSDLFile, got)
 	}
 	return data
 }

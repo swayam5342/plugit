@@ -313,6 +313,26 @@ func TestSelectionZeroOptsUseDefaults(t *testing.T) {
 	if got, want := sel.Render(), "{ id login bio org { id name } }"; got != want {
 		t.Errorf("Render = %q, want %q", got, want)
 	}
+	assertValidDoc(t, s, "user", sel)
+}
+
+// An object return type with no selectable field (every field needs an
+// argument, or is an object with nothing selectable) selects only
+// __typename at the root: never an empty selection set.
+func TestSelectionNoSelectableFields(t *testing.T) {
+	for name, sdl := range map[string]string{
+		"only required-arg fields": "type U { a(x: Int!): Int }\ntype Query { u: U }\n",
+		"only dead-end objects":    "type E { a(x: Int!): Int }\ntype U { e: E }\ntype Query { u: U }\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := loadSDL(t, sdl)
+			sel, truncated := DefaultSelection(s, queryField(t, s, "u"), SelectionOpts{})
+			if got := sel.Render(); got != "{ __typename }" || truncated {
+				t.Errorf("Render = %q (truncated %v), want { __typename }", got, truncated)
+			}
+			assertValidDoc(t, s, "u", sel)
+		})
+	}
 }
 
 func TestTruncationNeverEmptyObject(t *testing.T) {

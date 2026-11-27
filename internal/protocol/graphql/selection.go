@@ -19,6 +19,11 @@ const (
 // path could otherwise expand exponentially (T18).
 const maxPathSteps = 10000
 
+// maxPathSegments caps the segments of one response_fields path, so a very
+// long path is refused before it is compiled (each abstract level wraps the
+// error of the level below, which would be O(D^2) work for D segments).
+const maxPathSegments = 100
+
 // SelectionOpts caps a default selection. Depth is the number of field
 // levels selected (the return type's own fields are depth 1); MaxFields is
 // the number of field selections, leaf or object, that may be emitted
@@ -171,6 +176,11 @@ func (f *selField) responseName() string {
 //   - No selection set is ever empty: an object, interface or union field
 //     whose sub-selection would be empty (depth limit, budget, or nothing
 //     selectable) is left out.
+//   - Whether a nested object can be filled is decided by looking one level
+//     down only (fillable), so an object whose own fields are all dead-end
+//     objects may take budget slots before it is backed out. The result
+//     stays valid, with a few fewer fields, and truncated can then report
+//     a drop although only such dead-end objects were left out.
 //
 // Zero or negative opts fields use DefaultSelectionDepth and
 // DefaultMaxFields. The result is deterministic.

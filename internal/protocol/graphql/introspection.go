@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 
@@ -322,8 +323,8 @@ func typeRef(r *introRef) (string, error) {
 		return "", fmt.Errorf("invalid type name %q", r.Name)
 	}
 	out := r.Name
-	for i := len(wrappers) - 1; i >= 0; i-- {
-		if wrappers[i] == "LIST" {
+	for _, w := range slices.Backward(wrappers) {
+		if w == "LIST" {
 			out = "[" + out + "]"
 		} else {
 			out += "!"

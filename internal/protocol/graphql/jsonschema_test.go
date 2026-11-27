@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/vektah/gqlparser/v2/ast"
@@ -103,9 +104,9 @@ type Query { f(filter: Filter): Int }
 	if required || degraded {
 		t.Errorf("required, degraded = %v, %v; want false, false", required, degraded)
 	}
-	want := `{"properties":{` +
+	want := `{"additionalProperties":false,"properties":{` +
 		`"alpha":{"description":"The minimum age.","maximum":2147483647,"minimum":-2147483648,"type":"integer"},` +
-		`"defaulted":{"maximum":2147483647,"minimum":-2147483648,"type":"integer"},` +
+		`"defaulted":{"default":3,"maximum":2147483647,"minimum":-2147483648,"type":"integer"},` +
 		`"optional":{"type":"string"},` +
 		`"tags":{"items":{"type":"string"},"type":"array"},` +
 		`"zeta":{"type":"string"}},` +
@@ -129,7 +130,7 @@ input Page { size: Int = 10 }
 type Query { f(p: Page!): Int }
 `
 	raw, required, _ := mapArg(t, sdl, "f", "p")
-	if want := `{"properties":{"size":{"maximum":2147483647,"minimum":-2147483648,"type":"integer"}},"type":"object"}`; string(raw) != want {
+	if want := `{"additionalProperties":false,"properties":{"size":{"default":10,"maximum":2147483647,"minimum":-2147483648,"type":"integer"}},"type":"object"}`; string(raw) != want {
 		t.Errorf("schema = %s, want %s (no empty required list)", raw, want)
 	}
 	if !required {
@@ -197,7 +198,7 @@ type Query { f(since: DateTime, at: [DateTime!]!, w: Window): Int }
 	}{
 		{"since", `{}`},
 		{"at", `{"items":{},"type":"array"}`},
-		{"w", `{"properties":{"from":{},"label":{"type":"string"}},"required":["from"],"type":"object"}`},
+		{"w", `{"additionalProperties":false,"properties":{"from":{},"label":{"type":"string"}},"required":["from"],"type":"object"}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.arg, func(t *testing.T) {
@@ -411,5 +412,99 @@ func TestMapHiddenResetsPerArg(t *testing.T) {
 	m.arg(args[1].DefaultValue, args[1].Type)
 	if got := m.hidden(); len(got) != 0 {
 		t.Errorf("hidden after b = %q, want none", got)
+	}
+}
+
+// An input field's default value is emitted as "default", spelled as JSON
+// (enum values as strings, lists and objects as such); a default too long
+// to be worth the tokens is left out, and hidden text in a default string
+// is reported like a description's.
+func TestMapInputFieldDefaults(t *testing.T) {
+	long := strings.Repeat("x", maxDefaultLen)
+	sdl := `
+enum Order { ASC DESC }
+input In { v: Int }
+input F {
+  i: Int = -7
+  x: Float = 1.5e3
+  s: String = "a\"b"
+  b: Boolean = false
+  n: String = null
+  e: Order = DESC
+  l: [Int] = [1, 2]
+  o: In = {v: 1}
+  long: String = "` + long + `"
+  none: Int
+}
+type Query { f(a: F): Int }
+`
+	raw, _, degraded := mapArg(t, sdl, "f", "a")
+	if degraded {
+		t.Errorf("degraded: %s", raw)
+	}
+	// decode reads numbers as float64, so 1.5e3 comes back as 1500.
+	props := decode(t, raw)["properties"].(map[string]any)
+	for name, want := range map[string]string{
+		"i": `-7`, "x": `1500`, "s": `"a\"b"`, "b": `false`, "n": `null`,
+		"e": `"DESC"`, "l": `[1,2]`, "o": `{"v":1}`,
+	} {
+		p := props[name].(map[string]any)
+		d, ok := p["default"]
+		if !ok {
+			t.Errorf("%s: no default in %v", name, p)
+			continue
+		}
+		if b, err := json.Marshal(d); err != nil || string(b) != want {
+			t.Errorf("%s: default = %s, want %s", name, b, want)
+		}
+	}
+	for _, name := range []string{"long", "none"} {
+		if _, ok := props[name].(map[string]any)["default"]; ok {
+			t.Errorf("%s: default emitted, want none", name)
+		}
+	}
+
+	s := loadSDL(t, "input F {\n  f: String = \"a\u200bb\"\n}\ntype Query { q(a: F): Int }")
+	m := newArgMapper(s)
+	a := s.Query.Fields.ForName("q").Arguments[0]
+	m.arg(a.DefaultValue, a.Type)
+	if got := m.hidden(); !slices.Equal(got, []string{"input F field f default value contained invisible or bidi characters (removed)"}) {
+		t.Errorf("hidden = %q", got)
+	}
+}
+
+// A degraded argument says why it was degraded: each distinct reason, in
+// the order met.
+func TestMapDegradedReasons(t *testing.T) {
+	sdl := `
+scalar DateTime
+input Node { value: Int, next: Node }
+input W { a: W, b: W, c: W, d: W }
+input Mixed { at: DateTime, n: Node }
+type Query { f(at: DateTime, n: Node, w: W, m: Mixed, i: Int): Int }
+`
+	s, err := LoadSchema([]byte(sdl), FormatSDL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := s.Query.Fields.ForName("f")
+	for _, tc := range []struct {
+		arg  string
+		want []string
+	}{
+		{"at", []string{"custom scalar DateTime"}},
+		{"n", []string{"depth cap"}},
+		{"w", []string{"depth cap", "node budget"}},
+		{"m", []string{"custom scalar DateTime", "depth cap"}},
+		{"i", nil},
+	} {
+		t.Run(tc.arg, func(t *testing.T) {
+			m := newArgMapper(s) // a fresh budget per argument
+			a := f.Arguments.ForName(tc.arg)
+			_, _, degraded := m.arg(a.DefaultValue, a.Type)
+			if got := m.degradedReasons(); !slices.Equal(got, tc.want) || degraded != (tc.want != nil) {
+				t.Errorf("reasons = %q (degraded %v), want %q", got, degraded, tc.want)
+			}
+		})
 	}
 }
