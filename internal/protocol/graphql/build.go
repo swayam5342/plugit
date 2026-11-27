@@ -70,6 +70,7 @@ func Build(s *ast.Schema, format string, opts ingest.Options) (*model.Manifest, 
 			t, err := b.tool(root.op, f)
 			if err != nil {
 				b.warn(fmt.Sprintf("%s %q skipped: the generated document failed validation: %v", root.op, f.Name, err))
+				b.m.Unsupported = append(b.m.Unsupported, model.UnsupportedOp{Operation: root.op, Field: f.Name, Reason: model.UnsupportedInvalidDocument})
 				continue
 			}
 			tools = append(tools, t)
@@ -77,6 +78,7 @@ func Build(s *ast.Schema, format string, opts ingest.Options) (*model.Manifest, 
 	}
 	for _, f := range rootFields(s.Subscription) {
 		b.warn(fmt.Sprintf("subscription %q: subscriptions aren't supported yet (L013)", f.Name))
+		b.m.Unsupported = append(b.m.Unsupported, model.UnsupportedOp{Operation: "subscription", Field: f.Name, Reason: model.UnsupportedSubscription})
 	}
 	if b.extraWarns > 0 {
 		b.m.Warnings = append(b.m.Warnings, fmt.Sprintf("... and %d more warnings", b.extraWarns))

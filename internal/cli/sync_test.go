@@ -447,3 +447,25 @@ func apiFilesOf(t *testing.T, p config.Paths, name string) []string {
 	cache, _ := p.Manifest(name)
 	return []string{cfgPath, snap, cache}
 }
+
+// A saved source.format is forced on every sync. When the new source doesn't
+// parse as it, the error leads with the parse failure and only suggests
+// re-adding the API as a possibility: a spec of the right format can fail too.
+func TestSyncForcedFormatFailureWording(t *testing.T) {
+	up := newUpstream(t)
+	p := setupSyncAPI(t, up.URL)
+	cfgPath, _ := p.APIConfig("pets")
+	raw, _ := os.ReadFile(cfgPath)
+	withFormat := strings.Replace(string(raw), "openapi.yaml}", "openapi.yaml, format: openapi}", 1)
+	if err := config.WriteFileAtomic(cfgPath, []byte(withFormat)); err != nil {
+		t.Fatal(err)
+	}
+	s := syncDeps(&bytes.Buffer{})
+	s.spec, s.yes = writeSpec(t, "openapi: 4.0.0\ninfo: {title: t, version: '1'}\npaths: {}\n"), true
+	err := syncAPI(t.Context(), p, "pets", s)
+	want := "pets's new source didn't parse as openapi, its saved source.format: "
+	hint := "(if the API moved to another format, remove it and add it again with plugit add)"
+	if err == nil || !strings.HasPrefix(err.Error(), want) || !strings.HasSuffix(err.Error(), hint) {
+		t.Fatalf("err = %v, want it to start %q and end %q", err, want, hint)
+	}
+}

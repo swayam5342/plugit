@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"fmt"
 	"os"
 	"slices"
 	"strings"
@@ -46,7 +47,7 @@ func gqlInput(m *model.Manifest) Input {
 	a := api(keys)
 	a.Protocol = string(model.GraphQL)
 	a.Endpoint = "https://api.example.test/graphql"
-	return Input{API: a, Tools: m.Tools, Warnings: m.Warnings}
+	return Input{API: a, Tools: m.Tools, Unsupported: m.Unsupported}
 }
 
 func findings(fs []Finding, rule string) []Finding {
@@ -101,9 +102,9 @@ type Query { wide: Wide narrow: Int }
 	}
 }
 
-// L013: a Subscription field becomes no tool, only a manifest warning; lint
-// turns each into an info finding for the API (no toolset, no tool), and
-// lint.ignore hides them like any info.
+// L013: a Subscription field becomes no tool, recorded in the manifest's
+// Unsupported list; lint turns each into an info finding for the API (no
+// toolset, no tool), and lint.ignore hides them like any info.
 func TestL013Subscription(t *testing.T) {
 	m := gqlManifest(t, `
 type Query { now: Int }
@@ -135,11 +136,25 @@ type Subscription { onEvent: String onOther(id: ID!): Int }
 		t.Errorf("with lint.ignore L013: findings %+v, ignored %d; want none shown, 2 ignored", fs, ignored)
 	}
 
-	// Other manifest warnings are not L013.
+	// Warnings are for humans: lint reads only the Unsupported list.
 	other := gqlInput(m)
-	other.Warnings = []string{"... and 3 more warnings", `query "x": something else`}
+	other.Unsupported = nil
 	if got := findings(Run(other), "L013"); len(got) != 0 {
-		t.Errorf("unrelated warnings produced L013: %+v", got)
+		t.Errorf("L013 without Unsupported entries: %+v", got)
+	}
+}
+
+// Every subscription is reported, past the manifest's 25-warning cap.
+func TestL013SubscriptionsPastWarningCap(t *testing.T) {
+	var sdl strings.Builder
+	sdl.WriteString("type Query { now: Int }\ntype Subscription {\n")
+	for i := range 40 {
+		fmt.Fprintf(&sdl, "  s%d: Int\n", i)
+	}
+	sdl.WriteString("}\n")
+	m := gqlManifest(t, sdl.String(), ingest.Options{})
+	if got := findings(Run(gqlInput(m)), "L013"); len(got) != 40 {
+		t.Errorf("L013 findings = %d, want all 40 subscriptions (warnings %d)", len(got), len(m.Warnings))
 	}
 }
 
@@ -150,10 +165,9 @@ type Subscription { onEvent: String onOther(id: ID!): Int }
 func TestL013GraphQLSkippedOperation(t *testing.T) {
 	m := gqlManifest(t, `type Query { now: Int }`, ingest.Options{})
 	in := gqlInput(m)
-	in.Warnings = []string{
-		`query "broken" skipped: the generated document failed validation: input: boom`,
-		`mutation "alsoBroken" skipped: the generated document failed validation: validator panic: x`,
-		"... and 3 more warnings",
+	in.Unsupported = []model.UnsupportedOp{
+		{Operation: "query", Field: "broken", Reason: model.UnsupportedInvalidDocument},
+		{Operation: "mutation", Field: "alsoBroken", Reason: model.UnsupportedInvalidDocument},
 	}
 	got := findings(Run(in), "L013")
 	if len(got) != 2 {

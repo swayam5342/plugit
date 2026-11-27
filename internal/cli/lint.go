@@ -91,7 +91,7 @@ func lintAPI(ctx context.Context, p config.Paths, name string, s lintSettings) e
 	if err != nil {
 		return err
 	}
-	fs, ignored := lint.RunCounting(lint.Input{API: *cfg, Tools: m.Tools, Hidden: hiddenParams(cfg.Auth, cfg.Fixed), Warnings: m.Warnings})
+	fs, ignored := lint.RunCounting(lint.Input{API: *cfg, Tools: m.Tools, Hidden: hiddenParams(cfg.Auth, cfg.Fixed), Unsupported: m.Unsupported})
 	if s.toolset != "" {
 		fs = slices.DeleteFunc(fs, func(f lint.Finding) bool { return f.Toolset != "" && f.Toolset != s.toolset })
 	}

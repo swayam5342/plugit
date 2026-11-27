@@ -257,17 +257,36 @@ type Issue struct {
 
 // Manifest is the result of ingesting one source (SPEC §3.4 P2).
 type Manifest struct {
-	Protocol    Protocol       `json:"protocol"`
-	Format      string         `json:"format,omitempty"`
-	Title       string         `json:"title"`
-	Version     string         `json:"version"`
-	SpecVersion string         `json:"specVersion"`
-	Endpoints   []string       `json:"endpoints,omitempty"`
-	Tools       []Tool         `json:"tools"`
-	Warnings    []string       `json:"warnings,omitempty"`
-	GraphQL     *GraphQLSchema `json:"graphql,omitempty"`
-	GRPC        *GRPCSchema    `json:"grpc,omitempty"`
+	Protocol    Protocol `json:"protocol"`
+	Format      string   `json:"format,omitempty"`
+	Title       string   `json:"title"`
+	Version     string   `json:"version"`
+	SpecVersion string   `json:"specVersion"`
+	Endpoints   []string `json:"endpoints,omitempty"`
+	Tools       []Tool   `json:"tools"`
+	Warnings    []string `json:"warnings,omitempty"`
+	// Unsupported lists every source operation that became no tool, uncapped
+	// (Warnings stop at a cap and are for people); lint reports each as L013.
+	Unsupported []UnsupportedOp `json:"unsupported,omitempty"`
+	GraphQL     *GraphQLSchema  `json:"graphql,omitempty"`
+	GRPC        *GRPCSchema     `json:"grpc,omitempty"`
 }
+
+// UnsupportedOp is a source operation that became no tool: its operation
+// type ("subscription", "query", "mutation"), its root field name and why.
+type UnsupportedOp struct {
+	Operation string `json:"operation"`
+	Field     string `json:"field"`
+	Reason    string `json:"reason"`
+}
+
+// UnsupportedOp reasons.
+const (
+	// UnsupportedSubscription: subscriptions aren't supported yet.
+	UnsupportedSubscription = "subscription"
+	// UnsupportedInvalidDocument: the generated document failed validation.
+	UnsupportedInvalidDocument = "invalid-document"
+)
 
 // GraphQLSchema is the derived GraphQL data serve and sync need, cached in
 // manifest.json so serve never parses a schema (SPEC §3.6, no migration).

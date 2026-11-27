@@ -126,7 +126,7 @@ func syncAPI(ctx context.Context, p config.Paths, name string, s syncSettings) e
 	if err != nil {
 		if cfg.Source.Format != "" {
 			// The saved format is forced (SPEC P4), --spec included.
-			return fmt.Errorf("%s's source format is %s, and the new source didn't parse as that (to change the format, remove the API and add it again with plugit add): %w",
+			return fmt.Errorf("%s's new source didn't parse as %s, its saved source.format: %w (if the API moved to another format, remove it and add it again with plugit add)",
 				name, cfg.Source.Format, err)
 		}
 		return err
@@ -144,7 +144,7 @@ func syncAPI(ctx context.Context, p config.Paths, name string, s syncSettings) e
 	}
 	diff := curate.DiffManifests(old, updated, *cfg)
 
-	findings := lint.Run(lint.Input{API: *cfg, Tools: updated.Tools, Hidden: hiddenParams(cfg.Auth, cfg.Fixed), Warnings: updated.Warnings})
+	findings := lint.Run(lint.Input{API: *cfg, Tools: updated.Tools, Hidden: hiddenParams(cfg.Auth, cfg.Fixed), Unsupported: updated.Unsupported})
 	lintNote := ""
 	if n := lint.Summarize(findings).Errors; n > 0 {
 		lintNote = fmt.Sprintf("%s in the new spec for tools you serve (run plugit lint %s after syncing to see them all)", plural(n, "lint error"), name)

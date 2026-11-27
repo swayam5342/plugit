@@ -254,6 +254,15 @@ func TestHostileHugeIntrospection(t *testing.T) {
 	} else if want := fmt.Sprintf("... and %d more warnings", sz.Subscriptions-maxWarnings); m.Warnings[maxWarnings] != want {
 		t.Errorf("last warning = %q, want %q", m.Warnings[maxWarnings], want)
 	}
+	// The structured list lint reads is not capped like the warnings.
+	if len(m.Unsupported) != sz.Subscriptions {
+		t.Errorf("%d unsupported operations recorded, want all %d subscriptions", len(m.Unsupported), sz.Subscriptions)
+	}
+	for _, u := range m.Unsupported {
+		if u.Operation != "subscription" || u.Reason != model.UnsupportedSubscription || u.Field == "" {
+			t.Errorf("unsupported entry %+v", u)
+		}
+	}
 	for _, tl := range m.Tools {
 		if n := utf8.RuneCountInString(tl.Description); n > naming.DefaultMaxDescription {
 			t.Errorf("%s: description is %d runes", tl.Key, n)

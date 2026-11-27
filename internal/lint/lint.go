@@ -10,7 +10,6 @@ import (
 	"maps"
 	"net"
 	"net/url"
-	"regexp"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -74,10 +73,10 @@ type Input struct {
 	API    config.API
 	Tools  []model.Tool
 	Hidden []string
-	// Warnings are the manifest's warnings. Run reads the GraphQL ones for
-	// operations that became no tool (L013 for a subscription or a root
-	// field whose generated document failed validation).
-	Warnings []string
+	// Unsupported is the manifest's list of operations that became no tool
+	// (L013 for a subscription or a root field whose generated document
+	// failed validation). It is uncapped, unlike the manifest's warnings.
+	Unsupported []model.UnsupportedOp
 }
 
 // Summary counts findings by severity.
@@ -116,7 +115,7 @@ func Run(in Input) []Finding {
 // RunCounting is Run, and also says how many findings the config ignores.
 func RunCounting(in Input) (fs []Finding, ignored int) {
 	fs = apiFindings(in.API)
-	for _, f := range warningFindings(in.Warnings) {
+	for _, f := range unsupportedFindings(in.Unsupported) {
 		if ignoredByAPI(in.API, f) {
 			ignored++
 			continue
@@ -151,29 +150,22 @@ func ignoredByAPI(a config.API, f Finding) bool {
 	return f.Severity < Error && slices.Contains(a.Lint.Ignore, f.Rule)
 }
 
-// subscriptionWarning matches the manifest warning the GraphQL builder
-// writes for a Subscription field, which becomes no tool.
-var subscriptionWarning = regexp.MustCompile(`^subscription "([_A-Za-z][_0-9A-Za-z]*)": subscriptions aren't supported yet \(L013\)$`)
-
-// skippedWarning matches the manifest warning the GraphQL builder writes for
-// a root field whose generated document failed validation, which becomes no
-// tool. Only the prefix is matched: the validator's text after it is cut to
-// the warning length and echoes schema content.
-var skippedWarning = regexp.MustCompile(`^(query|mutation) "([_A-Za-z][_0-9A-Za-z]*)" skipped: the generated document failed validation`)
-
-// warningFindings are the API-wide findings read from manifest warnings:
-// L013 ("unsupported feature", the rule for an operation that has no tool)
-// for each GraphQL subscription, and for each root field dropped because its
-// generated document failed validation.
-func warningFindings(warnings []string) []Finding {
+// unsupportedFindings are the API-wide findings for the manifest's
+// unsupported operations: L013 ("unsupported feature", the rule for an
+// operation that has no tool) for each GraphQL subscription, and for each
+// root field dropped because its generated document failed validation. The
+// field is a GraphQL Name (the schema loader checks it), and the message
+// never carries the validator's text, which echoes schema content.
+func unsupportedFindings(ops []model.UnsupportedOp) []Finding {
 	var out []Finding
-	for _, w := range warnings {
-		if m := subscriptionWarning.FindStringSubmatch(w); m != nil {
+	for _, op := range ops {
+		switch op.Reason {
+		case model.UnsupportedSubscription:
 			out = append(out, Finding{Rule: "L013", Severity: Info,
-				Message: fmt.Sprintf("subscription %q has no tool: subscriptions aren't supported yet", m[1])})
-		} else if m := skippedWarning.FindStringSubmatch(w); m != nil {
+				Message: fmt.Sprintf("subscription %q has no tool: subscriptions aren't supported yet", op.Field)})
+		case model.UnsupportedInvalidDocument:
 			out = append(out, Finding{Rule: "L013", Severity: Info,
-				Message: fmt.Sprintf("%s %q has no tool: its generated document failed validation against the schema", m[1], m[2])})
+				Message: fmt.Sprintf("%s %q has no tool: its generated document failed validation against the schema", op.Operation, op.Field)})
 		}
 	}
 	return out
