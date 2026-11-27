@@ -55,10 +55,15 @@ jobs:
           go-version: ${{ matrix.go }}
       - name: go test -race
         run: go test -race -count=1 ./...
-      - name: go test (race off) for the allocation bound
-        # Skipped under -race: DetectSDL's zero-allocation cheap reject.
-        # Deterministic, so it runs on every OS.
-        run: go test -count=1 -run '^TestDetectSDLCheapReject$' ./internal/protocol/graphql
+      - name: go test (race off) for the allocation bounds
+        # Skipped under -race: DetectSDL's zero-allocation cheap reject and
+        # redact's streaming quote scan (memory independent of the number of
+        # quotes). Deterministic, so they run on every OS. bash (with -e) so a
+        # failure in the first command fails the step on Windows too.
+        shell: bash
+        run: |
+          go test -count=1 -run '^TestDetectSDLCheapReject$' ./internal/protocol/graphql
+          go test -count=1 -run '^TestCanonicalStringsStreamsQuotes$' ./internal/redact
       - name: go test (race off) for the SPEC's 2 s ingest bounds
         # Loosened under -race. Wall-clock bounds run on Linux only, where the
         # runners are the least noisy.

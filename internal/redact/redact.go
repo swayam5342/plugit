@@ -113,7 +113,8 @@ func (r *Redactor) String(s string) string {
 // form counts ("tok\/en", \uXXXX escapes, or a mix): a JSON parser decodes them
 // all back to the secret. Text that is not one valid JSON document is
 // checked through canonicalStrings: every span between two consecutive
-// unescaped quotes, in both parities, is decoded and re-spelled the same way.
+// unescaped quotes, in both parities, that holds a backslash and decodes as
+// a JSON string is re-spelled on its own.
 func (r *Redactor) ContainsSecret(s string) bool {
 	if len(r.forms) == 0 {
 		return false

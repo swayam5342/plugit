@@ -566,9 +566,10 @@ func FuzzEscapedSecretCaught(f *testing.F) {
 
 // canonicalStrings streams its quote scan: an untrusted body made of quotes
 // (up to max_response_bytes) must not make it hold an index per quote. A
-// 1 MiB all-quotes body with one backslash (so the scan runs) allocates a
-// small constant, not the ~16 MB an index slice would. Heap accounting is
-// skipped under -race, whose instrumentation allocates on its own.
+// 1 MiB all-quotes body (its leading backslash only escapes the first quote)
+// allocates a small constant; the index-slice version allocated about
+// 100 MB on it (measured). Heap accounting is skipped under -race, whose
+// instrumentation allocates on its own; CI runs this test once without it.
 func TestCanonicalStringsStreamsQuotes(t *testing.T) {
 	b := append([]byte{'\\'}, bytes.Repeat([]byte{'"'}, 1<<20)...)
 	if got := canonicalStrings(b); !bytes.Equal(got, b) {
