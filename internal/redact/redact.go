@@ -18,10 +18,13 @@ import (
 	"cmp"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -104,7 +107,26 @@ func (r *Redactor) String(s string) string {
 // formats that were never configured don't count. It is for text that must
 // be refused rather than masked, such as an introspection result that
 // becomes spec text.
+//
+// When s is a JSON document with escapes, its canonical spelling
+// (CanonicalJSON) is checked too, so every JSON-escape spelling of every
+// form counts ("tok\/en", \uXXXX escapes, or a mix): a JSON parser decodes them
+// all back to the secret.
 func (r *Redactor) ContainsSecret(s string) bool {
+	if len(r.forms) == 0 {
+		return false
+	}
+	if r.containsForm(s) {
+		return true
+	}
+	if !strings.ContainsRune(s, '\\') {
+		return false
+	}
+	c, ok := CanonicalJSON([]byte(s))
+	return ok && r.containsForm(string(c))
+}
+
+func (r *Redactor) containsForm(s string) bool {
 	for _, f := range r.forms {
 		if strings.Contains(s, f) {
 			return true
@@ -338,4 +360,97 @@ func (r *Redactor) walk(v any, byName bool) any {
 		return r.String(v)
 	}
 	return v
+}
+
+// CanonicalJSON re-spells the JSON document b in one canonical form: compact,
+// every string (keys included) re-encoded with Go's escapes and no HTML
+// escaping, numbers exactly as written, key order and duplicate keys kept.
+// A JSON parser decodes "\/" as "/" and a \uXXXX escape as its character,
+// so a secret matches
+// the canonical spelling however the document escaped it. It reports false,
+// with no output, when b isn't exactly one valid JSON document.
+//
+// It walks the token stream rather than decoding into a map, so a duplicate
+// key's earlier value (which a map would drop, and a different parser might
+// keep) is still checked. It is pure and allocates in proportion to b;
+// callers pass bodies that are already size-capped.
+func CanonicalJSON(b []byte) ([]byte, bool) {
+	if !json.Valid(b) {
+		return nil, false
+	}
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
+	var out bytes.Buffer
+	out.Grow(len(b))
+	enc := json.NewEncoder(&out)
+	enc.SetEscapeHTML(false)
+	type frame struct {
+		object bool
+		n      int // tokens written in this container
+	}
+	var stack []frame
+	for {
+		tok, err := dec.Token()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, false
+		}
+		if d, ok := tok.(json.Delim); ok && (d == '}' || d == ']') {
+			stack = stack[:len(stack)-1]
+			out.WriteString(d.String())
+			continue
+		}
+		if len(stack) > 0 {
+			f := &stack[len(stack)-1]
+			switch {
+			case f.object && f.n%2 == 1:
+				out.WriteByte(':')
+			case f.n > 0:
+				out.WriteByte(',')
+			}
+			f.n++
+		}
+		switch v := tok.(type) {
+		case json.Delim:
+			out.WriteString(v.String())
+			stack = append(stack, frame{object: v == '{'})
+		case string:
+			if enc.Encode(v) != nil {
+				return nil, false
+			}
+			out.Truncate(out.Len() - 1) // Encode's trailing newline
+		case json.Number:
+			out.WriteString(string(v))
+		case bool:
+			out.WriteString(strconv.FormatBool(v))
+		case nil:
+			out.WriteString("null")
+		default:
+			return nil, false
+		}
+	}
+	return out.Bytes(), true
+}
+
+// JSON returns b unchanged, unless b is a JSON document whose canonical
+// spelling (CanonicalJSON) holds something String masks: a configured secret
+// or a known token format hidden behind JSON escapes ("tok\/en", \uXXXX).
+// Then it returns the canonical spelling, so String masks it before the text
+// reaches the model, which (like any JSON-parsing client) would decode the
+// escapes. A body without a backslash is returned at once: with no escapes,
+// its strings already read as they decode.
+func (r *Redactor) JSON(b []byte) []byte {
+	if !bytes.ContainsRune(b, '\\') {
+		return b
+	}
+	c, ok := CanonicalJSON(b)
+	if !ok {
+		return b
+	}
+	if s := string(c); r.String(s) == s {
+		return b
+	}
+	return c
 }

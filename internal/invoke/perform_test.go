@@ -357,3 +357,31 @@ func TestPerformTokenSourceFails(t *testing.T) {
 		t.Errorf("result = %+v, hits = %d", res, hits.Load())
 	}
 }
+
+// T11 for JSON escapes: an upstream body that spells the credential with
+// JSON escapes ("\u0074est-...", a mix) matches no secret form as bytes, but
+// the model (or a client that parses the JSON) decodes it to the credential.
+// Perform masks it, in a JSON success body and in an error body shown as
+// text. A body with escapes and no secret is shown exactly as it came.
+func TestPerformEchoSecretJSONEscaped(t *testing.T) {
+	cred := Credential{Type: "bearer", Secret: testSecret}
+	for _, spelling := range []string{uEscape(testSecret), "test" + uEscape("-") + "token-123"} {
+		for _, status := range []int{200, 401} {
+			t.Run(http.StatusText(status), func(t *testing.T) {
+				s := serve(t, jsonReply(status, `{"error":"bad key","echo":"`+spelling+`","n":1.50}`))
+				res := perform(t, s.URL, listThings, `{}`, cred, httpx.Options{}, nil)
+				if strings.Contains(res.Text, spelling) || strings.Contains(res.Text, testSecret) || !strings.Contains(res.Text, redact.Mask) {
+					t.Errorf("result leaks the escaped credential:\n%s", res.Text)
+				}
+				if !strings.Contains(res.Text, "1.50") {
+					t.Errorf("numbers must keep their spelling:\n%s", res.Text)
+				}
+			})
+		}
+	}
+	plain := `{"name":"caf` + uEscape("é") + `","path":"a\/b"}`
+	res := perform(t, serve(t, jsonReply(200, plain)).URL, listThings, `{}`, cred, httpx.Options{}, nil)
+	if !strings.Contains(res.Text, `"name": "caf`+uEscape("é")+`"`) || !strings.Contains(res.Text, `"path": "a\/b"`) || strings.Contains(res.Text, redact.Mask) {
+		t.Errorf("a body without a secret changed:\n%s", res.Text)
+	}
+}

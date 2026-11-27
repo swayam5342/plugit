@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -96,7 +97,14 @@ func TestFetchRefusesBodyCarryingSecret(t *testing.T) {
 		{"bare token of a header credential", header, nil, tok, true},
 		{"percent-encoded token", header, nil, url.QueryEscape(tok), true},
 		{"base64 token", header, nil, base64.StdEncoding.EncodeToString([]byte(tok)), true},
+		// The isolate child decodes JSON escapes, so every escape spelling
+		// of the token reaches the spec text as the token itself.
+		{`solidus-escaped token (PHP's json_encode)`, header, nil, `tok\/en+123=`, true},
+		{"fully u-escaped token", header, nil, uEscape(tok), true},
+		{"mixed-escape token", header, nil, "t" + uEscape("ok") + `\/en` + uEscape("+") + "123" + uEscape("="), true},
+		{"u-escaped fixed secret", Credential{}, redact.New(redact.Options{Secrets: []string{fixedSecret}}), uEscape("f") + "ixed-secret-456", true},
 		{"OAuth access token", oauth, nil, tok, true},
+		{"escapes but no secret", header, nil, "caf" + uEscape("é") + ` \/ tok\/en`, false},
 		{"fixed secret in d.Redactor", Credential{}, redact.New(redact.Options{Secrets: []string{fixedSecret}}), fixedSecret, true},
 		{"no secret", header, redact.New(redact.Options{Secrets: []string{fixedSecret}}), "an ordinary description", false},
 	}
@@ -178,4 +186,13 @@ func TestSecretValuesBareTokenOfSchemeHeader(t *testing.T) {
 			t.Errorf("SecretValues(%q) = %q, want %q", tc.cred.Secret, got, tc.want)
 		}
 	}
+}
+
+// uEscape spells every rune of s (BMP) as a JSON \uXXXX escape.
+func uEscape(s string) string {
+	var b strings.Builder
+	for _, c := range s {
+		fmt.Fprintf(&b, `\u%04x`, c)
+	}
+	return b.String()
 }

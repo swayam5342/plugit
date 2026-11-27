@@ -26,7 +26,9 @@ var ErrSecretInResponse = errors.New("the result contains the API credential or 
 //
 // The body is refused with ErrSecretInResponse when it contains a secret in
 // play, in any form d.Redactor would mask (raw, percent-encoded, base64,
-// JSON-escaped): the credential (an OAuth access token included, which only
+// JSON-escaped) and, for a JSON body, in any JSON-escape spelling of those
+// forms ("\/", \uXXXX: redact.ContainsSecret checks the canonical
+// re-encoding, because the isolate child decodes the escapes): the credential (an OAuth access token included, which only
 // Fetch knows) and every secret d.Redactor holds (the caller passes the
 // resolved secret fixed values there). The caller turns the body into spec
 // text, which reaches disk, the TUI and the model, so it is refused rather

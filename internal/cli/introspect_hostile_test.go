@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"strings"
@@ -37,6 +38,29 @@ func withQueryDescription(t *testing.T, fixture []byte, desc string) []byte {
 		t.Fatal(err)
 	}
 	return out
+}
+
+// withRawQueryDescription is withQueryDescription with desc written into the
+// JSON as is, between the quotes: desc is string-literal text, so it can
+// spell characters with JSON escapes ("\/", \uXXXX) the way some
+// servers do. The child decodes them like any JSON parser.
+func withRawQueryDescription(t *testing.T, fixture []byte, desc string) []byte {
+	t.Helper()
+	const mark = "PLUGIT-RAW-DESCRIPTION-MARK"
+	out := bytes.Replace(withQueryDescription(t, fixture, mark), []byte(mark), []byte(desc), 1)
+	if !json.Valid(out) {
+		t.Fatalf("description %q makes the fixture invalid JSON", desc)
+	}
+	return out
+}
+
+// jsonUEscape spells every rune of s (BMP) as a JSON \uXXXX escape.
+func jsonUEscape(s string) string {
+	var b strings.Builder
+	for _, c := range s {
+		fmt.Fprintf(&b, `\u%04x`, c)
+	}
+	return b.String()
 }
 
 // checkRefusedEcho fails unless err is the credential-echo refusal, names no
@@ -84,17 +108,32 @@ func TestHostileIntrospectionEchoesCredential(t *testing.T) {
 	fixture := introspectionFixture(t)
 	env := map[string]string{"GH_TOKEN": "Bearer " + tok, "EXTRA": fixedSecret}
 	secrets := []string{tok, url.QueryEscape(tok), base64.StdEncoding.EncodeToString([]byte(tok)), fixedSecret}
-	cases := []struct{ name, echo string }{
-		{"whole header value", "Bearer " + tok},
-		{"bare token", tok},
-		{"percent-encoded token", url.QueryEscape(tok)},
-		{"base64 token", base64.StdEncoding.EncodeToString([]byte(tok))},
-		{"secret fixed header", fixedSecret},
+	cases := []struct {
+		name, echo string
+		raw        bool // echo is JSON string-literal text, escapes and all
+	}{
+		{"whole header value", "Bearer " + tok, false},
+		{"bare token", tok, false},
+		{"percent-encoded token", url.QueryEscape(tok), false},
+		{"base64 token", base64.StdEncoding.EncodeToString([]byte(tok)), false},
+		{"secret fixed header", fixedSecret, false},
+		// The child decodes JSON escapes, so each of these becomes the
+		// token in the schema text.
+		{"solidus-escaped token", strings.ReplaceAll(tok, "/", `\/`), true},
+		{"fully u-escaped token", jsonUEscape(tok), true},
+		{"mixed-escape token", "t" + jsonUEscape("o") + `k\/en` + jsonUEscape("+") + "123" + jsonUEscape("="), true},
+		{"u-escaped fixed header", jsonUEscape(fixedSecret), true},
+	}
+	describe := func(t *testing.T, echo string, raw bool) []byte {
+		if raw {
+			return withRawQueryDescription(t, fixture, "Root type. Your key: "+echo)
+		}
+		return withQueryDescription(t, fixture, "Root type. Your key: "+echo)
 	}
 	for _, tc := range cases {
 		t.Run("add/"+tc.name, func(t *testing.T) {
 			up := newGraphQLUpstream(t, func(u *gqlUpstream) {
-				u.introspection = withQueryDescription(t, fixture, "Root type. Your key: "+tc.echo)
+				u.introspection = describe(t, tc.echo, tc.raw)
 			})
 			p, d, out := addEnv(t)
 			d.resolver = envResolver(env)
@@ -114,7 +153,7 @@ func TestHostileIntrospectionEchoesCredential(t *testing.T) {
 		})
 		t.Run("run/"+tc.name, func(t *testing.T) {
 			up := newGraphQLUpstream(t, func(u *gqlUpstream) {
-				u.introspection = withQueryDescription(t, fixture, "Root type. Your key: "+tc.echo)
+				u.introspection = describe(t, tc.echo, tc.raw)
 			})
 			stderr := &syncBuf{}
 			// A transport no client connects to: should the result be
@@ -163,6 +202,44 @@ func TestHostileSyncReintrospectionEchoesCredential(t *testing.T) {
 		}
 		if strings.Contains(out.String(), runSecret) || strings.Contains(out.String(), echo) {
 			t.Errorf("sync output leaks the token:\n%s", out)
+		}
+	}
+}
+
+// T11 (hostile) for sync with JSON escapes: the re-introspected schema spells
+// the token with escapes the child decodes ("\/" as PHP's json_encode
+// writes it, \uXXXX, or a mix). Sync refuses each, and nothing changes.
+func TestHostileSyncReintrospectionEscapedCredential(t *testing.T) {
+	const tok = "tok/en+123="
+	fixture := introspectionFixture(t)
+	pinned := newIntrospectionServer(t, fixture)
+	p, s, out := addIntrospectedWith(t, pinned.URL+"/graphql", tok)
+	before := map[string][]byte{}
+	for _, path := range apiFiles(t, p, "gh") {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before[path] = b
+	}
+	for name, echo := range map[string]string{
+		"solidus-escaped": strings.ReplaceAll(tok, "/", `\/`),
+		"fully u-escaped": jsonUEscape(tok),
+		"mixed":           jsonUEscape("to") + `k\/en+` + jsonUEscape("123") + "=",
+	} {
+		pinned.schema.Store(withRawQueryDescription(t, withQueryField(t, fixture, "ping"), "token: "+echo))
+		err := syncAPI(t.Context(), p, "gh", s)
+		if !errors.Is(err, invoke.ErrSecretInResponse) {
+			t.Fatalf("%s: err = %v, want the introspection result refused", name, err)
+		}
+		checkRefusedEcho(t, err, nil, "", tok, echo)
+		for path, want := range before {
+			if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, want) {
+				t.Errorf("%s: %s changed after a refused sync (err %v)", name, path, err)
+			}
+		}
+		if strings.Contains(out.String(), tok) || strings.Contains(out.String(), echo) {
+			t.Errorf("%s: sync output leaks the token:\n%s", name, out)
 		}
 	}
 }

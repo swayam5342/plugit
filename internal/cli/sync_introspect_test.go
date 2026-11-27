@@ -99,8 +99,14 @@ func (s *introspectionServer) onlyToken(t *testing.T) {
 // token, and returns sync settings that resolve the same token.
 func addIntrospected(t *testing.T, endpoint string) (config.Paths, syncSettings, *bytes.Buffer) {
 	t.Helper()
+	return addIntrospectedWith(t, endpoint, runSecret)
+}
+
+// addIntrospectedWith is addIntrospected with the bearer token tok.
+func addIntrospectedWith(t *testing.T, endpoint, tok string) (config.Paths, syncSettings, *bytes.Buffer) {
+	t.Helper()
 	p, d, _ := addEnv(t)
-	env := map[string]string{"GH_TOKEN": "Bearer " + runSecret}
+	env := map[string]string{"GH_TOKEN": "Bearer " + tok}
 	d.resolver = envResolver(env)
 	if err := addAPI(t.Context(), addSettingsFor(endpoint, func(s *addSettings) {
 		s.name, s.introspect, s.fromRun, s.allowPrivate = "gh", true, true, true

@@ -1,8 +1,10 @@
 package redact
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -357,4 +359,126 @@ func TestContainsSecret(t *testing.T) {
 	if New(Options{}).ContainsSecret(secret) {
 		t.Error("a Redactor without secrets reported one")
 	}
+}
+
+// A JSON document may spell a string with any escapes (PHP's json_encode
+// writes "\/" for "/"; any character may be "\uXXXX"), and a JSON parser
+// decodes them all, so ContainsSecret checks a JSON document's canonical
+// spelling too: every escape spelling of every secret form is caught,
+// in values and keys, and in a duplicate key's discarded value.
+func TestContainsSecretAnyJSONEscape(t *testing.T) {
+	const secret = "tok/en+123="
+	r := New(Options{Secrets: []string{secret}})
+	b64 := base64.StdEncoding.EncodeToString([]byte(secret))
+	for name, doc := range map[string]string{
+		"solidus escaped":       `{"d":"key tok\/en+123= here"}`,
+		"fully u-escaped":       `{"d":"` + jsonU(secret) + `"}`,
+		"mixed escapes":         `{"d":"t\u006fk\/en\u002B123\u003d"}`,
+		"u-escaped query form":  `{"d":"` + jsonU(url.QueryEscape(secret)) + `"}`,
+		"u-escaped base64 form": `["` + jsonU(b64) + `"]`,
+		"in a key":              `{"tok\/en+123=":1}`,
+		"duplicate key's first": `{"a":"tok\/en+123=","a":"x"}`,
+		"deep and pretty": `{
+  "a": [1, 2.50, true, null, {"b": "tok\/en+123="}]
+}`,
+	} {
+		if !r.ContainsSecret(doc) {
+			t.Errorf("ContainsSecret missed the %s spelling: %s", name, doc)
+		}
+	}
+	for _, s := range []string{`{"d":"caf\u00e9 \/ \n"}`, `{"d":"tok\/en"}`, `not json \/`} {
+		if r.ContainsSecret(s) {
+			t.Errorf("ContainsSecret(%q) = true, want false", s)
+		}
+	}
+}
+
+// jsonU spells every rune of s (BMP) as a \uXXXX escape.
+func jsonU(s string) string {
+	var b strings.Builder
+	for _, c := range s {
+		fmt.Fprintf(&b, `\u%04x`, c)
+	}
+	return b.String()
+}
+
+// CanonicalJSON re-spells a JSON document: compact, every string with Go's
+// escapes (no HTML escaping), numbers as written, key order and duplicate
+// keys kept. Anything that isn't one valid JSON document is refused.
+func TestCanonicalJSON(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`{"b":"\u00e9\/<&>","a":[1.50,true,null,{"x":"\"\\"}],"a":2}`, `{"b":"é/<&>","a":[1.50,true,null,{"x":"\"\\"}],"a":2}`},
+		{" [ ] ", `[]`},
+		{`{}`, `{}`},
+		{`"t\u006fk"`, `"tok"`},
+		{`-0.5e10`, `-0.5e10`},
+		{"{\n \"a\" : { \"b\" : [ ] } , \"c\" : " + `"\n"` + " }", `{"a":{"b":[]},"c":"\n"}`},
+	}
+	for _, tc := range cases {
+		got, ok := CanonicalJSON([]byte(tc.in))
+		if !ok || string(got) != tc.want {
+			t.Errorf("CanonicalJSON(%s) = %s, %v; want %s", tc.in, got, ok, tc.want)
+		}
+	}
+	for _, bad := range []string{``, `{"a":1`, `{} {}`, `{"a":1,}`, `tok`} {
+		if got, ok := CanonicalJSON([]byte(bad)); ok {
+			t.Errorf("CanonicalJSON(%q) = %s, true; want refused", bad, got)
+		}
+	}
+}
+
+// JSON returns a body unchanged unless it is a JSON document whose canonical
+// spelling carries something String masks; then it returns that spelling, so
+// a secret hidden behind escapes is masked before the model (or a client that
+// decodes the JSON) sees it.
+func TestJSONCanonicalOnlyWhenMasked(t *testing.T) {
+	const secret = "tok/en+123="
+	r := New(Options{Secrets: []string{secret}})
+	for _, body := range []string{
+		`{"d":"` + jsonU(secret) + `"}`,
+		`{"d":"tok\/en+123="}`,
+		`{"d":"` + jsonU(fakeGitHub) + `"}`, // token-pattern backstop
+	} {
+		got := r.String(string(r.JSON([]byte(body))))
+		if strings.Contains(got, secret) || strings.Contains(got, fakeGitHub) || !strings.Contains(got, Mask) {
+			t.Errorf("JSON(%s) then String = %s; want the secret masked", body, got)
+		}
+	}
+	for _, body := range []string{`{"d":"caf\u00e9 \/ \u003c"}`, `{"d":"plain"}`, `not json \u0074`, `{"d":"tok\/en+123=`} {
+		if got := r.JSON([]byte(body)); string(got) != body {
+			t.Errorf("JSON(%s) = %s; want it unchanged", body, got)
+		}
+	}
+	if r.JSON(nil) != nil {
+		t.Error("JSON(nil) != nil")
+	}
+}
+
+// CanonicalJSON accepts exactly the valid JSON documents, and its output is
+// valid JSON that decodes to the same value.
+func FuzzCanonicalJSON(f *testing.F) {
+	for _, s := range []string{`{"a":"t\u006fk\/x","a":[1.50,true,null]}`, `[]`, `"x"`, `{"a":1`, `{} {}`, "\"\xff\""} {
+		f.Add([]byte(s))
+	}
+	f.Fuzz(func(t *testing.T, b []byte) {
+		c, ok := CanonicalJSON(b)
+		if ok != json.Valid(b) {
+			t.Fatalf("CanonicalJSON ok = %v, json.Valid = %v", ok, !ok)
+		}
+		if !ok {
+			return
+		}
+		decode := func(x []byte) any {
+			d := json.NewDecoder(bytes.NewReader(x))
+			d.UseNumber()
+			var v any
+			if err := d.Decode(&v); err != nil {
+				t.Fatalf("decode %q: %v", x, err)
+			}
+			return v
+		}
+		if !json.Valid(c) || !reflect.DeepEqual(decode(b), decode(c)) {
+			t.Fatalf("CanonicalJSON(%q) = %q: not the same value", b, c)
+		}
+	})
 }
