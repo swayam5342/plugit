@@ -47,7 +47,7 @@ func Dispatch(formats []Format, data []byte, forceName string, opts Options) (*m
 		}
 	}
 	if reason := jsonSyntaxError(data); reason != nil {
-		return nil, fmt.Errorf("%w: no format recognized the source (it is not valid JSON: %w)", ErrUnsupportedFormat, reason)
+		return nil, fmt.Errorf("%w: no format recognized the source (it starts like JSON but is not valid JSON: %w; use --format NAME to skip detection)", ErrUnsupportedFormat, reason)
 	}
 	return nil, fmt.Errorf("%w: no format recognized the source", ErrUnsupportedFormat)
 }
@@ -55,7 +55,9 @@ func Dispatch(formats []Format, data []byte, forceName string, opts Options) (*m
 // jsonSyntaxError returns the JSON syntax error of data when it looks like a
 // JSON object (its first byte after a BOM and whitespace is '{') but does not
 // decode: a syntax error before a format's marker key hides the key from
-// detection, and the error says why. It returns nil for anything else.
+// detection, and a YAML flow-mapping root ({openapi: 3.0.0, ...}) is not
+// detected; the error says why and points at --format. It returns nil for
+// anything else.
 func jsonSyntaxError(data []byte) error {
 	data = bytes.TrimLeft(utils.TrimBOM(data), " \t\r\n")
 	if len(data) == 0 || data[0] != '{' {

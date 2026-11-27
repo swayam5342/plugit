@@ -1,7 +1,9 @@
 package ingest_test
 
 import (
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/swayam5342/plugit/internal/formats"
@@ -128,10 +130,6 @@ func TestDispatchErrorWording(t *testing.T) {
 	}{
 		{"unknown forced format", postmanDoc, "nosuchformat", `unsupported spec format: unknown format "nosuchformat"`},
 		{"nothing detected", "!x", "", "unsupported spec format: no format recognized the source"},
-		// A JSON syntax error before the openapi key hides the key from
-		// detection; the error says why instead of a bare "unrecognized".
-		{"invalid json", "\xef\xbb\xbf {\"info\":{,\"openapi\":\"3.0.0\"}", "",
-			"unsupported spec format: no format recognized the source (it is not valid JSON: invalid character ',' looking for beginning of object key string)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := ingest.Dispatch(formats.Ordered(), []byte(tc.data), tc.force, ingest.Options{})
@@ -140,6 +138,31 @@ func TestDispatchErrorWording(t *testing.T) {
 			}
 			if err.Error() != tc.want {
 				t.Errorf("err = %q, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// An input that starts like JSON but doesn't decode (a syntax error before
+// the openapi key hides it from detection, and a YAML flow-mapping root is
+// not detected at all) says it is not valid JSON and how to skip detection.
+// The JSON error text comes from encoding/json, so only its type is checked.
+func TestDispatchNotValidJSON(t *testing.T) {
+	for name, data := range map[string]string{
+		"syntax error before the key": "\xef\xbb\xbf {\"info\":{,\"openapi\":\"3.0.0\"}",
+		"yaml flow mapping":           "{openapi: 3.0.0, info: {title: t, version: '1'}, paths: {}}\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := ingest.Dispatch(formats.Ordered(), []byte(data), "", ingest.Options{})
+			if !errors.Is(err, ingest.ErrUnsupportedFormat) {
+				t.Fatalf("err = %v, want ErrUnsupportedFormat", err)
+			}
+			var syn *json.SyntaxError
+			msg := err.Error()
+			if !errors.As(err, &syn) ||
+				!strings.HasPrefix(msg, "unsupported spec format: no format recognized the source (it starts like JSON but is not valid JSON: ") ||
+				!strings.HasSuffix(msg, "; use --format NAME to skip detection)") {
+				t.Errorf("err = %q, want the not-valid-JSON explanation, a *json.SyntaxError and the --format hint", msg)
 			}
 		})
 	}

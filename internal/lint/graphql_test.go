@@ -159,19 +159,19 @@ func TestL013SubscriptionsPastWarningCap(t *testing.T) {
 }
 
 // L013 for a dropped GraphQL operation: a root field whose generated
-// document failed validation becomes no tool, only a manifest warning, which
-// no command showed. lint turns each into an API-wide info naming the
-// operation (not the validator's text, which echoes schema content).
+// document failed validation becomes no tool. The builder records it in the
+// manifest's Unsupported list (a default value the schema loader accepts but
+// the document validator refuses is a real way to get there), and lint turns
+// each into an API-wide info naming the operation (not the validator's text,
+// which echoes schema content).
 func TestL013GraphQLSkippedOperation(t *testing.T) {
-	m := gqlManifest(t, `type Query { now: Int }`, ingest.Options{})
-	in := gqlInput(m)
-	in.Unsupported = []model.UnsupportedOp{
-		{Operation: "query", Field: "broken", Reason: model.UnsupportedInvalidDocument},
-		{Operation: "mutation", Field: "alsoBroken", Reason: model.UnsupportedInvalidDocument},
-	}
-	got := findings(Run(in), "L013")
+	m := gqlManifest(t, `
+type Query { now: Int broken(a: Int = "boom"): Int }
+type Mutation { alsoBroken(a: Int = "boom"): Int }
+`, ingest.Options{})
+	got := findings(Run(gqlInput(m)), "L013")
 	if len(got) != 2 {
-		t.Fatalf("L013 findings = %+v, want two", got)
+		t.Fatalf("L013 findings = %+v, want two (unsupported %+v)", got, m.Unsupported)
 	}
 	for i, want := range []string{`mutation "alsoBroken" has no tool`, `query "broken" has no tool`} { // findings are sorted
 		f := got[i]

@@ -223,6 +223,27 @@ func TestBuildTruncationIssue(t *testing.T) {
 	}
 }
 
+// A root field whose generated document fails validation (here a default
+// value the schema loader accepts but the validator refuses) becomes no
+// tool: a warning for people and an UnsupportedInvalidDocument entry for
+// lint (L013).
+func TestBuildRecordsInvalidDocumentAsUnsupported(t *testing.T) {
+	m := build(t, `type Query { ok: Int q(a: Int = "x"): Int } type Mutation { m(a: [Int] = [true]): Int }`, ingest.Options{})
+	if len(m.Tools) != 1 || m.Tools[0].Key != "query ok" {
+		t.Fatalf("tools = %+v, want only query ok", m.Tools)
+	}
+	want := []model.UnsupportedOp{
+		{Operation: "query", Field: "q", Reason: model.UnsupportedInvalidDocument},
+		{Operation: "mutation", Field: "m", Reason: model.UnsupportedInvalidDocument},
+	}
+	if !reflect.DeepEqual(m.Unsupported, want) {
+		t.Errorf("Unsupported = %+v, want %+v", m.Unsupported, want)
+	}
+	if len(m.Warnings) != 2 || !strings.Contains(m.Warnings[0], `query "q" skipped`) {
+		t.Errorf("warnings = %q", m.Warnings)
+	}
+}
+
 func TestBuildDegradedArgIssue(t *testing.T) {
 	m := build(t, `scalar JSON type Query { q(data: JSON, n: Int): Int }`, ingest.Options{})
 	tl := toolByKey(t, m, "query q")

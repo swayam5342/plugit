@@ -2,6 +2,7 @@ package graphql
 
 import (
 	"encoding/json"
+	"fmt"
 	"maps"
 	"math"
 	"slices"
@@ -94,13 +95,27 @@ func (m *argMapper) hidden() []string {
 	return m.hiddenList
 }
 
+// Hidden-text finding wordings: a description is cleaned before the model
+// sees it; a default value is part of what the API accepts and is left in
+// (the same wording as REST's schema values).
+const (
+	hiddenRemoved = " contained %s (removed)"
+	hiddenLeftIn  = " contains %s (left in: it is part of what the API accepts)"
+)
+
 // noteHidden records a hidden-text finding for the description s of where.
 func (m *argMapper) noteHidden(where, s string) {
+	m.noteHiddenAs(where, s, hiddenRemoved)
+}
+
+// noteHiddenAs records a hidden-text finding for s, worded by format
+// (hiddenRemoved or hiddenLeftIn).
+func (m *argMapper) noteHiddenAs(where, s, format string) {
 	r := naming.Hidden(s)
 	if r == "" {
 		return
 	}
-	d := naming.CleanText(where+" contained "+r+" (removed)", maxIssueLen)
+	d := naming.CleanText(where+fmt.Sprintf(format, r), maxIssueLen)
 	if m.hiddenSeen == nil {
 		m.hiddenSeen = map[string]bool{}
 	}
@@ -211,11 +226,12 @@ func (m *argMapper) inputObject(d *ast.Definition, depth int) map[string]any {
 }
 
 // noteHiddenValue records a hidden-text finding for every string in the
-// JSON value v (a default), as for a description.
+// JSON value v (a default). The value reaches the model unchanged, so the
+// finding says it was left in.
 func (m *argMapper) noteHiddenValue(where string, v any) {
 	switch x := v.(type) {
 	case string:
-		m.noteHidden(where, x)
+		m.noteHiddenAs(where, x, hiddenLeftIn)
 	case []any:
 		for _, e := range x {
 			m.noteHiddenValue(where, e)

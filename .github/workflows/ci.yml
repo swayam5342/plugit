@@ -55,10 +55,15 @@ jobs:
           go-version: ${{ matrix.go }}
       - name: go test -race
         run: go test -race -count=1 ./...
-      - name: go test (race off) for the allocation and time bounds
-        # These checks are skipped or loosened under -race: DetectSDL's
-        # zero-allocation cheap reject and the SPEC's 2 s ingest bounds.
-        run: go test -count=1 -run '^(TestDetectSDLCheapReject|TestGitHubSDLIngestsUnder2s|TestGoldenLargeSpecs)$' ./internal/protocol/graphql ./internal/protocol/rest/openapi
+      - name: go test (race off) for the allocation bound
+        # Skipped under -race: DetectSDL's zero-allocation cheap reject.
+        # Deterministic, so it runs on every OS.
+        run: go test -count=1 -run '^TestDetectSDLCheapReject$' ./internal/protocol/graphql
+      - name: go test (race off) for the SPEC's 2 s ingest bounds
+        # Loosened under -race. Wall-clock bounds run on Linux only, where the
+        # runners are the least noisy.
+        if: runner.os == 'Linux'
+        run: go test -count=1 -run '^(TestGitHubSDLIngestsUnder2s|TestGoldenLargeSpecs)$' ./internal/protocol/graphql ./internal/protocol/rest/openapi
 
   fuzz:
     runs-on: ubuntu-latest
@@ -69,6 +74,7 @@ jobs:
           - { pkg: ./internal/redact, fn: FuzzStringNeverLeaksSecret }
           - { pkg: ./internal/redact, fn: FuzzCanonicalJSON }
           - { pkg: ./internal/redact, fn: FuzzEscapedSecretCaught }
+          - { pkg: ./internal/protocol/rest, fn: FuzzEncodeBody }
           - { pkg: ./internal/protocol/rest/openapi, fn: FuzzParse }
           - { pkg: ./internal/protocol/rest/openapi, fn: FuzzRefCheck }
           - { pkg: ./internal/protocol/rest/openapi, fn: FuzzIsOpenAPI }

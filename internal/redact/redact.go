@@ -483,42 +483,59 @@ func (r *Redactor) JSON(b []byte) []byte {
 }
 
 // canonicalStrings is the lenient fallback of CanonicalJSON for bytes that
-// are not one valid JSON document: it re-spells each complete "..." string
-// literal that holds an escape and decodes as a JSON string, with Go's
-// escapes and no HTML escaping, and leaves every other byte as it is. A
-// literal cut off at the end of b, or with an invalid escape, is left
-// alone. It is linear in len(b) and returns b itself when nothing changed.
+// are not one valid JSON document: it re-spells each "..." string literal
+// that holds an escape and decodes as a JSON string, with Go's escapes and
+// no HTML escaping, and leaves every other byte as it is.
+//
+// In text that isn't JSON, which quote opens a literal is unknown: an odd
+// number of quotes, or a stray \" before a secret, would throw a single
+// left-to-right pairing off. So the candidates are the spans between every
+// two consecutive unescaped quotes (a quote is escaped when an odd run of
+// backslashes precedes it, which doesn't depend on where a literal began).
+// The spans of even and of odd index are re-spelled in two passes; a span
+// holds no unescaped quote, so re-spelling one keeps every quote's
+// escapedness and the second pass sees the same spans. A literal cut off
+// at the end of b, or with an invalid escape, is left alone. It is linear
+// in len(b) and returns b itself when nothing changed.
 func canonicalStrings(b []byte) []byte {
+	return respellSpans(respellSpans(b, 0), 1)
+}
+
+// respellSpans re-spells the spans between consecutive unescaped quotes
+// whose index has the given parity (see canonicalStrings).
+func respellSpans(b []byte, parity int) []byte {
+	var quotes []int
+	run := 0 // backslashes immediately before b[i]
+	for i, c := range b {
+		switch c {
+		case '\\':
+			run++
+			continue
+		case '"':
+			if run%2 == 0 {
+				quotes = append(quotes, i)
+			}
+		}
+		run = 0
+	}
 	var out bytes.Buffer
 	enc := json.NewEncoder(&out)
 	enc.SetEscapeHTML(false)
-	last := 0
-	for i := 0; i < len(b); i++ {
-		if b[i] != '"' {
+	last, changed := 0, false
+	for k := parity; k+1 < len(quotes); k += 2 {
+		lit := b[quotes[k] : quotes[k+1]+1]
+		var s string
+		if bytes.IndexByte(lit, '\\') < 0 || json.Unmarshal(lit, &s) != nil {
 			continue
 		}
-		j, escaped := i+1, false
-		for ; j < len(b) && b[j] != '"'; j++ {
-			if b[j] == '\\' {
-				escaped = true
-				j++
-			}
+		out.Write(b[last:quotes[k]])
+		if enc.Encode(s) != nil {
+			return b
 		}
-		if j >= len(b) {
-			break // an unterminated literal
-		}
-		var s string
-		if escaped && json.Unmarshal(b[i:j+1], &s) == nil {
-			out.Write(b[last:i])
-			if enc.Encode(s) != nil {
-				return b
-			}
-			out.Truncate(out.Len() - 1) // Encode's trailing newline
-			last = j + 1
-		}
-		i = j
+		out.Truncate(out.Len() - 1) // Encode's trailing newline
+		last, changed = quotes[k+1]+1, true
 	}
-	if last == 0 {
+	if !changed {
 		return b
 	}
 	out.Write(b[last:])

@@ -467,9 +467,15 @@ type Query { f(a: F): Int }
 	s := loadSDL(t, "input F {\n  f: String = \"a\u200bb\"\n}\ntype Query { q(a: F): Int }")
 	m := newArgMapper(s)
 	a := s.Query.Fields.ForName("q").Arguments[0]
-	m.arg(a.DefaultValue, a.Type)
-	if got := m.hidden(); !slices.Equal(got, []string{"input F field f default value contained invisible or bidi characters (removed)"}) {
+	raw, _, _ = m.arg(a.DefaultValue, a.Type)
+	// A default is part of what the API accepts, so it is left in, and the
+	// finding says so (REST's wording), not "(removed)".
+	if got := m.hidden(); !slices.Equal(got, []string{"input F field f default value contains invisible or bidi characters (left in: it is part of what the API accepts)"}) {
 		t.Errorf("hidden = %q", got)
+	}
+	f := decode(t, raw)["properties"].(map[string]any)["f"].(map[string]any)
+	if f["default"] != "a\u200bb" {
+		t.Errorf("default = %q, want the original string kept", f["default"])
 	}
 }
 

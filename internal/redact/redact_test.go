@@ -467,7 +467,12 @@ func TestJSONLenientOnInvalidBodies(t *testing.T) {
 		"trailing junk":              `{"d":"` + jsonU(secret) + `"} trailing`,
 		"two documents":              `{} {"d":"tok\/en+123="}`,
 		"in markup":                  `<p>"tok\/en+123="</p>`,
-		"token pattern":              `{"d":"` + jsonU(fakeGitHub) + `",`,
+		// An odd number of quotes, or an escaped quote, before the secret
+		// must not throw the literal pairing off.
+		"odd quote before":     `x"y {"d":"tok\/en+123="}`,
+		"escaped quote before": `"a\"{"d":"tok\/en+123="} more`,
+		"stray escaped quote":  `a \" b "tok\/en+123="`,
+		"token pattern":        `{"d":"` + jsonU(fakeGitHub) + `",`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			got := r.String(string(r.JSON([]byte(body))))
@@ -524,15 +529,18 @@ func FuzzCanonicalJSON(f *testing.F) {
 
 // A fixed secret spelled with any mix of per-rune escapes (\uXXXX, "\/")
 // inside a JSON string is always caught by ContainsSecret and masked by
-// JSON then String, whether the document is valid or cut short. The fuzz
-// input picks which runes are escaped and the bytes around the document.
+// JSON then String, whether the document is valid or cut short, and
+// whatever comes before it (an odd number of quotes, escaped quotes). The
+// fuzz input picks which runes are escaped and the bytes around the document.
 func FuzzEscapedSecretCaught(f *testing.F) {
-	f.Add([]byte{0}, []byte(""))
-	f.Add([]byte{0xff, 0x0f}, []byte(" junk"))
-	f.Add([]byte{0xaa, 0x55, 0x33}, []byte(`,"x":"`))
+	f.Add([]byte{0}, []byte(""), []byte(""))
+	f.Add([]byte{0xff, 0x0f}, []byte(""), []byte(" junk"))
+	f.Add([]byte{0xaa, 0x55, 0x33}, []byte(""), []byte(`,"x":"`))
+	f.Add([]byte{0x0f}, []byte(`x"y `), []byte(""))
+	f.Add([]byte{0xf0, 0x01}, []byte(`"a\"`), []byte(` "`))
 	const secret = "tok/en+123=é"
 	r := New(Options{Secrets: []string{secret}})
-	f.Fuzz(func(t *testing.T, mask, tail []byte) {
+	f.Fuzz(func(t *testing.T, mask, prefix, tail []byte) {
 		var lit strings.Builder
 		for i, c := range secret {
 			bit := len(mask) > 0 && mask[(i/8)%len(mask)]&(1<<(i%8)) != 0
@@ -545,7 +553,7 @@ func FuzzEscapedSecretCaught(f *testing.F) {
 				lit.WriteRune(c)
 			}
 		}
-		body := `{"d":"` + lit.String() + `"}` + string(tail)
+		body := string(prefix) + `{"d":"` + lit.String() + `"}` + string(tail)
 		if !r.ContainsSecret(body) {
 			t.Fatalf("ContainsSecret(%q) = false", body)
 		}
