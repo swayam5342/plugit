@@ -7,7 +7,9 @@ import "strings"
 var deleteVerbs = []string{"delete", "remove", "destroy", "purge", "drop", "revoke"}
 
 // DeleteVerb reports whether name starts with a delete verb (delete, remove,
-// destroy, purge, drop, revoke), ignoring case. A bare verb matches.
+// destroy, purge, drop, revoke), ignoring case. A bare verb matches. It is a
+// plain prefix match and over-matches on purpose ("dropdownOptions"): the
+// heuristic only ever raises Safety (SPEC §3.5 P6).
 func DeleteVerb(name string) bool {
 	lower := strings.ToLower(name)
 	for _, v := range deleteVerbs {

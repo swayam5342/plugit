@@ -92,7 +92,10 @@ func TestManifestJSONRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(b, &out); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
-	b2, _ := json.Marshal(out)
+	b2, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if string(b) != string(b2) {
 		t.Errorf("round trip changed the manifest:\n%s\n%s", b, b2)
 	}
@@ -146,7 +149,10 @@ func TestManifestGraphQLRoundTrips(t *testing.T) {
 	if got := out.GraphQL.OverrideDocs["ro"]["query x"]; got != "query PlugIt_x{x}" {
 		t.Errorf("OverrideDocs[ro][query x] = %q", got)
 	}
-	b2, _ := json.Marshal(out)
+	b2, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if string(b) != string(b2) {
 		t.Errorf("round trip changed the manifest:\n%s\n%s", b, b2)
 	}
