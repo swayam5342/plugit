@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -561,4 +562,27 @@ func FuzzEscapedSecretCaught(f *testing.F) {
 			t.Fatalf("JSON then String(%q) = %q; want the secret masked", body, got)
 		}
 	})
+}
+
+// canonicalStrings streams its quote scan: an untrusted body made of quotes
+// (up to max_response_bytes) must not make it hold an index per quote. A
+// 1 MiB all-quotes body with one backslash (so the scan runs) allocates a
+// small constant, not the ~16 MB an index slice would. Heap accounting is
+// skipped under -race, whose instrumentation allocates on its own.
+func TestCanonicalStringsStreamsQuotes(t *testing.T) {
+	b := append([]byte{'\\'}, bytes.Repeat([]byte{'"'}, 1<<20)...)
+	if got := canonicalStrings(b); !bytes.Equal(got, b) {
+		t.Fatal("canonicalStrings changed a body with nothing to re-spell")
+	}
+	if raceEnabled {
+		t.Skip("heap accounting is not meaningful under -race")
+	}
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	_ = canonicalStrings(b)
+	runtime.ReadMemStats(&after)
+	if n := after.TotalAlloc - before.TotalAlloc; n > 64<<10 {
+		t.Errorf("canonicalStrings allocated %d bytes on a %d-byte all-quotes body; want a small constant", n, len(b))
+	}
 }
