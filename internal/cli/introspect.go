@@ -10,10 +10,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/httpx"
 	"github.com/swayam5342/plugit/internal/invoke"
+	"github.com/swayam5342/plugit/internal/naming"
 	"github.com/swayam5342/plugit/internal/protocol/graphql"
 	"github.com/swayam5342/plugit/internal/redact"
 	"github.com/swayam5342/plugit/internal/schema"
@@ -225,12 +227,78 @@ func introspect(ctx context.Context, endpoint *url.URL, cred invoke.Credential, 
 	case err != nil:
 		return nil, fmt.Errorf("introspecting %s: %w", where, err)
 	case status < 200 || status > 299:
-		return nil, fmt.Errorf("introspecting %s: HTTP %d %s (introspection is often disabled; add the API from an SDL file instead)",
-			where, status, http.StatusText(status))
+		return nil, fmt.Errorf("introspecting %s: HTTP %d %s (%s)", where, status, http.StatusText(status), introspectionDisabledHint)
 	case truncated:
 		return nil, fmt.Errorf("introspecting %s: the result is over %d bytes", where, config.MaxSnapshotBytes)
 	case len(bytes.TrimSpace(data)) == 0:
 		return nil, fmt.Errorf("introspecting %s: empty response", where)
 	}
+	if msgs, ok := introspectionErrors(data); ok {
+		// Fetch has already refused a body carrying a secret in play; String
+		// also masks known token formats.
+		return nil, fmt.Errorf("introspecting %s: the endpoint answered with GraphQL errors and no schema: %s; %s",
+			where, red.With(cred.SecretValues()...).String(msgs), introspectionDisabledHint)
+	}
 	return data, nil
+}
+
+// introspectionDisabledHint is what to do when an endpoint won't answer
+// the introspection query.
+const introspectionDisabledHint = "introspection is often disabled on public APIs: download the schema (SDL) and run plugit add NAME FILE --format graphql-sdl --endpoint URL"
+
+// Limits on the upstream messages an errors envelope is reported with.
+const (
+	maxEnvelopeMessages    = 3
+	maxEnvelopeMessageRune = 200
+)
+
+// introspectionErrors reports whether body is a GraphQL errors envelope with
+// no data.__schema (how servers answer when introspection is turned off),
+// and returns its first messages, cleaned (naming.CleanText), capped and
+// quoted, for the error. A body with a schema, or that isn't such an
+// envelope, is left to the isolate child to parse and judge.
+//
+// This is the only parsing of the untrusted result outside the child, and it
+// is deliberately minimal: the body is already size-capped (the client's
+// MaxSnapshotBytes), json.Unmarshal goes into a two-field struct of
+// json.RawMessage (no schema text is built, and data.__schema is only
+// checked for presence), and only the "message" strings of at most a few
+// errors are decoded.
+func introspectionErrors(body []byte) (string, bool) {
+	var env struct {
+		Data   json.RawMessage   `json:"data"`
+		Errors []json.RawMessage `json:"errors"`
+	}
+	if json.Unmarshal(body, &env) != nil || len(env.Errors) == 0 {
+		return "", false
+	}
+	var data struct {
+		Schema json.RawMessage `json:"__schema"`
+	}
+	if json.Unmarshal(env.Data, &data) == nil && len(data.Schema) > 0 && string(data.Schema) != "null" {
+		return "", false
+	}
+	var msgs []string
+	for _, raw := range env.Errors {
+		if len(msgs) == maxEnvelopeMessages {
+			break
+		}
+		var e struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(raw, &e) != nil {
+			continue
+		}
+		if m := naming.CleanText(e.Message, maxEnvelopeMessageRune); m != "" {
+			msgs = append(msgs, `"`+m+`"`)
+		}
+	}
+	out := strings.Join(msgs, "; ")
+	if out == "" {
+		out = "(no message)"
+	}
+	if n := len(env.Errors) - len(msgs); n > 0 && len(msgs) == maxEnvelopeMessages {
+		out += fmt.Sprintf(" (and %d more)", n)
+	}
+	return out, true
 }
