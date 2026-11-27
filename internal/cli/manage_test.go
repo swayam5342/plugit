@@ -31,7 +31,7 @@ func TestList(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := out.String()
-	for _, want := range []string{"pets", "4", "read-only", "https://pets.example.test", "broken", "bogus"} {
+	for _, want := range []string{"ENDPOINT", "pets", "4", "read-only", "https://pets.example.test", "broken", "bogus"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("list missing %q:\n%s", want, s)
 		}
@@ -44,9 +44,13 @@ func TestList(t *testing.T) {
 	if err := listAPIs(p, true, &out); err != nil {
 		t.Fatal(err)
 	}
+	// The key is endpoint, as in plugit.yaml (renamed from base_url).
+	if !strings.Contains(out.String(), `"endpoint": "https://pets.example.test"`) || strings.Contains(out.String(), "base_url") {
+		t.Errorf("list --json should carry the endpoint key, not base_url:\n%s", out.String())
+	}
 	var got []struct {
 		Name     string         `json:"name"`
-		BaseURL  string         `json:"endpoint"`
+		Endpoint string         `json:"endpoint"`
 		Mode     string         `json:"mode"`
 		Toolsets map[string]int `json:"toolsets"`
 		Error    string         `json:"error"`

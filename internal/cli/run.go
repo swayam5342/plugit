@@ -69,7 +69,8 @@ PLUGIT_HEADER, PLUGIT_FIXED), then defaults.
 
 --introspect treats the URL as a GraphQL endpoint: the standard
 introspection query is POSTed there instead of reading a schema file. For
-GraphQL the first --header is the credential, sent only to the endpoint.
+GraphQL the Authorization --header, if one is given, is the credential,
+sent only to the endpoint; otherwise the first --header is.
 
 Secrets in --header and --fixed must be env: or keyring: references; put the
 real value in the MCP client's env block. When any credential is configured,
@@ -160,7 +161,7 @@ func runServe(ctx context.Context, s runSettings, d runDeps) error {
 			return err
 		}
 		creds.fixed.userAgent = userAgent
-		raw, err := introspect(ctx, baseURL, creds.cred, creds.fixed, s.allowPrivate)
+		raw, err := introspect(ctx, baseURL, creds.cred, creds.fixed, s.allowPrivate, runIntrospectionHint)
 		if err != nil {
 			return err
 		}
@@ -242,18 +243,20 @@ type runCredentials struct {
 
 // resolveRunCredentials resolves --header and --fixed. For REST every
 // header is a fixed header and --fixed goes to the query string, as before.
-// For GraphQL the first header is the credential, as plugit add makes it:
+// For GraphQL the credential header (credentialHeader: Authorization if
+// given, else the first) is the credential, as plugit add makes it:
 // invoke attaches it only to the pinned endpoint's origin (T8), and an
 // Authorization header (the bearer form SPEC 2.4 documents) can't be a
 // GraphQL fixed header; --fixed values are variables.
 func resolveRunCredentials(headers, fixedFlags []credFlag, res *secrets.Resolver, gql bool) (runCredentials, error) {
 	var rc runCredentials
+	ci := credentialHeader(headers)
 	for i, h := range headers {
 		v, err := res.Resolve(h.ref)
 		if err != nil {
 			return rc, fmt.Errorf("--header %s: %w", h.name, err)
 		}
-		if gql && i == 0 {
+		if gql && i == ci {
 			rc.cred = invoke.Credential{Type: string(config.AuthHeader), Header: h.name, Secret: v}
 		} else {
 			rc.fixed.items = append(rc.fixed.items, fixedItem{Name: h.name, In: "header", Value: v, Secret: true})

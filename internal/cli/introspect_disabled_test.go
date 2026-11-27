@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -11,10 +14,14 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/swayam5342/plugit/internal/invoke"
 	"github.com/swayam5342/plugit/internal/redact"
 )
 
-const disabledHint = "introspection is often disabled on public APIs: download the schema (SDL) and run plugit add NAME FILE --format graphql-sdl --endpoint URL"
+const (
+	disabledHint    = "introspection is often disabled on public APIs: download the schema (SDL) and run plugit add NAME FILE --format graphql-sdl --endpoint URL"
+	runDisabledHint = "introspection is often disabled on public APIs: download the schema (SDL) and run plugit run FILE --format graphql-sdl --endpoint URL"
+)
 
 // errorsEnvelope is a GraphQL response with these error messages and the
 // given raw data member ("" leaves data out).
@@ -53,13 +60,13 @@ func TestIntrospectionDisabledIsExplained(t *testing.T) {
 		{"many errors", errorsEnvelope(t, "", "one", "two", "three", "four", "five"), []string{`"one"; "two"; "three" (and 2 more)`}},
 		{"hostile message", errorsEnvelope(t, "", hostile), []string{"is disabled here. key " + redact.Mask}},
 	}
-	check := func(t *testing.T, err error, want []string) {
+	check := func(t *testing.T, err error, want []string, hint string) {
 		t.Helper()
 		if err == nil {
 			t.Fatal("err = nil, want the disabled-introspection explanation")
 		}
 		msg := err.Error()
-		for _, w := range append(want, "GraphQL errors and no schema", disabledHint) {
+		for _, w := range append(want, "GraphQL errors and no schema", hint) {
 			if !strings.Contains(msg, w) {
 				t.Errorf("error missing %q:\n%s", w, msg)
 			}
@@ -77,7 +84,7 @@ func TestIntrospectionDisabledIsExplained(t *testing.T) {
 			err := addAPI(t.Context(), addSettingsFor(up.URL+"/graphql", func(s *addSettings) {
 				s.name, s.introspect, s.fromRun, s.allowPrivate = "gh", true, true, true
 			}), d)
-			check(t, err, tc.want)
+			check(t, err, tc.want, disabledHint)
 			for _, path := range apiFiles(t, p, "gh") {
 				if fileExists(path) {
 					t.Errorf("%s was written", path)
@@ -92,7 +99,7 @@ func TestIntrospectionDisabledIsExplained(t *testing.T) {
 			err := runServe(ctx, settings(up.URL+"/graphql", func(s *runSettings) {
 				s.introspect, s.allowPrivate = true, true
 			}), deps(st, &syncBuf{}, nil))
-			check(t, err, tc.want)
+			check(t, err, tc.want, runDisabledHint)
 		})
 	}
 
@@ -111,7 +118,7 @@ func TestIntrospectionDisabledIsExplained(t *testing.T) {
 		for _, tc := range cases {
 			pinned.schema.Store(tc.body)
 			err := syncAPI(t.Context(), p, "gh", s)
-			check(t, err, tc.want)
+			check(t, err, tc.want, disabledHint)
 			for path, want := range before {
 				if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, want) {
 					t.Errorf("%s: %s changed (err %v)", tc.name, path, err)
@@ -158,5 +165,37 @@ func TestIntrospectionDisabledMessageEchoingCredentialIsRefused(t *testing.T) {
 			s.headers = []string{"Authorization=env:GH_TOKEN"}
 		}), d)
 		checkRefusedEcho(t, err, &p, "gh", tok, `tok\/en`)
+	}
+}
+
+// A non-2xx answer that carries a GraphQL errors envelope (Apollo answers a
+// refused introspection with HTTP 400) keeps the upstream's messages next to
+// the status, and the hint names the command the caller runs.
+func TestIntrospectionNon2xxKeepsMessages(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		body   string
+		want   string
+	}{
+		{http.StatusBadRequest, `{"errors":[{"message":"GraphQL introspection is not allowed by Apollo Server"}]}`,
+			`HTTP 400 Bad Request: the endpoint answered with GraphQL errors and no schema: "GraphQL introspection is not allowed by Apollo Server"`},
+		{http.StatusForbidden, `<html>denied</html>`, "HTTP 403 Forbidden ("},
+	} {
+		t.Run(http.StatusText(tc.status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			t.Cleanup(srv.Close)
+			u, err := url.Parse(srv.URL + "/graphql")
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = introspect(t.Context(), u, invoke.Credential{}, resolvedFixed{}, true, runIntrospectionHint)
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), runIntrospectionHint) {
+				t.Errorf("err = %v, want it to contain %q and the run hint", err, tc.want)
+			}
+		})
 	}
 }

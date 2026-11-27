@@ -93,7 +93,9 @@ parsed manifest).
 becomes a saved config by adding "add <name>" and --from-run.
 
 Credentials are references only (--header Name=env:VAR, keyring:svc/key);
-store a keyring value with plugit auth.
+store a keyring value with plugit auth. The Authorization --header, if one
+is given, is the credential, sent only to the pinned origin; otherwise the
+first --header is. Any other --header is a fixed header.
 
 --format NAME skips format detection (openapi, postman, graphql-sdl,
 graphql-introspection). --introspect treats the URL as a GraphQL endpoint:
@@ -475,8 +477,9 @@ func pinBaseURL(s addSettings, servers []string, confirm func(string) (bool, err
 	return u.String(), nil
 }
 
-// credentialConfig turns --header and --fixed flags into config: the first
-// header becomes the auth credential (SPEC §9 item 4), any others fixed
+// credentialConfig turns --header and --fixed flags into config: the
+// credential header (credentialHeader: Authorization if given, else the
+// first) becomes the auth credential (SPEC §9 item 4), any others fixed
 // headers.
 func credentialConfig(headerFlags, fixedFlags []string) (config.Auth, []config.Fixed, error) {
 	auth := config.Auth{Type: config.AuthNone}
@@ -489,8 +492,9 @@ func credentialConfig(headerFlags, fixedFlags []string) (config.Auth, []config.F
 		return auth, nil, err
 	}
 	var fixed []config.Fixed
+	ci := credentialHeader(headers)
 	for i, h := range headers {
-		if i == 0 {
+		if i == ci {
 			auth = config.Auth{Type: config.AuthHeader, Header: h.name, Secret: h.ref.String()}
 			continue
 		}

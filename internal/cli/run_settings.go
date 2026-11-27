@@ -167,6 +167,17 @@ type credFlag struct {
 	ref  secrets.Ref
 }
 
+// credentialHeader returns the index of the --header that is the
+// credential: the first named Authorization (any case), else the first.
+func credentialHeader(headers []credFlag) int {
+	for i, h := range headers {
+		if strings.EqualFold(h.name, "Authorization") {
+			return i
+		}
+	}
+	return 0
+}
+
 var headerNameRe = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 
 // parseHeaderFlags parses --header Name=env:VAR|keyring:svc/key. Header

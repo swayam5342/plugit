@@ -100,11 +100,7 @@ func loadActive(ctx context.Context, s serveSettings, d runDeps, logger *slog.Lo
 	for _, st := range sel.Tools {
 		t := st.Tool
 		if doc, ok := docs[t.Key]; ok && t.GraphQL != nil {
-			op := *t.GraphQL
-			op.Document = doc
-			// Selection must describe the document served, not the default.
-			op.Selection = m.GraphQL.OverrideSelections[tsName][string(t.Key)]
-			t.GraphQL = &op
+			t.GraphQL = overrideOp(*t.GraphQL, doc, m.GraphQL.OverrideSelections[tsName], t.Key)
 		}
 		mt := mcpserver.Tool{Tool: schema.Prepare(t, schema.Options{Fixed: hidden}), Override: st.Override}
 		if r, err := policy.ParseRate(ts.Tools[string(t.Key)].RateLimit); err == nil {
@@ -280,4 +276,17 @@ func parserID(info BuildInfo) string {
 		}
 	}
 	return id
+}
+
+// overrideOp returns op serving the override document doc. Selection must
+// describe the document served, so it is replaced by the override's
+// selection, when the manifest records one (sels holds the toolset's
+// selections by tool key). A cache written before selections were recorded
+// has none; the default selection is kept then rather than cleared.
+func overrideOp(op model.GraphQLOp, doc string, sels map[string][]string, key model.OpKey) *model.GraphQLOp {
+	op.Document = doc
+	if sel, ok := sels[string(key)]; ok {
+		op.Selection = sel
+	}
+	return &op
 }

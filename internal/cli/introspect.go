@@ -175,7 +175,7 @@ func introspectAPI(ctx context.Context, cfg *config.API, d runDeps) (raw []byte,
 		return nil, "", err
 	}
 	fx.userAgent = "plugit/" + d.info.withDefaults().Version
-	raw, err = introspect(ctx, endpoint, cred, fx, cfg.Network.AllowPrivate)
+	raw, err = introspect(ctx, endpoint, cred, fx, cfg.Network.AllowPrivate, introspectionDisabledHint)
 	if err != nil {
 		return nil, "", err
 	}
@@ -192,8 +192,10 @@ func introspectAPI(ctx context.Context, cfg *config.API, d runDeps) (raw []byte,
 // non-2xx status or a result over the cap is an error. So is a result that
 // carries the credential or a secret fixed value in any encoded form (T11):
 // it would become the snapshot, the manifest and tool descriptions, so
-// invoke.Fetch refuses it and nothing is saved.
-func introspect(ctx context.Context, endpoint *url.URL, cred invoke.Credential, fx resolvedFixed, allowPrivate bool) ([]byte, error) {
+// invoke.Fetch refuses it and nothing is saved. hint is what to do when the
+// endpoint won't answer (introspectionDisabledHint or runIntrospectionHint),
+// chosen by the calling command.
+func introspect(ctx context.Context, endpoint *url.URL, cred invoke.Credential, fx resolvedFixed, allowPrivate bool, hint string) ([]byte, error) {
 	where := safeLocation(endpoint.String())
 	body, err := json.Marshal(map[string]string{"query": introspectionQuery})
 	if err != nil {
@@ -227,7 +229,13 @@ func introspect(ctx context.Context, endpoint *url.URL, cred invoke.Credential, 
 	case err != nil:
 		return nil, fmt.Errorf("introspecting %s: %w", where, err)
 	case status < 200 || status > 299:
-		return nil, fmt.Errorf("introspecting %s: HTTP %d %s (%s)", where, status, http.StatusText(status), introspectionDisabledHint)
+		// A refused introspection may still say why in an errors envelope
+		// (Apollo answers HTTP 400); its messages are kept.
+		if msgs, ok := introspectionErrors(data); ok && !truncated {
+			return nil, fmt.Errorf("introspecting %s: HTTP %d %s: the endpoint answered with GraphQL errors and no schema: %s; %s",
+				where, status, http.StatusText(status), red.With(cred.SecretValues()...).String(msgs), hint)
+		}
+		return nil, fmt.Errorf("introspecting %s: HTTP %d %s (%s)", where, status, http.StatusText(status), hint)
 	case truncated:
 		return nil, fmt.Errorf("introspecting %s: the result is over %d bytes", where, config.MaxSnapshotBytes)
 	case len(bytes.TrimSpace(data)) == 0:
@@ -237,14 +245,18 @@ func introspect(ctx context.Context, endpoint *url.URL, cred invoke.Credential, 
 		// Fetch has already refused a body carrying a secret in play; String
 		// also masks known token formats.
 		return nil, fmt.Errorf("introspecting %s: the endpoint answered with GraphQL errors and no schema: %s; %s",
-			where, red.With(cred.SecretValues()...).String(msgs), introspectionDisabledHint)
+			where, red.With(cred.SecretValues()...).String(msgs), hint)
 	}
 	return data, nil
 }
 
-// introspectionDisabledHint is what to do when an endpoint won't answer
-// the introspection query.
-const introspectionDisabledHint = "introspection is often disabled on public APIs: download the schema (SDL) and run plugit add NAME FILE --format graphql-sdl --endpoint URL"
+// introspectionDisabledHint and runIntrospectionHint say what to do when an
+// endpoint won't answer the introspection query, for add and sync, and for
+// run.
+const (
+	introspectionDisabledHint = "introspection is often disabled on public APIs: download the schema (SDL) and run plugit add NAME FILE --format graphql-sdl --endpoint URL"
+	runIntrospectionHint      = "introspection is often disabled on public APIs: download the schema (SDL) and run plugit run FILE --format graphql-sdl --endpoint URL"
+)
 
 // Limits on the upstream messages an errors envelope is reported with.
 const (
