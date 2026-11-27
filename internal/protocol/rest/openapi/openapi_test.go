@@ -10,18 +10,13 @@ import (
 	"testing"
 
 	"github.com/swayam5342/plugit/internal/model"
-	"github.com/swayam5342/plugit/internal/protocol/rest/postman"
 )
 
-// parse mimics the ingest dispatcher for tests: a Postman collection goes to
-// postman.Parse, everything else to Parse.
+// parse runs Parse on src. Tests that drive both REST parsers live in the
+// rest package (paths_test.go).
 func parse(t *testing.T, src string, opts Options) *model.Manifest {
 	t.Helper()
-	p := Parse
-	if postman.Detect([]byte(src)) {
-		p = postman.Parse
-	}
-	m, err := p([]byte(src), opts)
+	m, err := Parse([]byte(src), opts)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}

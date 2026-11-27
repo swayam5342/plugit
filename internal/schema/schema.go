@@ -99,7 +99,7 @@ func bodyParams(t *model.Tool, fx fixed, ns *namespace) []model.Param {
 		trial := ns.clone()
 		var fields []model.Param
 		collided := false
-		for _, k := range utils.SortedKeys(props) {
+		for _, k := range slices.Sorted(maps.Keys(props)) {
 			f := model.Param{
 				Bind:     model.Binding{Upstream: k, In: model.InBody},
 				Required: t.HTTP.Body.Required && required[k],

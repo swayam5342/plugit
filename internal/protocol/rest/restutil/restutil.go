@@ -1,7 +1,9 @@
-// Package restutil holds the manifest-building helpers shared by the REST
-// ingest parsers, openapi and postman: the Builder that collects tools and
-// warnings, the per-tool issue Collector, path validation, parameter and
-// form-body modelling (SPEC §3.4, §3.5).
+// Package restutil holds the helpers shared by the REST ingest parsers,
+// openapi and postman, and by the REST encoder (SPEC §3.2): the Builder that
+// collects tools and warnings, the per-tool issue Collector, path
+// validation, parameter and form-body modelling (SPEC §3.4, §3.5), and the
+// cookie-name rule (ValidCookieName) that ingest and rest.Encode must agree
+// on, which is why the encoder imports this package.
 //
 // Everything here handles untrusted spec text (SPEC §5.3): text that reaches
 // the model or the terminal is cleaned with naming.CleanText, and path

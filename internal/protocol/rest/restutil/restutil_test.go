@@ -48,8 +48,9 @@ func TestBuilderValidPath(t *testing.T) {
 			if got := b.ValidPath(tc.path); got != want {
 				t.Errorf("ValidPath(%q) with AllowUnsafePaths=%v = %v, want %v", tc.path, allow, got, want)
 			}
-			if got := len(b.M.Warnings) == 1; got == want {
-				t.Errorf("ValidPath(%q) with AllowUnsafePaths=%v: warnings %q", tc.path, allow, b.M.Warnings)
+			// A refused path is reported with one warning; an accepted one with none.
+			if warned := len(b.M.Warnings) == 1; warned != !want {
+				t.Errorf("ValidPath(%q) with AllowUnsafePaths=%v: warnings %q, want a warning only when refused", tc.path, allow, b.M.Warnings)
 			}
 		}
 	}

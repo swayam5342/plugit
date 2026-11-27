@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -101,7 +103,7 @@ func (g GraphQL) Encode(ctx context.Context, c protocol.Call) (*http.Request, er
 	}
 
 	vars := map[string]any{}
-	for _, name := range utils.SortedKeys(c.Args) {
+	for _, name := range slices.Sorted(maps.Keys(c.Args)) {
 		p, ok := byName[name]
 		if !ok {
 			return nil, fmt.Errorf("%w: unknown argument %q", ErrBadArgument, name)
@@ -260,7 +262,7 @@ func (GraphQL) Decode(c protocol.Call, resp *http.Response, body []byte, truncat
 	case len(body) == 0:
 		httpRes.Text = fmt.Sprintf("(empty response, status %d)", resp.StatusCode)
 		return httpRes
-	case utils.IsBinary(ct, body):
+	case protocol.IsBinary(ct, body):
 		typ := ct
 		if typ == "" {
 			typ = "unknown"

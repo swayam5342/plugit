@@ -5,7 +5,6 @@ import (
 	"go/token"
 	"math"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -25,15 +24,6 @@ func TestMustJSON(t *testing.T) {
 				t.Errorf("MustJSON = %s, want %s", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestSortedKeys(t *testing.T) {
-	if got := SortedKeys(map[string]any{"b": 1, "a": 2, "c": nil}); !reflect.DeepEqual(got, []string{"a", "b", "c"}) {
-		t.Errorf("SortedKeys = %v", got)
-	}
-	if got := SortedKeys(map[string]int{}); got == nil || len(got) != 0 {
-		t.Errorf("SortedKeys(empty) = %#v, want an empty non-nil slice", got)
 	}
 }
 
@@ -57,26 +47,6 @@ func TestTrimBOM(t *testing.T) {
 	} {
 		if got := string(TrimBOM([]byte(in))); got != want {
 			t.Errorf("TrimBOM(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
-func TestIsBinary(t *testing.T) {
-	for _, tc := range []struct {
-		ct, body string
-		want     bool
-	}{
-		{"application/json", `{"a":1}`, false},
-		{"text/plain; charset=utf-8", "héllo", false},
-		{"image/png", "PNG", true},
-		{"application/octet-stream", "abc", true},
-		{"application/pdf; x=y", "", true},
-		{"text/plain", "nul\x00byte", true},
-		{"text/plain", "\xff\xfe", true},
-		{"", "plain", false},
-	} {
-		if got := IsBinary(tc.ct, []byte(tc.body)); got != tc.want {
-			t.Errorf("IsBinary(%q, %q) = %v, want %v", tc.ct, tc.body, got, tc.want)
 		}
 	}
 }

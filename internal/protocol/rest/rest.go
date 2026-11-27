@@ -10,7 +10,6 @@ import (
 
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/protocol"
-	"github.com/swayam5342/plugit/internal/utils"
 )
 
 // REST serves REST tools. Target carries the fixed params and user agent;
@@ -56,7 +55,7 @@ func (REST) Decode(_ protocol.Call, resp *http.Response, body []byte, truncated 
 	switch {
 	case len(body) == 0:
 		res.Text = fmt.Sprintf("(empty response, status %d)", resp.StatusCode)
-	case utils.IsBinary(ct, body):
+	case protocol.IsBinary(ct, body):
 		typ := ct
 		if typ == "" {
 			typ = "unknown"
