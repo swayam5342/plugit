@@ -17,8 +17,8 @@ import (
 func tl(method, path, name string, tags ...string) model.Tool {
 	return model.Tool{
 		Key: model.NewOpKey(method, path), Name: name, Description: method + " " + path + " does things.",
-		Method: method, Path: path, Tags: tags, Safety: model.SafetyForMethod(method),
-		Params: []model.Param{{Name: "id", UpstreamName: "id", In: model.InQuery, Schema: json.RawMessage(`{"type":"string"}`)}},
+		HTTP: &model.HTTPOp{Method: method, Path: path}, Tags: tags, Safety: model.SafetyForMethod(method),
+		Params: []model.Param{{Name: "id", Bind: model.Binding{Upstream: "id", In: model.InQuery}, Schema: json.RawMessage(`{"type":"string"}`)}},
 	}
 }
 
@@ -203,6 +203,33 @@ func TestPickerRenameAndDescribe(t *testing.T) {
 	press(p, "r", "ctrl+u", "enter")
 	if ts, _ := p.Result(); ts.Tools["GET /pets"].Name != "" {
 		t.Errorf("reset failed: %+v", ts.Tools["GET /pets"])
+	}
+}
+
+func TestPickerDetailUsesProtocolDescribe(t *testing.T) {
+	ts := config.Toolset{Tools: map[string]config.ToolOverride{}}
+	p := NewPicker(PickerInput{
+		API: "pets", Tools: testTools(), Prefix: "pp", Mode: policy.ReadOnly, Selected: ts,
+		Describe: func(model.Tool) (string, string) { return "QRY", "svc.v1/Get" },
+	})
+	p.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	moveTo(t, p, "pp_listPets")
+	press(p, "i") // open the tool-detail screen
+	v := view(p)
+	if !strings.Contains(v, "QRY") || !strings.Contains(v, "svc.v1/Get") {
+		t.Errorf("tool detail should show the protocol badge/target from Describe:\n%s", v)
+	}
+}
+
+func TestPickerListUsesProtocolDescribe(t *testing.T) {
+	ts := config.Toolset{Tools: map[string]config.ToolOverride{}}
+	p := NewPicker(PickerInput{
+		API: "pets", Tools: testTools(), Prefix: "pp", Mode: policy.ReadOnly, Selected: ts,
+		Describe: func(model.Tool) (string, string) { return "QRY", "svc.v1/Get" },
+	})
+	p.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	if v := view(p); !strings.Contains(v, "QRY") || !strings.Contains(v, "svc.v1/Get") {
+		t.Errorf("picker list rows should show the protocol badge/target from Describe:\n%s", v)
 	}
 }
 

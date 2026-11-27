@@ -1,6 +1,7 @@
 package store
 
 import (
+	gosql "database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -27,7 +28,7 @@ func open(t *testing.T) (*DB, string) {
 func call(api, tool string, at time.Time, ms int, outcome Outcome) Call {
 	return Call{
 		Time: at, API: api, Toolset: "default", Tool: tool, Op: "GET /" + tool,
-		Outcome: outcome, Status: 200, Duration: time.Duration(ms) * time.Millisecond, Bytes: 100,
+		Outcome: outcome, Code: "HTTP 200", Duration: time.Duration(ms) * time.Millisecond, Bytes: 100,
 	}
 }
 
@@ -57,7 +58,7 @@ func TestInsertAndList(t *testing.T) {
 	if err != nil || id == 0 {
 		t.Fatalf("Insert = %d, %v", id, err)
 	}
-	if _, err := db.Insert(ctx, call("other", "x", t0.Add(time.Second), 7, HTTPError)); err != nil {
+	if _, err := db.Insert(ctx, call("other", "x", t0.Add(time.Second), 7, UpstreamError)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Insert(ctx, call("pets", "get_pet", t0.Add(2*time.Second), 9, Denied)); err != nil {
@@ -123,7 +124,7 @@ func TestStats(t *testing.T) {
 	for i := 1; i <= 20; i++ {
 		o := OK
 		if i%5 == 0 {
-			o = HTTPError
+			o = UpstreamError
 		}
 		if _, err := db.Insert(ctx, call("pets", "list_pets", t0.Add(time.Duration(i)*time.Minute), i*10, o)); err != nil {
 			t.Fatal(err)
@@ -217,5 +218,33 @@ func TestRecorder(t *testing.T) {
 	}
 	if len(got) == 0 || len(failures) != 0 {
 		t.Errorf("stored %d, failures %v", len(got), failures)
+	}
+}
+
+func TestOldDBMovedAside(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "plugit.db")
+	old, err := gosql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.ExecContext(t.Context(), "CREATE TABLE calls(id INTEGER, status INTEGER)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.ExecContext(t.Context(), "PRAGMA user_version = 1"); err != nil {
+		t.Fatal(err)
+	}
+	_ = old.Close()
+
+	db, err := Open(t.Context(), path)
+	if err != nil {
+		t.Fatalf("Open should move a pre-rebuild log aside, not fail: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := os.Stat(path + ".bak"); err != nil {
+		t.Errorf("old log was not moved aside: %v", err)
+	}
+	if _, err := db.Insert(t.Context(), Call{API: "a", Toolset: "t", Tool: "x", Op: "GET /x", Outcome: OK, Code: "HTTP 200", Time: time.Now()}); err != nil {
+		t.Errorf("insert into fresh log failed: %v", err)
 	}
 }

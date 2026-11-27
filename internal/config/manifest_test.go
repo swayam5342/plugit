@@ -18,11 +18,11 @@ func testManifest() *model.Manifest {
 		Title:       "Pets",
 		Version:     "1",
 		SpecVersion: "3.0.3",
-		Servers:     []string{"https://pets.example.test"},
+		Endpoints:   []string{"https://pets.example.test"},
 		Tools: []model.Tool{{
 			Key: "GET /pets/{id}", ID: "abcd1234", Name: "getPet", Description: "Get a pet",
-			Method: "GET", Path: "/pets/{id}", Safety: model.ReadOnly,
-			Params: []model.Param{{Name: "id", UpstreamName: "id", In: model.InPath, Required: true, Schema: []byte(`{"type":"string"}`)}},
+			HTTP: &model.HTTPOp{Method: "GET", Path: "/pets/{id}"}, Safety: model.ReadOnly,
+			Params: []model.Param{{Name: "id", Bind: model.Binding{Upstream: "id", In: model.InPath}, Required: true, Schema: []byte(`{"type":"string"}`)}},
 		}},
 		Warnings: []string{"1 TRACE operation skipped"},
 	}

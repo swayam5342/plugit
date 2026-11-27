@@ -1,18 +1,18 @@
-// Package proxy turns validated tool arguments into an HTTP request and the
-// upstream response into a tool result (SPEC §3.7 steps 5-8).
+// Package rest is the REST Protocol (SPEC §3.5 P4/§3.7 P5): it encodes a
+// validated call into an HTTP request and decodes the response into a neutral
+// Result. It never attaches a credential, opens a connection or calls httpx —
+// invoke owns every network step (T17).
 //
 // Every argument is routed by the location the spec declares, under its
 // upstream name; nothing is guessed. The host always comes from the pinned
 // base URL. Path values are percent-encoded and may not be empty, ".", ".."
 // or contain a slash (even percent-encoded); header values may not contain
-// CR, LF or other control characters. Credentials are attached last, only
-// for the pinned origin, and replace anything with the same name.
-package proxy
+// CR, LF or other control characters.
+package rest
 
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,7 +25,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/swayam5342/plugit/internal/httpx"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/schema"
 )
@@ -109,10 +108,10 @@ func (tg Target) SecretValues() []string {
 
 var placeholderRe = regexp.MustCompile(`\{[^{}/]*\}`)
 
-// Build creates the request for one call. args are decoded arguments (see
-// schema.DecodeArgs) and should already have passed schema validation; Build
-// re-checks everything it relies on.
-func Build(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*http.Request, error) {
+// Encode routes arguments and fixed params into an *http.Request WITHOUT any
+// credential (SPEC §3.7 P5: a protocol's Encode never attaches credentials;
+// invoke calls AttachAuth afterwards).
+func Encode(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*http.Request, error) {
 	if err := checkBase(tg.BaseURL); err != nil {
 		return nil, err
 	}
@@ -130,7 +129,7 @@ func Build(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*
 	}
 	slices.Sort(names)
 
-	path := t.Path
+	path := t.HTTP.Path
 	query := url.Values{}
 	header := http.Header{}
 	bodyFields := map[string]any{}
@@ -147,38 +146,38 @@ func Build(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*
 		if v == nil {
 			continue
 		}
-		switch p.In {
+		switch p.Bind.In {
 		case model.InPath:
 			seg, err := pathSegment(name, v)
 			if err != nil {
 				return nil, err
 			}
-			path = strings.ReplaceAll(path, "{"+p.UpstreamName+"}", seg)
+			path = strings.ReplaceAll(path, "{"+p.Bind.Upstream+"}", seg)
 		case model.InQuery:
-			if err := addQuery(query, p.UpstreamName, v); err != nil {
+			if err := addQuery(query, p.Bind.Upstream, v); err != nil {
 				return nil, fmt.Errorf("%w: %q: %w", ErrBadArgument, name, err)
 			}
 		case model.InHeader:
-			if schema.IsForbiddenHeader(p.UpstreamName) {
-				return nil, fmt.Errorf("%w: %q: the %s header can't be set by a tool", ErrBadArgument, name, p.UpstreamName)
+			if schema.IsForbiddenHeader(p.Bind.Upstream) {
+				return nil, fmt.Errorf("%w: %q: the %s header can't be set by a tool", ErrBadArgument, name, p.Bind.Upstream)
 			}
 			s, err := headerValue(v)
 			if err != nil {
 				return nil, fmt.Errorf("%w: %q: %w", ErrBadArgument, name, err)
 			}
-			header.Set(p.UpstreamName, s)
+			header.Set(p.Bind.Upstream, s)
 		case model.InCookie:
-			s, err := cookieValue(p.UpstreamName, v)
+			s, err := cookieValue(p.Bind.Upstream, v)
 			if err != nil {
 				return nil, fmt.Errorf("%w: %q: %w", ErrBadArgument, name, err)
 			}
-			cookies[p.UpstreamName] = s
+			cookies[p.Bind.Upstream] = s
 		case model.InBody:
-			bodyFields[p.UpstreamName] = v
+			bodyFields[p.Bind.Upstream] = v
 		case model.InBodyRoot:
 			bodyRoot, hasBodyRoot = v, true
 		default:
-			return nil, fmt.Errorf("%w: argument %q has unsupported location %s", ErrBuild, name, p.In)
+			return nil, fmt.Errorf("%w: argument %q has unsupported location %s", ErrBuild, name, p.Bind.In)
 		}
 	}
 
@@ -186,8 +185,8 @@ func Build(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*
 		in := f.In
 		upstream := f.Name
 		if p := declaredFixed(t, f.Name); p != nil {
-			in, upstream = p.In, p.UpstreamName
-		} else if in != model.InHeader {
+			in, upstream = p.Bind.In, p.Bind.Upstream
+		} else if in != model.InHeader && in != model.InCookie {
 			in = model.InQuery
 		}
 		switch in {
@@ -224,11 +223,11 @@ func Build(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*
 
 	declared := map[string]bool{}
 	for _, p := range t.Params {
-		if p.In == model.InBody {
-			declared[p.UpstreamName] = true
+		if p.Bind.In == model.InBody {
+			declared[p.Bind.Upstream] = true
 		}
 	}
-	body, contentType, err := encodeBody(t.Body, bodyFields, bodyRoot, hasBodyRoot, declared)
+	body, contentType, err := encodeBody(t.HTTP.Body, bodyFields, bodyRoot, hasBodyRoot, declared)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +238,7 @@ func Build(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*
 	}
 	u.RawQuery = query.Encode()
 
-	req, err := http.NewRequestWithContext(ctx, strings.ToUpper(t.Method), u.String(), bytesReader(body))
+	req, err := http.NewRequestWithContext(ctx, strings.ToUpper(t.HTTP.Method), u.String(), bytesReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrBuild, err)
 	}
@@ -257,9 +256,6 @@ func Build(ctx context.Context, t model.Tool, args map[string]any, tg Target) (*
 	req.Header.Set("Accept", "application/json, */*;q=0.8")
 	if tg.UserAgent != "" {
 		req.Header.Set("User-Agent", tg.UserAgent)
-	}
-	if err := attachAuth(req, tg); err != nil {
-		return nil, err
 	}
 	return req, nil
 }
@@ -286,7 +282,7 @@ func declaredFixed(t model.Tool, name string) *model.Param {
 		if !p.Hidden {
 			continue
 		}
-		if p.UpstreamName == name || (p.In == model.InHeader && strings.EqualFold(p.UpstreamName, name)) {
+		if p.Bind.Upstream == name || (p.Bind.In == model.InHeader && strings.EqualFold(p.Bind.Upstream, name)) {
 			return p
 		}
 	}
@@ -408,44 +404,6 @@ func scalar(v any) (string, bool) {
 
 func hasControl(s string) bool {
 	return strings.IndexFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0
-}
-
-func attachAuth(req *http.Request, tg Target) error {
-	a := tg.Auth
-	if a.Type == "" || a.Type == AuthNone {
-		return nil
-	}
-	if !httpx.SameOrigin(req.URL, tg.BaseURL) {
-		return fmt.Errorf("%w: request origin differs from the pinned base URL", ErrBuild)
-	}
-	if hasControl(a.Secret) {
-		return fmt.Errorf("%w: the credential contains control characters", ErrBuild)
-	}
-	switch a.Type {
-	case AuthBearer:
-		req.Header.Set("Authorization", "Bearer "+a.Secret)
-	case AuthHeader:
-		if a.Header == "" {
-			return fmt.Errorf("%w: auth.header is required for header auth", ErrBuild)
-		}
-		req.Header.Del(a.Header)
-		req.Header.Set(a.Header, a.Secret)
-	case AuthQuery:
-		if a.Param == "" {
-			return fmt.Errorf("%w: auth.param is required for query auth", ErrBuild)
-		}
-		q := req.URL.Query()
-		q.Set(a.Param, a.Secret)
-		req.URL.RawQuery = q.Encode()
-	case AuthBasic:
-		if !strings.Contains(a.Secret, ":") {
-			return fmt.Errorf("%w: basic auth secrets must look like user:password", ErrBuild)
-		}
-		req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(a.Secret)))
-	default:
-		return fmt.Errorf("%w: unknown auth type %q", ErrBuild, a.Type)
-	}
-	return nil
 }
 
 var cookieNameRe = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$")

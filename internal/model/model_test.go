@@ -78,9 +78,9 @@ func TestStringsAndJSON(t *testing.T) {
 }
 
 func TestManifestJSONRoundTrip(t *testing.T) {
-	in := Manifest{Title: "t", SpecVersion: "3.1.0", Tools: []Tool{{
-		Key: "POST /x", Name: "x", Method: "POST", Path: "/x", Safety: Write,
-		Params: []Param{{Name: "b", UpstreamName: "", In: InBodyRoot, Schema: json.RawMessage(`{"type":"array"}`)}},
+	in := Manifest{Protocol: REST, Title: "t", SpecVersion: "3.1.0", Tools: []Tool{{
+		Key: "POST /x", Name: "x", Safety: Write, HTTP: &HTTPOp{Method: "POST", Path: "/x"},
+		Params: []Param{{Name: "b", Bind: Binding{In: InBodyRoot}, Schema: json.RawMessage(`{"type":"array"}`)}},
 		Issues: []Issue{{Kind: IssueBodyNested, Detail: "d"}},
 	}}}
 	b, err := json.Marshal(in)
@@ -95,8 +95,8 @@ func TestManifestJSONRoundTrip(t *testing.T) {
 	if string(b) != string(b2) {
 		t.Errorf("round trip changed the manifest:\n%s\n%s", b, b2)
 	}
-	if out.Tools[0].Safety != Write || out.Tools[0].Params[0].In != InBodyRoot {
-		t.Errorf("enums not decoded: %v %v", out.Tools[0].Safety, out.Tools[0].Params[0].In)
+	if out.Tools[0].Safety != Write || out.Tools[0].Params[0].Bind.In != InBodyRoot {
+		t.Errorf("enums not decoded: %v %v", out.Tools[0].Safety, out.Tools[0].Params[0].Bind.In)
 	}
 }
 

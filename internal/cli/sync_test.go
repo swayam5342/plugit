@@ -45,10 +45,10 @@ paths:
       responses: {'200': {description: ok}}
 `
 
-const richYAML = `version: 2
+const richYAML = `version: 1
 name: pets
 source: {url: https://example.test/openapi.yaml}
-base_url: %s
+endpoint: %s
 prefix: pp
 network: {allow_private: true}
 auth: {type: header, header: X-Api-Key, secret: env:PETS_KEY}
@@ -105,8 +105,8 @@ func TestSyncKeepsEveryOverride(t *testing.T) {
 	}
 
 	cfg, _ := config.LoadAPI(p, "pets")
-	if cfg.BaseURL != up.URL || !strings.HasSuffix(cfg.Source.URL, "spec.yaml") || cfg.Source.SHA256 == "" {
-		t.Errorf("config after sync: base=%s source=%s sha=%s", cfg.BaseURL, cfg.Source.URL, cfg.Source.SHA256)
+	if cfg.Endpoint != up.URL || !strings.HasSuffix(cfg.Source.URL, "spec.yaml") || cfg.Source.SHA256 == "" {
+		t.Errorf("config after sync: base=%s source=%s sha=%s", cfg.Endpoint, cfg.Source.URL, cfg.Source.SHA256)
 	}
 	snap, _ := p.SpecSnapshot("pets")
 	data, sum, err := config.ReadSnapshot(snap)
@@ -121,7 +121,7 @@ func TestSyncKeepsEveryOverride(t *testing.T) {
 
 	o := out.String()
 	for _, want := range []string{"+ GET /owners", "- POST /pets", "~ GET /pets/{id}", "description", "parameters",
-		"servers changed", "new-home.example.test", "base_url stays " + up.URL, "overrides kept"} {
+		"servers changed", "new-home.example.test", "endpoint stays " + up.URL, "overrides kept"} {
 		if !strings.Contains(o, want) {
 			t.Errorf("output missing %q:\n%s", want, o)
 		}
@@ -252,8 +252,8 @@ func TestSyncFailures(t *testing.T) {
 }
 
 func TestSyncDiffFlagsAutoServedOperations(t *testing.T) {
-	added := model.Tool{Key: "POST /pets/{id}/photos", Name: "addPhoto", Method: "POST", Path: "/pets/{id}/photos"}
-	quiet := model.Tool{Key: "GET /owners", Name: "listOwners", Method: "GET", Path: "/owners"}
+	added := model.Tool{Key: "POST /pets/{id}/photos", Name: "addPhoto", HTTP: &model.HTTPOp{Method: "POST", Path: "/pets/{id}/photos"}}
+	quiet := model.Tool{Key: "GET /owners", Name: "listOwners", HTTP: &model.HTTPOp{Method: "GET", Path: "/owners"}}
 	d := curate.SyncDiff{Added: []curate.OpChange{
 		{Key: added.Key, New: &added, AutoSelected: []string{"by-tag", "posts"}},
 		{Key: quiet.Key, New: &quiet},
@@ -272,7 +272,7 @@ func TestSyncDiffFlagsAutoServedOperations(t *testing.T) {
 }
 
 func TestSyncDiffSanitizesKeys(t *testing.T) {
-	evil := model.Tool{Key: "GET /pets\x1b]0;owned\a", Name: "listPets", Method: "GET", Path: "/pets"}
+	evil := model.Tool{Key: "GET /pets\x1b]0;owned\a", Name: "listPets", HTTP: &model.HTTPOp{Method: "GET", Path: "/pets"}}
 	d := curate.SyncDiff{
 		Added:   []curate.OpChange{{Key: evil.Key, New: &evil}},
 		Changed: []curate.OpChange{{Key: evil.Key, Old: &evil, New: &evil, What: []string{"description"}}},

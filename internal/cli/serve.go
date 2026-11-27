@@ -28,9 +28,10 @@ import (
 	"github.com/swayam5342/plugit/internal/mcpserver"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/oauth"
-	"github.com/swayam5342/plugit/internal/openapi"
 	"github.com/swayam5342/plugit/internal/policy"
-	"github.com/swayam5342/plugit/internal/proxy"
+	"github.com/swayam5342/plugit/internal/protocol"
+	"github.com/swayam5342/plugit/internal/protocol/rest"
+	"github.com/swayam5342/plugit/internal/protocol/rest/openapi"
 	"github.com/swayam5342/plugit/internal/redact"
 	"github.com/swayam5342/plugit/internal/schema"
 	"github.com/swayam5342/plugit/internal/secrets"
@@ -108,7 +109,7 @@ func serveAPI(ctx context.Context, s serveSettings, d runDeps) error {
 	}
 	logger.Info("plugit serve serving",
 		"api", a.cfg.Name, "toolset", a.toolset, "selected", len(a.tools), "listed", listed, "mode", a.cfg.Policy.Mode,
-		"base_url", a.target.BaseURL.String())
+		"endpoint", a.target.BaseURL.String())
 	var apiLimit *policy.Limiter
 	if r, err := policy.ParseRate(a.cfg.Policy.RateLimit); err == nil {
 		apiLimit = policy.NewLimiter(r, nil)
@@ -124,6 +125,7 @@ func serveAPI(ctx context.Context, s serveSettings, d runDeps) error {
 		Tools:    a.tools,
 		Mode:     a.cfg.PolicyMode(),
 		Target:   a.target,
+		Proto:    a.proto,
 		Doer:     a.doer,
 		Redactor: a.red,
 		Logger:   logger,
@@ -208,9 +210,30 @@ type active struct {
 	cfg     *config.API
 	toolset string
 	tools   []mcpserver.Tool
-	target  proxy.Target
+	target  rest.Target
+	proto   protocol.Protocol
 	red     *redact.Redactor
 	doer    httpx.Doer
+}
+
+// resolveProto picks the serving protocol from the registry (SPEC §3.7 P5) and
+// binds the per-serve target. A protocol with no registered impl is refused —
+// "needs a newer plugit" — never served as REST by accident (T-rules: one serve
+// = one protocol). An empty name is a pre-field manifest, which is REST.
+func resolveProto(name model.Protocol, tg rest.Target) (protocol.Protocol, error) {
+	if name == "" {
+		name = model.REST
+	}
+	p, ok := protocol.For(name)
+	if !ok {
+		return nil, fmt.Errorf("this plugit build can't serve the %q protocol; it may need a newer version of plugit", name)
+	}
+	// REST is the only impl in M7 and carries its config on the value; bind it.
+	if r, isREST := p.(rest.REST); isREST {
+		r.Target = tg
+		return r, nil
+	}
+	return p, nil
 }
 
 // loadActive loads plugit.yaml, the manifest (from cache when fresh), the
@@ -246,11 +269,15 @@ func loadActive(ctx context.Context, s serveSettings, d runDeps, logger *slog.Lo
 		return nil, fmt.Errorf("toolset %q selects no tools: add operations with `plugit edit %s`", tsName, cfg.Name)
 	}
 
-	baseURL, err := url.Parse(cfg.BaseURL)
+	baseURL, err := url.Parse(cfg.Endpoint)
 	if err != nil {
-		return nil, fmt.Errorf("base_url: %w", err)
+		return nil, fmt.Errorf("endpoint: %w", err)
 	}
 	target, hidden, err := buildTarget(cfg, baseURL, d, "plugit/"+d.info.withDefaults().Version)
+	if err != nil {
+		return nil, err
+	}
+	proto, err := resolveProto(m.Protocol, target)
 	if err != nil {
 		return nil, err
 	}
@@ -270,6 +297,7 @@ func loadActive(ctx context.Context, s serveSettings, d runDeps, logger *slog.Lo
 		toolset: tsName,
 		tools:   tools,
 		target:  target,
+		proto:   proto,
 		red: redact.New(redact.Options{
 			Secrets:           target.SecretValues(),
 			SecretHeaders:     hidden,
@@ -305,7 +333,7 @@ func loadManifest(ctx context.Context, p config.Paths, cfg *config.API, d runDep
 	key := config.CacheKey{SpecSHA256: sum, Prefix: cfg.Prefix, Parser: parserID(d.info), UnsafePaths: cfg.Network.AllowInsecure}
 	m, err := config.ReadManifest(cachePath, key)
 	if err == nil {
-		return m, nil
+		return checkProtocol(cfg, m)
 	}
 	if !errors.Is(err, os.ErrNotExist) {
 		logger.Info("re-parsing the spec snapshot", "reason", err.Error())
@@ -316,6 +344,23 @@ func loadManifest(ctx context.Context, p config.Paths, cfg *config.API, d runDep
 	}
 	if err := config.WriteManifest(cachePath, key, m); err != nil {
 		logger.Warn("could not write the manifest cache; the next start will parse again", "error", err.Error())
+	}
+	return checkProtocol(cfg, m)
+}
+
+// checkProtocol rejects a config whose protocol disagrees with the manifest
+// it is paired with (a hand edit, or a sync whose source changed format).
+func checkProtocol(cfg *config.API, m *model.Manifest) (*model.Manifest, error) {
+	want := cfg.Protocol
+	if want == "" {
+		want = string(model.REST)
+	}
+	got := string(m.Protocol)
+	if got == "" {
+		got = string(model.REST) // a manifest with no protocol predates the field; it is REST
+	}
+	if want != got {
+		return nil, fmt.Errorf("config protocol %q does not match the %q manifest; re-run `plugit sync %s`", want, got, cfg.Name)
 	}
 	return m, nil
 }
@@ -336,9 +381,9 @@ func parserID(info BuildInfo) string {
 
 // buildTarget resolves the credential and fixed params. It returns the
 // names to hide from the model and to redact by name.
-func buildTarget(cfg *config.API, baseURL *url.URL, d runDeps, userAgent string) (proxy.Target, []string, error) {
+func buildTarget(cfg *config.API, baseURL *url.URL, d runDeps, userAgent string) (rest.Target, []string, error) {
 	res := d.resolver
-	tg := proxy.Target{BaseURL: baseURL, UserAgent: userAgent}
+	tg := rest.Target{BaseURL: baseURL, UserAgent: userAgent}
 	var hidden []string
 
 	a := cfg.Auth
@@ -351,7 +396,7 @@ func buildTarget(cfg *config.API, baseURL *url.URL, d runDeps, userAgent string)
 		}
 		store := keyringStore{get: res.Keyring, set: d.keyring, api: cfg.Name}
 		src := oauth.NewSource(oc, oauthDoer(cfg), store, nil)
-		tg.Auth = proxy.Auth{Type: proxy.AuthBearer, Token: src.Token, Unauthorized: src.Invalidate}
+		tg.Auth = rest.Auth{Type: rest.AuthBearer, Token: src.Token, Unauthorized: src.Invalidate}
 		tg.Extra = append(tg.Extra, oc.ClientSecret)
 	default:
 		ref, err := secrets.ParseSecretRef(a.Secret)
@@ -362,7 +407,7 @@ func buildTarget(cfg *config.API, baseURL *url.URL, d runDeps, userAgent string)
 		if err != nil {
 			return tg, nil, fmt.Errorf("auth.secret: %w", err)
 		}
-		tg.Auth = proxy.Auth{Type: proxy.AuthType(a.Type), Header: a.Header, Param: a.Param, Secret: v}
+		tg.Auth = rest.Auth{Type: rest.AuthType(a.Type), Header: a.Header, Param: a.Param, Secret: v}
 		switch a.Type {
 		case config.AuthHeader:
 			hidden = append(hidden, a.Header)
@@ -380,10 +425,13 @@ func buildTarget(cfg *config.API, baseURL *url.URL, d runDeps, userAgent string)
 			return tg, nil, fmt.Errorf("fixed %s: %w", f.Name, err)
 		}
 		in := model.InQuery
-		if f.In == "header" {
+		switch f.In {
+		case "header":
 			in = model.InHeader
+		case "cookie":
+			in = model.InCookie
 		}
-		tg.Fixed = append(tg.Fixed, proxy.Fixed{Name: f.Name, In: in, Value: v, Secret: ref.IsSecret()})
+		tg.Fixed = append(tg.Fixed, rest.Fixed{Name: f.Name, In: in, Value: v, Secret: ref.IsSecret()})
 		hidden = append(hidden, f.Name)
 	}
 	return tg, hidden, nil

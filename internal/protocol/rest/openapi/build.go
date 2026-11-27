@@ -55,6 +55,7 @@ func (b *builder) warnErr(err error) {
 }
 
 func (b *builder) finish() *model.Manifest {
+	b.m.Protocol = model.REST
 	if b.extraWarns > 0 {
 		b.m.Warnings = append(b.m.Warnings, fmt.Sprintf("... and %d more warnings", b.extraWarns))
 	}
@@ -90,12 +91,12 @@ func (b *builder) addOp(t *model.Tool, operationID string) {
 func (b *builder) newTool(method, path, summary, description string, tags []string, deprecated bool) *model.Tool {
 	return &model.Tool{
 		Key:         model.NewOpKey(method, path),
-		Method:      strings.ToUpper(method),
-		Path:        path,
 		Description: naming.Describe(summary, description, method, path, b.opts.MaxDescription),
 		Tags:        cleanTags(tags),
 		Deprecated:  deprecated,
 		Safety:      model.SafetyForMethod(method),
+		Idempotent:  model.IdempotentForMethod(method),
+		HTTP:        &model.HTTPOp{Method: strings.ToUpper(method), Path: path},
 	}
 }
 
@@ -191,7 +192,7 @@ func (b *builder) fromV3(doc *v3.Document) {
 	}
 	for _, s := range doc.Servers {
 		if s != nil && s.URL != "" {
-			b.m.Servers = append(b.m.Servers, expandServer(s))
+			b.m.Endpoints = append(b.m.Endpoints, expandServer(s))
 		}
 	}
 	if doc.Paths == nil || doc.Paths.PathItems == nil {
@@ -272,11 +273,11 @@ func (b *builder) v3Op(method, path string, item *v3.PathItem, op *v3.Operation)
 		required := rb.Required != nil && *rb.Required
 		switch {
 		case jsonMT != nil:
-			t.Body = &model.Body{ContentType: "application/json", Schema: c.raw(jsonMT.Schema), Required: required}
+			t.HTTP.Body = &model.Body{ContentType: "application/json", Schema: c.raw(jsonMT.Schema), Required: required}
 		case formMT != nil:
-			t.Body = formBody(c, ctForm, c.raw(formMT.Schema), v3Encodings(formMT), required)
+			t.HTTP.Body = formBody(c, ctForm, c.raw(formMT.Schema), v3Encodings(formMT), required)
 		case multiMT != nil:
-			t.Body = formBody(c, ctMultipart, c.raw(multiMT.Schema), v3Encodings(multiMT), required)
+			t.HTTP.Body = formBody(c, ctMultipart, c.raw(multiMT.Schema), v3Encodings(multiMT), required)
 		default:
 			c.issue(model.IssueUnsupported, "request body content type(s) not supported yet: %s", strings.Join(all, ", "))
 		}
@@ -290,7 +291,7 @@ func (b *builder) fromV2(doc *v2.Swagger) {
 		b.m.Title = naming.CleanText(doc.Info.Title, 200)
 		b.m.Version = naming.CleanText(doc.Info.Version, 100)
 	}
-	b.m.Servers = v2Servers(doc)
+	b.m.Endpoints = v2Servers(doc)
 	if doc.Paths == nil || doc.Paths.PathItems == nil {
 		return
 	}
@@ -352,7 +353,7 @@ func (b *builder) v2Op(method, path string, item *v2.PathItem, op *v2.Operation,
 				c.issue(model.IssueUnsupported, "request body content type(s) not supported yet: %s", strings.Join(consumes, ", "))
 				continue
 			}
-			t.Body = &model.Body{ContentType: ct, Schema: c.raw(p.Schema), Required: p.Required != nil && *p.Required}
+			t.HTTP.Body = &model.Body{ContentType: ct, Schema: c.raw(p.Schema), Required: p.Required != nil && *p.Required}
 		case "formdata":
 			prop := v2ParamSchema(c, p)
 			if d := naming.CleanText(p.Description, b.opts.MaxDescription); d != "" {
@@ -367,7 +368,7 @@ func (b *builder) v2Op(method, path string, item *v2.PathItem, op *v2.Operation,
 			b.addParam(t, c, p.Name, p.In, p.Required != nil && *p.Required, p.Description, mustJSON(v2ParamSchema(c, p)))
 		}
 	}
-	if len(form) > 0 && t.Body == nil {
+	if len(form) > 0 && t.HTTP.Body == nil {
 		ct := ctForm
 		if slices.ContainsFunc(consumes, func(x string) bool { return normalizeMediaType(x) == ctMultipart }) &&
 			!slices.ContainsFunc(consumes, func(x string) bool { return normalizeMediaType(x) == ctForm }) {
@@ -377,7 +378,7 @@ func (b *builder) v2Op(method, path string, item *v2.PathItem, op *v2.Operation,
 		if len(formRequired) > 0 {
 			obj["required"] = formRequired
 		}
-		t.Body = formBody(c, ct, mustJSON(obj), nil, formAnyRequired)
+		t.HTTP.Body = formBody(c, ct, mustJSON(obj), nil, formAnyRequired)
 	}
 	t.Issues = c.issues
 	b.addOp(t, op.OperationId)
@@ -601,12 +602,11 @@ func (b *builder) addParam(t *model.Tool, c *converter, name, in string, require
 	}
 	c.hidden(fmt.Sprintf("parameter %q description", name), desc)
 	t.Params = append(t.Params, model.Param{
-		Name:         name,
-		UpstreamName: name,
-		In:           loc,
-		Required:     required,
-		Schema:       schema,
-		Desc:         naming.CleanText(desc, b.opts.MaxDescription),
+		Name:     name,
+		Bind:     model.Binding{Upstream: name, In: loc},
+		Required: required,
+		Schema:   schema,
+		Desc:     naming.CleanText(desc, b.opts.MaxDescription),
 	})
 }
 

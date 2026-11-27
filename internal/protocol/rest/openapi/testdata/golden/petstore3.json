@@ -1,8 +1,10 @@
 {
+  "protocol": "rest",
+  "format": "openapi",
   "title": "Swagger Petstore - OpenAPI 3.0",
   "version": "1.0.27",
   "specVersion": "3.0.4",
-  "servers": [
+  "endpoints": [
     "/api/v3"
   ],
   "tools": [
@@ -11,21 +13,23 @@
       "id": "07dc06f0",
       "name": "deletePet",
       "description": "Deletes a pet.",
-      "method": "DELETE",
-      "path": "/pet/{petId}",
       "params": [
         {
           "name": "api_key",
-          "upstreamName": "api_key",
-          "in": "header",
+          "bind": {
+            "in": "header",
+            "upstream": "api_key"
+          },
           "schema": {
             "type": "string"
           }
         },
         {
           "name": "petId",
-          "upstreamName": "petId",
-          "in": "path",
+          "bind": {
+            "in": "path",
+            "upstream": "petId"
+          },
           "required": true,
           "schema": {
             "format": "int64",
@@ -37,20 +41,25 @@
       "tags": [
         "pet"
       ],
-      "safety": "destructive"
+      "safety": "destructive",
+      "idempotent": true,
+      "http": {
+        "method": "DELETE",
+        "path": "/pet/{petId}"
+      }
     },
     {
       "key": "DELETE /store/order/{orderId}",
       "id": "6733d51c",
       "name": "deleteOrder",
       "description": "Delete purchase order by identifier.",
-      "method": "DELETE",
-      "path": "/store/order/{orderId}",
       "params": [
         {
           "name": "orderId",
-          "upstreamName": "orderId",
-          "in": "path",
+          "bind": {
+            "in": "path",
+            "upstream": "orderId"
+          },
           "required": true,
           "schema": {
             "format": "int64",
@@ -62,20 +71,25 @@
       "tags": [
         "store"
       ],
-      "safety": "destructive"
+      "safety": "destructive",
+      "idempotent": true,
+      "http": {
+        "method": "DELETE",
+        "path": "/store/order/{orderId}"
+      }
     },
     {
       "key": "DELETE /user/{username}",
       "id": "9268178c",
       "name": "deleteUser",
       "description": "Delete user resource.",
-      "method": "DELETE",
-      "path": "/user/{username}",
       "params": [
         {
           "name": "username",
-          "upstreamName": "username",
-          "in": "path",
+          "bind": {
+            "in": "path",
+            "upstream": "username"
+          },
           "required": true,
           "schema": {
             "type": "string"
@@ -86,20 +100,25 @@
       "tags": [
         "user"
       ],
-      "safety": "destructive"
+      "safety": "destructive",
+      "idempotent": true,
+      "http": {
+        "method": "DELETE",
+        "path": "/user/{username}"
+      }
     },
     {
       "key": "GET /pet/findByStatus",
       "id": "de2ee60f",
       "name": "findPetsByStatus",
       "description": "Finds Pets by status.",
-      "method": "GET",
-      "path": "/pet/findByStatus",
       "params": [
         {
           "name": "status",
-          "upstreamName": "status",
-          "in": "query",
+          "bind": {
+            "in": "query",
+            "upstream": "status"
+          },
           "required": true,
           "schema": {
             "default": "available",
@@ -116,20 +135,25 @@
       "tags": [
         "pet"
       ],
-      "safety": "read-only"
+      "safety": "read-only",
+      "idempotent": true,
+      "http": {
+        "method": "GET",
+        "path": "/pet/findByStatus"
+      }
     },
     {
       "key": "GET /pet/findByTags",
       "id": "b6acd2b5",
       "name": "findPetsByTags",
       "description": "Finds Pets by tags.",
-      "method": "GET",
-      "path": "/pet/findByTags",
       "params": [
         {
           "name": "tags",
-          "upstreamName": "tags",
-          "in": "query",
+          "bind": {
+            "in": "query",
+            "upstream": "tags"
+          },
           "required": true,
           "schema": {
             "items": {
@@ -143,20 +167,25 @@
       "tags": [
         "pet"
       ],
-      "safety": "read-only"
+      "safety": "read-only",
+      "idempotent": true,
+      "http": {
+        "method": "GET",
+        "path": "/pet/findByTags"
+      }
     },
     {
       "key": "GET /pet/{petId}",
       "id": "47fdb1ba",
       "name": "getPetById",
       "description": "Find pet by ID.",
-      "method": "GET",
-      "path": "/pet/{petId}",
       "params": [
         {
           "name": "petId",
-          "upstreamName": "petId",
-          "in": "path",
+          "bind": {
+            "in": "path",
+            "upstream": "petId"
+          },
           "required": true,
           "schema": {
             "format": "int64",
@@ -168,32 +197,40 @@
       "tags": [
         "pet"
       ],
-      "safety": "read-only"
+      "safety": "read-only",
+      "idempotent": true,
+      "http": {
+        "method": "GET",
+        "path": "/pet/{petId}"
+      }
     },
     {
       "key": "GET /store/inventory",
       "id": "47e316c8",
       "name": "getInventory",
       "description": "Returns pet inventories by status.",
-      "method": "GET",
-      "path": "/store/inventory",
       "tags": [
         "store"
       ],
-      "safety": "read-only"
+      "safety": "read-only",
+      "idempotent": true,
+      "http": {
+        "method": "GET",
+        "path": "/store/inventory"
+      }
     },
     {
       "key": "GET /store/order/{orderId}",
       "id": "76464033",
       "name": "getOrderById",
       "description": "Find purchase order by ID.",
-      "method": "GET",
-      "path": "/store/order/{orderId}",
       "params": [
         {
           "name": "orderId",
-          "upstreamName": "orderId",
-          "in": "path",
+          "bind": {
+            "in": "path",
+            "upstream": "orderId"
+          },
           "required": true,
           "schema": {
             "format": "int64",
@@ -205,20 +242,25 @@
       "tags": [
         "store"
       ],
-      "safety": "read-only"
+      "safety": "read-only",
+      "idempotent": true,
+      "http": {
+        "method": "GET",
+        "path": "/store/order/{orderId}"
+      }
     },
     {
       "key": "GET /user/login",
       "id": "f04c69f5",
       "name": "loginUser",
       "description": "Logs user into the system.",
-      "method": "GET",
-      "path": "/user/login",
       "params": [
         {
           "name": "username",
-          "upstreamName": "username",
-          "in": "query",
+          "bind": {
+            "in": "query",
+            "upstream": "username"
+          },
           "schema": {
             "type": "string"
           },
@@ -226,8 +268,10 @@
         },
         {
           "name": "password",
-          "upstreamName": "password",
-          "in": "query",
+          "bind": {
+            "in": "query",
+            "upstream": "password"
+          },
           "schema": {
             "type": "string"
           },
@@ -237,32 +281,40 @@
       "tags": [
         "user"
       ],
-      "safety": "read-only"
+      "safety": "read-only",
+      "idempotent": true,
+      "http": {
+        "method": "GET",
+        "path": "/user/login"
+      }
     },
     {
       "key": "GET /user/logout",
       "id": "234d5441",
       "name": "logoutUser",
       "description": "Logs out current logged in user session.",
-      "method": "GET",
-      "path": "/user/logout",
       "tags": [
         "user"
       ],
-      "safety": "read-only"
+      "safety": "read-only",
+      "idempotent": true,
+      "http": {
+        "method": "GET",
+        "path": "/user/logout"
+      }
     },
     {
       "key": "GET /user/{username}",
       "id": "ccf458b1",
       "name": "getUserByName",
       "description": "Get user by user name.",
-      "method": "GET",
-      "path": "/user/{username}",
       "params": [
         {
           "name": "username",
-          "upstreamName": "username",
-          "in": "path",
+          "bind": {
+            "in": "path",
+            "upstream": "username"
+          },
           "required": true,
           "schema": {
             "type": "string"
@@ -273,20 +325,25 @@
       "tags": [
         "user"
       ],
-      "safety": "read-only"
+      "safety": "read-only",
+      "idempotent": true,
+      "http": {
+        "method": "GET",
+        "path": "/user/{username}"
+      }
     },
     {
       "key": "POST /pet",
       "id": "dae51426",
       "name": "addPet",
       "description": "Add a new pet to the store.",
-      "method": "POST",
-      "path": "/pet",
       "params": [
         {
           "name": "category",
-          "upstreamName": "category",
-          "in": "body",
+          "bind": {
+            "in": "body",
+            "upstream": "category"
+          },
           "schema": {
             "properties": {
               "id": {
@@ -302,8 +359,10 @@
         },
         {
           "name": "id",
-          "upstreamName": "id",
-          "in": "body",
+          "bind": {
+            "in": "body",
+            "upstream": "id"
+          },
           "schema": {
             "format": "int64",
             "type": "integer"
@@ -311,8 +370,10 @@
         },
         {
           "name": "name",
-          "upstreamName": "name",
-          "in": "body",
+          "bind": {
+            "in": "body",
+            "upstream": "name"
+          },
           "required": true,
           "schema": {
             "type": "string"
@@ -320,8 +381,10 @@
         },
         {
           "name": "photoUrls",
-          "upstreamName": "photoUrls",
-          "in": "body",
+          "bind": {
+            "in": "body",
+            "upstream": "photoUrls"
+          },
           "required": true,
           "schema": {
             "items": {
@@ -332,8 +395,10 @@
         },
         {
           "name": "status",
-          "upstreamName": "status",
-          "in": "body",
+          "bind": {
+            "in": "body",
+            "upstream": "status"
+          },
           "schema": {
             "description": "pet status in the store",
             "enum": [
@@ -346,8 +411,10 @@
         },
         {
           "name": "tags",
-          "upstreamName": "tags",
-          "in": "body",
+          "bind": {
+            "in": "body",
+            "upstream": "tags"
+          },
           "schema": {
             "items": {
               "properties": {
@@ -365,46 +432,18 @@
           }
         }
       ],
-      "body": {
-        "contentType": "application/json",
-        "schema": {
-          "properties": {
-            "category": {
-              "properties": {
-                "id": {
-                  "format": "int64",
-                  "type": "integer"
-                },
-                "name": {
-                  "type": "string"
-                }
-              },
-              "type": "object"
-            },
-            "id": {
-              "format": "int64",
-              "type": "integer"
-            },
-            "name": {
-              "type": "string"
-            },
-            "photoUrls": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "status": {
-              "description": "pet status in the store",
-              "enum": [
-                "available",
-                "pending",
-                "sold"
-              ],
-              "type": "string"
-            },
-            "tags": {
-              "items": {
+      "tags": [
+        "pet"
+      ],
+      "safety": "write",
+      "http": {
+        "method": "POST",
+        "path": "/pet",
+        "body": {
+          "contentType": "application/json",
+          "schema": {
+            "properties": {
+              "category": {
                 "properties": {
                   "id": {
                     "format": "int64",
@@ -416,34 +455,66 @@
                 },
                 "type": "object"
               },
-              "type": "array"
-            }
+              "id": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "photoUrls": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "status": {
+                "description": "pet status in the store",
+                "enum": [
+                  "available",
+                  "pending",
+                  "sold"
+                ],
+                "type": "string"
+              },
+              "tags": {
+                "items": {
+                  "properties": {
+                    "id": {
+                      "format": "int64",
+                      "type": "integer"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "name",
+              "photoUrls"
+            ],
+            "type": "object"
           },
-          "required": [
-            "name",
-            "photoUrls"
-          ],
-          "type": "object"
-        },
-        "required": true
-      },
-      "tags": [
-        "pet"
-      ],
-      "safety": "write"
+          "required": true
+        }
+      }
     },
     {
       "key": "POST /pet/{petId}",
       "id": "08c40b84",
       "name": "updatePetWithForm",
       "description": "Updates a pet in the store with form data.",
-      "method": "POST",
-      "path": "/pet/{petId}",
       "params": [
         {
           "name": "petId",
-          "upstreamName": "petId",
-          "in": "path",
+          "bind": {
+            "in": "path",
+            "upstream": "petId"
+          },
           "required": true,
           "schema": {
             "format": "int64",
@@ -453,8 +524,10 @@
         },
         {
           "name": "name",
-          "upstreamName": "name",
-          "in": "query",
+          "bind": {
+            "in": "query",
+            "upstream": "name"
+          },
           "schema": {
             "type": "string"
           },
@@ -462,8 +535,10 @@
         },
         {
           "name": "status",
-          "upstreamName": "status",
-          "in": "query",
+          "bind": {
+            "in": "query",
+            "upstream": "status"
+          },
           "schema": {
             "type": "string"
           },
@@ -473,20 +548,24 @@
       "tags": [
         "pet"
       ],
-      "safety": "write"
+      "safety": "write",
+      "http": {
+        "method": "POST",
+        "path": "/pet/{petId}"
+      }
     },
     {
       "key": "POST /pet/{petId}/uploadImage",
       "id": "f466df18",
       "name": "uploadFile",
       "description": "Uploads an image.",
-      "method": "POST",
-      "path": "/pet/{petId}/uploadImage",
       "params": [
         {
           "name": "petId",
-          "upstreamName": "petId",
-          "in": "path",
+          "bind": {
+            "in": "path",
+            "upstream": "petId"
+          },
           "required": true,
           "schema": {
             "format": "int64",
@@ -496,8 +575,10 @@
         },
         {
           "name": "additionalMetadata",
-          "upstreamName": "additionalMetadata",
-          "in": "query",
+          "bind": {
+            "in": "query",
+            "upstream": "additionalMetadata"
+          },
           "schema": {
             "type": "string"
           },
@@ -513,28 +594,34 @@
           "kind": "unsupported",
           "detail": "request body content type(s) not supported yet: application/octet-stream"
         }
-      ]
+      ],
+      "http": {
+        "method": "POST",
+        "path": "/pet/{petId}/uploadImage"
+      }
     },
     {
       "key": "POST /store/order",
       "id": "012c4eb6",
       "name": "placeOrder",
       "description": "Place an order for a pet.",
-      "method": "POST",
-      "path": "/store/order",
       "params": [
         {
           "name": "complete",
-          "upstreamName": "complete",
-          "in": "body",
+          "bind": {
+            "in": "body",
+            "upstream": "complete"
+          },
           "schema": {
             "type": "boolean"
           }
         },
         {
           "name": "id",
-          "upstreamName": "id",
-          "in": "body",
+          "bind": {
+            "in": "body",
+            "upstream": "id"
+          },
           "schema": {
             "format": "int64",
             "type": "integer"
@@ -542,8 +629,10 @@
         },
         {
           "name": "petId",
-          "upstreamName": "petId",
-          "in": "body",
+          "bind": {
+            "in": "body",
+            "upstream": "petId"
+          },
           "schema": {
             "format": "int64",
             "type": "integer"
@@ -551,8 +640,10 @@
         },
         {
           "name": "quantity",
-          "upstreamName": "quantity",
-          "in": "body",
+          "bind": {
+            "in": "body",
+            "upstream": "quantity"
+          },
           "schema": {
             "format": "int32",
             "type": "integer"
@@ -560,8 +651,10 @@
         },
         {
           "name": "shipDate",
-          "upstreamName": "shipDate",
-          "in": "body",
+          "bind": {
+            "in": "body",
+            "upstream": "shipDate"
+          },
           "schema": {
             "format": "date-time",
             "type": "string"
@@ -569,8 +662,10 @@
         },
         {
           "name": "status",
-          "upstreamName": "status",
-          "in": "body",
+          "bind": {
+            "in": "body",
+            "upstream": "status"
+          },
           "schema": {
             "description": "Order Status",
             "enum": [
@@ -582,75 +677,83 @@
           }
         }
       ],
-      "body": {
-        "contentType": "application/json",
-        "schema": {
-          "properties": {
-            "complete": {
-              "type": "boolean"
-            },
-            "id": {
-              "format": "int64",
-              "type": "integer"
-            },
-            "petId": {
-              "format": "int64",
-              "type": "integer"
-            },
-            "quantity": {
-              "format": "int32",
-              "type": "integer"
-            },
-            "shipDate": {
-              "format": "date-time",
-              "type": "string"
-            },
-            "status": {
-              "description": "Order Status",
-              "enum": [
-                "placed",
-                "approved",
-                "delivered"
-              ],
-              "type": "string"
-            }
-          },
-          "type": "object"
-        }
-      },
       "tags": [
         "store"
       ],
-      "safety": "write"
+      "safety": "write",
+      "http": {
+        "method": "POST",
+        "path": "/store/order",
+        "body": {
+          "contentType": "application/json",
+          "schema": {
+            "properties": {
+              "complete": {
+                "type": "boolean"
+              },
+              "id": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "petId": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "quantity": {
+                "format": "int32",
+                "type": "integer"
+              },
+              "shipDate": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "status": {
+                "description": "Order Status",
+                "enum": [
+                  "placed",
+                  "approved",
+                  "delivered"
+                ],
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        }
+      }
     },
     {
       "key": "POST /user",
       "id": "824ef3cd",
       "name": "createUser",
       "description": "Create user.",
-      "method": "POST",
-      "path": "/user",
       "params": [
         {
           "name": "email",
-          "upstreamName": "email",
-          "in": "body",
+          "bind": {
+            "in": "body",
+            "upstream": "email"
+          },
           "schema": {
             "type": "string"
           }
         },
         {
           "name": "firstName",
-          "upstreamName": "firstName",
-          "in": "body",
+          "bind": {
+            "in": "body",
+            "upstream": "firstName"
+          },
           "schema": {
             "type": "string"
           }
         },
         {
           "name": "id",
-          "upstreamName": "id",
-          "in": "body",
+          "bind": {
+            "in": "body",
+            "upstream": "id"
+          },
           "schema": {
             "format": "int64",
             "type": "integer"
@@ -658,32 +761,40 @@
         },
         {
           "name": "lastName",
-          "upstreamName": "lastName",
-          "in": "body",
+          "bind": {
+            "in": "body",
+            "upstream": "lastName"
+          },
           "schema": {
             "type": "string"
           }
         },
         {
           "name": "password",
-          "upstreamName": "password",
-          "in": "body",
+          "bind": {
+            "in": "body",
+            "upstream": "password"
+          },
           "schema": {
             "type": "string"
           }
         },
         {
           "name": "phone",
-          "upstreamName": "phone",
-          "in": "body",
+          "bind": {
+            "in": "body",
+            "upstream": "phone"
+          },
           "schema": {
             "type": "string"
           }
         },
         {
           "name": "userStatus",
-          "upstreamName": "userStatus",
-          "in": "body",
+          "bind": {
+            "in": "body",
+            "upstream": "userStatus"
+          },
           "schema": {
             "description": "User Status",
             "format": "int32",
@@ -692,65 +803,71 @@
         },
         {
           "name": "username",
-          "upstreamName": "username",
-          "in": "body",
+          "bind": {
+            "in": "body",
+            "upstream": "username"
+          },
           "schema": {
             "type": "string"
           }
         }
       ],
-      "body": {
-        "contentType": "application/json",
-        "schema": {
-          "properties": {
-            "email": {
-              "type": "string"
-            },
-            "firstName": {
-              "type": "string"
-            },
-            "id": {
-              "format": "int64",
-              "type": "integer"
-            },
-            "lastName": {
-              "type": "string"
-            },
-            "password": {
-              "type": "string"
-            },
-            "phone": {
-              "type": "string"
-            },
-            "userStatus": {
-              "description": "User Status",
-              "format": "int32",
-              "type": "integer"
-            },
-            "username": {
-              "type": "string"
-            }
-          },
-          "type": "object"
-        }
-      },
       "tags": [
         "user"
       ],
-      "safety": "write"
+      "safety": "write",
+      "http": {
+        "method": "POST",
+        "path": "/user",
+        "body": {
+          "contentType": "application/json",
+          "schema": {
+            "properties": {
+              "email": {
+                "type": "string"
+              },
+              "firstName": {
+                "type": "string"
+              },
+              "id": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "lastName": {
+                "type": "string"
+              },
+              "password": {
+                "type": "string"
+              },
+              "phone": {
+                "type": "string"
+              },
+              "userStatus": {
+                "description": "User Status",
+                "format": "int32",
+                "type": "integer"
+              },
+              "username": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        }
+      }
     },
     {
       "key": "POST /user/createWithList",
       "id": "5f1eea41",
       "name": "createUsersWithListInput",
       "description": "Creates list of users with given input array.",
-      "method": "POST",
-      "path": "/user/createWithList",
       "params": [
         {
           "name": "body",
-          "upstreamName": "",
-          "in": "bodyRoot",
+          "bind": {
+            "in": "bodyRoot",
+            "upstream": ""
+          },
           "schema": {
             "items": {
               "properties": {
@@ -788,10 +905,338 @@
           }
         }
       ],
-      "body": {
-        "contentType": "application/json",
-        "schema": {
-          "items": {
+      "tags": [
+        "user"
+      ],
+      "safety": "write",
+      "http": {
+        "method": "POST",
+        "path": "/user/createWithList",
+        "body": {
+          "contentType": "application/json",
+          "schema": {
+            "items": {
+              "properties": {
+                "email": {
+                  "type": "string"
+                },
+                "firstName": {
+                  "type": "string"
+                },
+                "id": {
+                  "format": "int64",
+                  "type": "integer"
+                },
+                "lastName": {
+                  "type": "string"
+                },
+                "password": {
+                  "type": "string"
+                },
+                "phone": {
+                  "type": "string"
+                },
+                "userStatus": {
+                  "description": "User Status",
+                  "format": "int32",
+                  "type": "integer"
+                },
+                "username": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        }
+      }
+    },
+    {
+      "key": "PUT /pet",
+      "id": "cdeab922",
+      "name": "updatePet",
+      "description": "Update an existing pet.",
+      "params": [
+        {
+          "name": "category",
+          "bind": {
+            "in": "body",
+            "upstream": "category"
+          },
+          "schema": {
+            "properties": {
+              "id": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        {
+          "name": "id",
+          "bind": {
+            "in": "body",
+            "upstream": "id"
+          },
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "name": "name",
+          "bind": {
+            "in": "body",
+            "upstream": "name"
+          },
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "photoUrls",
+          "bind": {
+            "in": "body",
+            "upstream": "photoUrls"
+          },
+          "required": true,
+          "schema": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        {
+          "name": "status",
+          "bind": {
+            "in": "body",
+            "upstream": "status"
+          },
+          "schema": {
+            "description": "pet status in the store",
+            "enum": [
+              "available",
+              "pending",
+              "sold"
+            ],
+            "type": "string"
+          }
+        },
+        {
+          "name": "tags",
+          "bind": {
+            "in": "body",
+            "upstream": "tags"
+          },
+          "schema": {
+            "items": {
+              "properties": {
+                "id": {
+                  "format": "int64",
+                  "type": "integer"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        }
+      ],
+      "tags": [
+        "pet"
+      ],
+      "safety": "write",
+      "idempotent": true,
+      "http": {
+        "method": "PUT",
+        "path": "/pet",
+        "body": {
+          "contentType": "application/json",
+          "schema": {
+            "properties": {
+              "category": {
+                "properties": {
+                  "id": {
+                    "format": "int64",
+                    "type": "integer"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "id": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "photoUrls": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "status": {
+                "description": "pet status in the store",
+                "enum": [
+                  "available",
+                  "pending",
+                  "sold"
+                ],
+                "type": "string"
+              },
+              "tags": {
+                "items": {
+                  "properties": {
+                    "id": {
+                      "format": "int64",
+                      "type": "integer"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "name",
+              "photoUrls"
+            ],
+            "type": "object"
+          },
+          "required": true
+        }
+      }
+    },
+    {
+      "key": "PUT /user/{username}",
+      "id": "e31ba2c0",
+      "name": "updateUser",
+      "description": "Update user resource.",
+      "params": [
+        {
+          "name": "username",
+          "bind": {
+            "in": "path",
+            "upstream": "username"
+          },
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "desc": "name that need to be deleted"
+        },
+        {
+          "name": "email",
+          "bind": {
+            "in": "body",
+            "upstream": "email"
+          },
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "firstName",
+          "bind": {
+            "in": "body",
+            "upstream": "firstName"
+          },
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "id",
+          "bind": {
+            "in": "body",
+            "upstream": "id"
+          },
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "name": "lastName",
+          "bind": {
+            "in": "body",
+            "upstream": "lastName"
+          },
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "password",
+          "bind": {
+            "in": "body",
+            "upstream": "password"
+          },
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "phone",
+          "bind": {
+            "in": "body",
+            "upstream": "phone"
+          },
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "userStatus",
+          "bind": {
+            "in": "body",
+            "upstream": "userStatus"
+          },
+          "schema": {
+            "description": "User Status",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        {
+          "name": "body_username",
+          "bind": {
+            "in": "body",
+            "upstream": "username"
+          },
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "tags": [
+        "user"
+      ],
+      "safety": "write",
+      "idempotent": true,
+      "http": {
+        "method": "PUT",
+        "path": "/user/{username}",
+        "body": {
+          "contentType": "application/json",
+          "schema": {
             "properties": {
               "email": {
                 "type": "string"
@@ -822,297 +1267,9 @@
               }
             },
             "type": "object"
-          },
-          "type": "array"
-        }
-      },
-      "tags": [
-        "user"
-      ],
-      "safety": "write"
-    },
-    {
-      "key": "PUT /pet",
-      "id": "cdeab922",
-      "name": "updatePet",
-      "description": "Update an existing pet.",
-      "method": "PUT",
-      "path": "/pet",
-      "params": [
-        {
-          "name": "category",
-          "upstreamName": "category",
-          "in": "body",
-          "schema": {
-            "properties": {
-              "id": {
-                "format": "int64",
-                "type": "integer"
-              },
-              "name": {
-                "type": "string"
-              }
-            },
-            "type": "object"
-          }
-        },
-        {
-          "name": "id",
-          "upstreamName": "id",
-          "in": "body",
-          "schema": {
-            "format": "int64",
-            "type": "integer"
-          }
-        },
-        {
-          "name": "name",
-          "upstreamName": "name",
-          "in": "body",
-          "required": true,
-          "schema": {
-            "type": "string"
-          }
-        },
-        {
-          "name": "photoUrls",
-          "upstreamName": "photoUrls",
-          "in": "body",
-          "required": true,
-          "schema": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          }
-        },
-        {
-          "name": "status",
-          "upstreamName": "status",
-          "in": "body",
-          "schema": {
-            "description": "pet status in the store",
-            "enum": [
-              "available",
-              "pending",
-              "sold"
-            ],
-            "type": "string"
-          }
-        },
-        {
-          "name": "tags",
-          "upstreamName": "tags",
-          "in": "body",
-          "schema": {
-            "items": {
-              "properties": {
-                "id": {
-                  "format": "int64",
-                  "type": "integer"
-                },
-                "name": {
-                  "type": "string"
-                }
-              },
-              "type": "object"
-            },
-            "type": "array"
           }
         }
-      ],
-      "body": {
-        "contentType": "application/json",
-        "schema": {
-          "properties": {
-            "category": {
-              "properties": {
-                "id": {
-                  "format": "int64",
-                  "type": "integer"
-                },
-                "name": {
-                  "type": "string"
-                }
-              },
-              "type": "object"
-            },
-            "id": {
-              "format": "int64",
-              "type": "integer"
-            },
-            "name": {
-              "type": "string"
-            },
-            "photoUrls": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "status": {
-              "description": "pet status in the store",
-              "enum": [
-                "available",
-                "pending",
-                "sold"
-              ],
-              "type": "string"
-            },
-            "tags": {
-              "items": {
-                "properties": {
-                  "id": {
-                    "format": "int64",
-                    "type": "integer"
-                  },
-                  "name": {
-                    "type": "string"
-                  }
-                },
-                "type": "object"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "name",
-            "photoUrls"
-          ],
-          "type": "object"
-        },
-        "required": true
-      },
-      "tags": [
-        "pet"
-      ],
-      "safety": "write"
-    },
-    {
-      "key": "PUT /user/{username}",
-      "id": "e31ba2c0",
-      "name": "updateUser",
-      "description": "Update user resource.",
-      "method": "PUT",
-      "path": "/user/{username}",
-      "params": [
-        {
-          "name": "username",
-          "upstreamName": "username",
-          "in": "path",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "desc": "name that need to be deleted"
-        },
-        {
-          "name": "email",
-          "upstreamName": "email",
-          "in": "body",
-          "schema": {
-            "type": "string"
-          }
-        },
-        {
-          "name": "firstName",
-          "upstreamName": "firstName",
-          "in": "body",
-          "schema": {
-            "type": "string"
-          }
-        },
-        {
-          "name": "id",
-          "upstreamName": "id",
-          "in": "body",
-          "schema": {
-            "format": "int64",
-            "type": "integer"
-          }
-        },
-        {
-          "name": "lastName",
-          "upstreamName": "lastName",
-          "in": "body",
-          "schema": {
-            "type": "string"
-          }
-        },
-        {
-          "name": "password",
-          "upstreamName": "password",
-          "in": "body",
-          "schema": {
-            "type": "string"
-          }
-        },
-        {
-          "name": "phone",
-          "upstreamName": "phone",
-          "in": "body",
-          "schema": {
-            "type": "string"
-          }
-        },
-        {
-          "name": "userStatus",
-          "upstreamName": "userStatus",
-          "in": "body",
-          "schema": {
-            "description": "User Status",
-            "format": "int32",
-            "type": "integer"
-          }
-        },
-        {
-          "name": "body_username",
-          "upstreamName": "username",
-          "in": "body",
-          "schema": {
-            "type": "string"
-          }
-        }
-      ],
-      "body": {
-        "contentType": "application/json",
-        "schema": {
-          "properties": {
-            "email": {
-              "type": "string"
-            },
-            "firstName": {
-              "type": "string"
-            },
-            "id": {
-              "format": "int64",
-              "type": "integer"
-            },
-            "lastName": {
-              "type": "string"
-            },
-            "password": {
-              "type": "string"
-            },
-            "phone": {
-              "type": "string"
-            },
-            "userStatus": {
-              "description": "User Status",
-              "format": "int32",
-              "type": "integer"
-            },
-            "username": {
-              "type": "string"
-            }
-          },
-          "type": "object"
-        }
-      },
-      "tags": [
-        "user"
-      ],
-      "safety": "write"
+      }
     }
   ],
   "inputSchemas": {

@@ -51,9 +51,13 @@ func Prepare(t model.Tool, opts Options) model.Tool {
 	out := t
 	out.Params = nil
 	out.Issues = slices.Clone(t.Issues)
-	if t.Body != nil {
-		b := *t.Body
-		out.Body = &b
+	if t.HTTP != nil {
+		h := *t.HTTP
+		out.HTTP = &h
+		if t.HTTP.Body != nil {
+			b := *t.HTTP.Body
+			out.HTTP.Body = &b
+		}
 	}
 
 	fx := fixedSet(opts.Fixed)
@@ -61,7 +65,7 @@ func Prepare(t model.Tool, opts Options) model.Tool {
 
 	kept := make([]model.Param, 0, len(t.Params))
 	for _, p := range t.Params {
-		if p.In == model.InHeader && IsForbiddenHeader(p.UpstreamName) {
+		if p.Bind.In == model.InHeader && IsForbiddenHeader(p.Bind.Upstream) {
 			continue
 		}
 		kept = append(kept, p)
@@ -70,36 +74,35 @@ func Prepare(t model.Tool, opts Options) model.Tool {
 	for i := range order {
 		order[i] = i
 	}
-	sort.SliceStable(order, func(a, b int) bool { return kept[order[a]].In < kept[order[b]].In })
+	sort.SliceStable(order, func(a, b int) bool { return kept[order[a]].Bind.In < kept[order[b]].Bind.In })
 	for _, i := range order {
 		p := &kept[i]
-		if fx.has(p.UpstreamName, p.In) {
-			p.Hidden, p.Name = true, p.UpstreamName
+		if fx.has(p.Bind.Upstream, p.Bind.In) {
+			p.Hidden, p.Name = true, p.Bind.Upstream
 			continue
 		}
 		p.Hidden = false
-		p.Name = ns.claim(sanitize(p.UpstreamName), p.In)
+		p.Name = ns.claim(sanitize(p.Bind.Upstream), p.Bind.In)
 	}
 	out.Params = kept
 
-	if t.Body != nil {
+	if t.HTTP != nil && t.HTTP.Body != nil {
 		out.Params = append(out.Params, bodyParams(&out, fx, ns)...)
 	}
 	return out
 }
 
 func bodyParams(t *model.Tool, fx fixed, ns *namespace) []model.Param {
-	sch := decode(t.Body.Schema)
+	sch := decode(t.HTTP.Body.Schema)
 	if props, required, ok := flattenable(sch); ok {
 		trial := ns.clone()
 		var fields []model.Param
 		collided := false
 		for _, k := range sortedKeys(props) {
 			f := model.Param{
-				UpstreamName: k,
-				In:           model.InBody,
-				Required:     t.Body.Required && required[k],
-				Schema:       mustJSON(props[k]),
+				Bind:     model.Binding{Upstream: k, In: model.InBody},
+				Required: t.HTTP.Body.Required && required[k],
+				Schema:   mustJSON(props[k]),
 			}
 			if fx.has(k, model.InBody) {
 				f.Hidden, f.Name = true, k
@@ -127,9 +130,9 @@ func bodyParams(t *model.Tool, fx fixed, ns *namespace) []model.Param {
 	name := ns.claimExact("body", "body_payload")
 	return []model.Param{{
 		Name:     name,
-		In:       model.InBodyRoot,
-		Required: t.Body.Required,
-		Schema:   t.Body.Schema,
+		Bind:     model.Binding{In: model.InBodyRoot},
+		Required: t.HTTP.Body.Required,
+		Schema:   t.HTTP.Body.Schema,
 	}}
 }
 

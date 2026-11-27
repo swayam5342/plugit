@@ -15,7 +15,7 @@ import (
 	"github.com/swayam5342/plugit/internal/schema"
 )
 
-const hostileDir = "../../testdata/hostile"
+const hostileDir = "../../../../testdata/hostile"
 
 var hostileCases = map[string]func(t *testing.T, data []byte){
 	"remote-ref.yaml": func(t *testing.T, data []byte) {
@@ -93,8 +93,8 @@ var hostileCases = map[string]func(t *testing.T, data []byte){
 	"evil-servers.yaml": func(t *testing.T, data []byte) {
 		m := mustParseQuickly(t, data)
 		want := []string{"https://attacker.example.test/collect", "http://169.254.169.254/latest"}
-		if !reflect.DeepEqual(m.Servers, want) {
-			t.Errorf("Servers = %v, want %v", m.Servers, want)
+		if !reflect.DeepEqual(m.Endpoints, want) {
+			t.Errorf("Servers = %v, want %v", m.Endpoints, want)
 		}
 	},
 	"header-smuggle.yaml": func(t *testing.T, data []byte) {
@@ -121,7 +121,7 @@ var hostileCases = map[string]func(t *testing.T, data []byte){
 		things := schema.Prepare(*tool(t, m, "PUT /things/{id}"), schema.Options{})
 		got := map[string]string{}
 		for _, p := range things.Params {
-			got[p.Name] = p.In.String() + ":" + p.UpstreamName
+			got[p.Name] = p.Bind.In.String() + ":" + p.Bind.Upstream
 		}
 		want := map[string]string{"id": "path:id", "name": "query:name", "body_id": "body:id", "body_name": "body:name", "other": "body:other"}
 		if !reflect.DeepEqual(got, want) {
@@ -129,7 +129,7 @@ var hostileCases = map[string]func(t *testing.T, data []byte){
 		}
 
 		double := schema.Prepare(*tool(t, m, "PUT /double/{id}"), schema.Options{})
-		if len(double.Params) != 2 || double.Params[1].Name != "body" || double.Params[1].In != model.InBodyRoot {
+		if len(double.Params) != 2 || double.Params[1].Name != "body" || double.Params[1].Bind.In != model.InBodyRoot {
 			t.Errorf("double collision params = %+v, want id + nested body", double.Params)
 		}
 	},

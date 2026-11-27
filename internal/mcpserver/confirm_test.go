@@ -13,13 +13,13 @@ import (
 
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/policy"
-	"github.com/swayam5342/plugit/internal/proxy"
+	"github.com/swayam5342/plugit/internal/protocol/rest"
 	"github.com/swayam5342/plugit/internal/store"
 )
 
 var createPetBody = tool("POST /pets", "createPet",
-	model.Param{Name: "name", UpstreamName: "name", In: model.InBody, Schema: json.RawMessage(`{"type":"string"}`)},
-	model.Param{Name: "api_token", UpstreamName: "api_token", In: model.InBody, Schema: json.RawMessage(`{"type":"string"}`)},
+	model.Param{Name: "name", Bind: model.Binding{Upstream: "name", In: model.InBody}, Schema: json.RawMessage(`{"type":"string"}`)},
+	model.Param{Name: "api_token", Bind: model.Binding{Upstream: "api_token", In: model.InBody}, Schema: json.RawMessage(`{"type":"string"}`)},
 )
 
 type elicitor struct {
@@ -49,7 +49,7 @@ func accept(confirm any) func() (*mcp.ElicitResult, error) {
 func confirmRig(t *testing.T, e *elicitor, rec *recorded) *rig {
 	t.Helper()
 	cfg := Config{Tools: served(createPetBody), Mode: policy.ConfirmWrites,
-		Target: proxy.Target{Auth: proxy.Auth{Type: proxy.AuthBearer, Secret: secret}}}
+		Target: rest.Target{Auth: rest.Auth{Type: rest.AuthBearer, Secret: secret}}}
 	if rec != nil {
 		cfg.Log = callLog(rec, "redacted", false)
 	}

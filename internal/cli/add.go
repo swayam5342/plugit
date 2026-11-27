@@ -19,8 +19,8 @@ import (
 	"github.com/swayam5342/plugit/internal/isolate"
 	"github.com/swayam5342/plugit/internal/lint"
 	"github.com/swayam5342/plugit/internal/model"
-	"github.com/swayam5342/plugit/internal/openapi"
 	"github.com/swayam5342/plugit/internal/policy"
+	"github.com/swayam5342/plugit/internal/protocol/rest/openapi"
 	"github.com/swayam5342/plugit/internal/spec"
 	"github.com/swayam5342/plugit/internal/tokens"
 	"github.com/swayam5342/plugit/internal/tui"
@@ -54,6 +54,7 @@ type pickInput struct {
 	mode     policy.Mode
 	selected config.Toolset
 	lint     func(config.Toolset) []lint.Finding
+	proto    model.Protocol
 }
 
 type addDeps struct {
@@ -107,7 +108,7 @@ store a keyring value with plugit auth.`,
 		},
 	}
 	fl := cmd.Flags()
-	fl.StringVar(&s.baseURL, "base-url", "", "API base URL to pin (default: the spec's server, after confirmation)")
+	fl.StringVar(&s.baseURL, "endpoint", "", "API base URL to pin (default: the spec's server, after confirmation)")
 	fl.StringVar(&s.prefix, "prefix", "", "tool name prefix, e.g. gh -> gh_listIssues")
 	fl.StringVar(&mode, "mode", string(policy.ReadOnly), "policy mode: read-only, confirm-writes or full")
 	fl.BoolVar(&s.allowPrivate, "allow-private", false, "allow loopback and private-network addresses")
@@ -153,7 +154,7 @@ func addAPI(ctx context.Context, s addSettings, d addDeps) error {
 	if err != nil {
 		return err
 	}
-	baseURL, err := pinBaseURL(s, m.Servers, d.confirm)
+	baseURL, err := pinBaseURL(s, m.Endpoints, d.confirm)
 	if err != nil {
 		return err
 	}
@@ -172,9 +173,9 @@ func addAPI(ctx context.Context, s addSettings, d addDeps) error {
 			ts.Tools[string(t.Key)] = config.ToolOverride{}
 		}
 	} else {
-		draft := config.API{Name: s.name, BaseURL: baseURL, Prefix: s.prefix, Auth: auth, Fixed: fixed, Policy: config.Policy{Mode: string(s.mode)}}
+		draft := config.API{Name: s.name, Endpoint: baseURL, Prefix: s.prefix, Auth: auth, Fixed: fixed, Policy: config.Policy{Mode: string(s.mode)}}
 		res, err := d.pick(ctx, pickInput{api: s.name, tools: prepared, prefix: s.prefix, mode: s.mode, selected: initialSelection(prepared, s.mode),
-			lint: pickerLint(draft, defaultToolset, m.Tools)})
+			lint: pickerLint(draft, defaultToolset, m.Tools), proto: m.Protocol})
 		if errors.Is(err, tui.ErrCancelled) {
 			_, err := fmt.Fprintln(d.out, "Cancelled; nothing saved.")
 			return err
@@ -199,8 +200,9 @@ func addAPI(ctx context.Context, s addSettings, d addDeps) error {
 	cfg := &config.API{
 		Version:  config.CurrentVersion,
 		Name:     s.name,
+		Protocol: string(model.REST),
 		Source:   config.Source{URL: source, SHA256: sp.SHA256},
-		BaseURL:  baseURL,
+		Endpoint: baseURL,
 		Prefix:   s.prefix,
 		Fixed:    fixed,
 		Network:  config.Network{AllowPrivate: s.allowPrivate, AllowInsecure: s.allowInsecure, Timeout: s.timeout},
@@ -284,7 +286,7 @@ func printAddSummary(w io.Writer, cfg *config.API, active curate.Result) error {
 		next = "  plugit auth " + cfg.Name + "                          store the credential\n" + next
 	}
 	_, err := fmt.Fprintf(w, "Saved %s: %d tools, %s tokens, base URL %s%s.\n\nNext:\n%s  plugit try %s <tool>                       one test call\n",
-		cfg.Name, len(tools), tokens.Format(tokens.Total(tools)), cfg.BaseURL, note, next, cfg.Name)
+		cfg.Name, len(tools), tokens.Format(tokens.Total(tools)), cfg.Endpoint, note, next, cfg.Name)
 	return err
 }
 
@@ -307,11 +309,11 @@ func initialSelection(tools []model.Tool, mode policy.Mode) config.Toolset {
 	return ts
 }
 
-// pinBaseURL picks the base URL to pin: --base-url, or the spec's single
+// pinBaseURL picks the base URL to pin: --endpoint, or the spec's single
 // server after the user confirms it (SPEC T3).
 func pinBaseURL(s addSettings, servers []string, confirm func(string) (bool, error)) (string, error) {
 	if s.baseURL != "" {
-		u, err := validateBaseURL(s.baseURL, "--base-url")
+		u, err := validateBaseURL(s.baseURL, "--endpoint")
 		if err != nil {
 			return "", err
 		}
@@ -325,14 +327,14 @@ func pinBaseURL(s addSettings, servers []string, confirm func(string) (bool, err
 		return u.String(), nil
 	}
 	if confirm == nil {
-		return "", fmt.Errorf("the spec's server is %s: confirm it with --yes, or pass --base-url", u)
+		return "", fmt.Errorf("the spec's server is %s: confirm it with --yes, or pass --endpoint", u)
 	}
 	ok, err := confirm(fmt.Sprintf("Pin base URL %s? Credentials will only ever be sent there.", u))
 	if err != nil {
 		return "", err
 	}
 	if !ok {
-		return "", errors.New("base URL not confirmed: pass --base-url to pin a different one")
+		return "", errors.New("base URL not confirmed: pass --endpoint to pin a different one")
 	}
 	return u.String(), nil
 }

@@ -26,7 +26,7 @@ paths:
 	assertJSON(t, "nested", param(t, tl, "nested").Schema, `{"type":"array","items":{}}`)
 	for _, p := range tl.Params {
 		if strings.ContainsAny(string(p.Schema), "\x1b\a") || strings.Contains(string(p.Schema), `\u001b`) {
-			t.Errorf("%s: schema carries an escape sequence: %s", p.UpstreamName, p.Schema)
+			t.Errorf("%s: schema carries an escape sequence: %s", p.Bind.Upstream, p.Schema)
 		}
 	}
 }

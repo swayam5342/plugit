@@ -50,6 +50,22 @@ type PickerInput struct {
 	Mode     policy.Mode
 	Selected config.Toolset
 	Lint     func(config.Toolset) []lint.Finding
+	// Describe returns a tool's per-protocol badge and target for display
+	// (SPEC §2.3): REST "GET /pets/{id}", GraphQL "query user", gRPC
+	// "acme.v1.Issues/Get". The cli layer injects protocol.For(..).Describe.
+	// When nil, the badge/target fall back to the REST method and path.
+	Describe func(model.Tool) (badge, target string)
+}
+
+// describe is the per-protocol badge and target for a tool (SPEC §2.3),
+// routed through the injected Describe. With none set it falls back to the
+// REST method and path from the OpKey, so REST renders identically whether
+// or not the caller wired the seam.
+func describe(fn func(model.Tool) (string, string), t model.Tool) (badge, target string) {
+	if fn != nil {
+		return fn(t)
+	}
+	return t.Key.Method(), t.Key.Path()
 }
 
 type rowKind int
@@ -177,7 +193,7 @@ func (p *Picker) buildGroups() {
 	for _, n := range names {
 		idx := byName[n]
 		slices.SortFunc(idx, func(a, b int) int {
-			return cmp.Or(cmp.Compare(p.tools[a].Path, p.tools[b].Path), cmp.Compare(methodOrder(p.tools[a].Method), methodOrder(p.tools[b].Method)))
+			return cmp.Or(cmp.Compare(p.tools[a].Key.Path(), p.tools[b].Key.Path()), cmp.Compare(methodOrder(p.tools[a].Key.Method()), methodOrder(p.tools[b].Key.Method())))
 		})
 		p.groups = append(p.groups, group{name: n, tools: idx})
 	}
@@ -767,7 +783,8 @@ func (p *Picker) rowSegs(r row, cursor bool) []seg {
 	if on {
 		box = seg{"● ", th.Accent}
 	}
-	method, name := th.method(t.Method), none
+	badge, target := describe(p.in.Describe, t)
+	method, name := th.method(badge), none
 	if cursor {
 		name = th.Bold
 	}
@@ -776,8 +793,8 @@ func (p *Picker) rowSegs(r row, cursor bool) []seg {
 	}
 	ss := []seg{
 		box,
-		{fmt.Sprintf("%-7s ", safe(t.Method)), method},
-		{fmt.Sprintf("%-*s ", pathWidth, truncate(safe(t.Path), pathWidth)), th.Dim},
+		{fmt.Sprintf("%-7s ", safe(badge)), method},
+		{fmt.Sprintf("%-*s ", pathWidth, truncate(safe(target), pathWidth)), th.Dim},
 		{fmt.Sprintf("%-*s", p.nameWidth, safe(p.displayName(t))), name},
 	}
 	if n, ok := p.toolTokens[t.Key]; ok && on {
@@ -896,7 +913,8 @@ func (p *Picker) View() tea.View {
 		if o := p.over[t.Key]; o.Description != "" {
 			d = o.Description
 		}
-		detail = th.method(t.Method).Render(safe(t.Method)) + " " + safe(t.Path) + th.Dim.Render("  "+safe(d))
+		badge, target := describe(p.in.Describe, t)
+		detail = th.method(badge).Render(safe(badge)) + " " + safe(target) + th.Dim.Render("  "+safe(d))
 	case ok:
 		detail = th.Dim.Render("space selects the whole group, enter folds it")
 	}

@@ -62,10 +62,10 @@ paths:
 	for name, src := range map[string]string{"swagger 2.0": v2, "openapi 3": v3} {
 		t.Run(name, func(t *testing.T) {
 			tl := tool(t, parse(t, src, Options{}), "POST /upload")
-			if tl.Body == nil {
+			if tl.HTTP.Body == nil {
 				t.Fatal("no body")
 			}
-			assertJSON(t, "body", tl.Body.Schema, `{"type":"object","properties":{"note":{"type":"string"}}}`)
+			assertJSON(t, "body", tl.HTTP.Body.Schema, `{"type":"object","properties":{"note":{"type":"string"}}}`)
 			if !hasIssue(tl, model.IssueUnsupported, `"doc"`) {
 				t.Errorf("the dropped file field isn't reported: %+v", tl.Issues)
 			}

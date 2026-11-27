@@ -88,7 +88,7 @@ func DiffManifests(old, updated *model.Manifest, cfg config.API) SyncDiff {
 	slices.SortFunc(d.Removed, byKey)
 	slices.SortFunc(d.Changed, byKey)
 
-	d.ServersBefore, d.ServersAfter = old.Servers, updated.Servers
+	d.ServersBefore, d.ServersAfter = old.Endpoints, updated.Endpoints
 	norm := func(ss []string) []string {
 		out := make([]string, len(ss))
 		for i, s := range ss {
@@ -96,8 +96,8 @@ func DiffManifests(old, updated *model.Manifest, cfg config.API) SyncDiff {
 		}
 		return out
 	}
-	d.ServersChanged = !slices.Equal(norm(old.Servers), norm(updated.Servers))
-	d.BaseURLListed = slices.Contains(norm(updated.Servers), strings.TrimRight(cfg.BaseURL, "/"))
+	d.ServersChanged = !slices.Equal(norm(old.Endpoints), norm(updated.Endpoints))
+	d.BaseURLListed = slices.Contains(norm(updated.Endpoints), strings.TrimRight(cfg.Endpoint, "/"))
 	return d
 }
 
@@ -119,7 +119,7 @@ func differences(o, n *model.Tool) []string {
 	if !same(o.Params, n.Params) {
 		out = append(out, "parameters")
 	}
-	if !same(o.Body, n.Body) {
+	if !same(o.HTTP.Body, n.HTTP.Body) {
 		out = append(out, "request body")
 	}
 	if !slices.Equal(o.Tags, n.Tags) {

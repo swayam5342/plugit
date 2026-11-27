@@ -12,8 +12,8 @@ import (
 	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/isolate"
 	"github.com/swayam5342/plugit/internal/model"
-	"github.com/swayam5342/plugit/internal/openapi"
 	"github.com/swayam5342/plugit/internal/policy"
+	"github.com/swayam5342/plugit/internal/protocol/rest/openapi"
 )
 
 func addEnv(t *testing.T) (config.Paths, addDeps, *bytes.Buffer) {
@@ -106,7 +106,7 @@ func TestAddWithPicker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.BaseURL != up.URL || cfg.Prefix != "pp" || cfg.PolicyMode() != policy.ReadOnly || cfg.Source.URL != specPath {
+	if cfg.Endpoint != up.URL || cfg.Prefix != "pp" || cfg.PolicyMode() != policy.ReadOnly || cfg.Source.URL != specPath {
 		t.Errorf("config = %+v", cfg)
 	}
 	if len(cfg.Source.SHA256) != 64 {
@@ -161,8 +161,8 @@ func TestAddFromRun(t *testing.T) {
 	if len(cfg.Fixed) != 2 || cfg.Fixed[0].Value != "literal:acme" || cfg.Fixed[1].Value != "keyring:plugit/pets-sig" {
 		t.Errorf("fixed = %+v", cfg.Fixed)
 	}
-	if !cfg.Network.AllowPrivate || cfg.BaseURL != up.URL {
-		t.Errorf("network/base = %+v %s", cfg.Network, cfg.BaseURL)
+	if !cfg.Network.AllowPrivate || cfg.Endpoint != up.URL {
+		t.Errorf("network/base = %+v %s", cfg.Network, cfg.Endpoint)
 	}
 	if ts := cfg.Toolsets["default"]; len(ts.Tools) != 1 || !ts.Tools["GET /pets/{id}"].IsZero() {
 		t.Errorf("toolset = %+v", ts)
@@ -190,9 +190,9 @@ func TestAddRefuses(t *testing.T) {
 		want string
 	}{
 		"invalid name":                        {good, func(s *addSettings, _ *addDeps) { s.name = "Bad Name" }, "invalid API name"},
-		"base URL declined":                   {good, func(_ *addSettings, d *addDeps) { d.confirm = no }, "--base-url"},
-		"no terminal to confirm the base URL": {good, func(_ *addSettings, d *addDeps) { d.confirm = nil }, "--base-url"},
-		"several servers":                     {twoServers, nil, "--base-url"},
+		"base URL declined":                   {good, func(_ *addSettings, d *addDeps) { d.confirm = no }, "--endpoint"},
+		"no terminal to confirm the base URL": {good, func(_ *addSettings, d *addDeps) { d.confirm = nil }, "--endpoint"},
+		"several servers":                     {twoServers, nil, "--endpoint"},
 		"no picker without a terminal":        {good, func(_ *addSettings, d *addDeps) { d.pick = nil }, "--from-run"},
 		"picker selects nothing":              {good, func(_ *addSettings, d *addDeps) { d.pick = pickKeys(nil) }, "no tools"},
 		"literal secret header": {good, func(s *addSettings, _ *addDeps) {

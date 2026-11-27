@@ -17,9 +17,9 @@ import (
 // A tool with a form body (Stripe style) arrives at the API as a form,
 // with deepObject fields in brackets.
 func TestFormBodyEndToEnd(t *testing.T) {
-	createCustomer := model.Tool{Key: "POST /v1/customers", Name: "createCustomer", Method: "POST", Path: "/v1/customers",
+	createCustomer := model.Tool{Key: "POST /v1/customers", Name: "createCustomer", HTTP: &model.HTTPOp{Method: "POST", Path: "/v1/customers"},
 		Description: "Create a customer.", Safety: model.Write}
-	createCustomer.Body = &model.Body{
+	createCustomer.HTTP.Body = &model.Body{
 		ContentType: "application/x-www-form-urlencoded",
 		Schema:      json.RawMessage(`{"type":"object","required":["email"],"properties":{"email":{"type":"string"},"metadata":{"type":"object","additionalProperties":{"type":"string"}},"expand":{"type":"array","items":{"type":"string"}}}}`),
 		Required:    true,
@@ -69,10 +69,10 @@ func TestResponseFields(t *testing.T) {
 // Cookie parameters reach the API as cookies; the model never sees or sets
 // the Cookie header itself.
 func TestCookieParamsEndToEnd(t *testing.T) {
-	me := schema.Prepare(model.Tool{Key: "GET /me", Name: "getMe", Method: "GET", Path: "/me", Description: "Who am I.", Safety: model.ReadOnly,
+	me := schema.Prepare(model.Tool{Key: "GET /me", Name: "getMe", HTTP: &model.HTTPOp{Method: "GET", Path: "/me"}, Description: "Who am I.", Safety: model.ReadOnly,
 		Params: []model.Param{
-			{Name: "theme", UpstreamName: "theme", In: model.InCookie, Schema: []byte(`{"type":"string"}`)},
-			{Name: "Cookie", UpstreamName: "Cookie", In: model.InHeader, Schema: []byte(`{"type":"string"}`)},
+			{Name: "theme", Bind: model.Binding{Upstream: "theme", In: model.InCookie}, Schema: []byte(`{"type":"string"}`)},
+			{Name: "Cookie", Bind: model.Binding{Upstream: "Cookie", In: model.InHeader}, Schema: []byte(`{"type":"string"}`)},
 		}}, schema.Options{})
 	if strings.Contains(string(schema.InputSchema(me)), `"Cookie"`) {
 		t.Fatalf("the Cookie header is a tool parameter: %s", schema.InputSchema(me))

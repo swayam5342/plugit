@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/swayam5342/plugit/internal/model"
-	"github.com/swayam5342/plugit/internal/openapi"
+	"github.com/swayam5342/plugit/internal/protocol/rest/openapi"
 )
 
 // The test binary doubles as the child process: PLUGIT_TEST_CHILD selects

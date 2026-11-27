@@ -1,6 +1,6 @@
 // Package mcpserver serves tools over MCP (SPEC §3.7).
 //
-// Each call runs: policy check, argument validation, then proxy.Call. Every
+// Each call runs: policy check, argument validation, then invoke.Perform. Every
 // failure after the tool lookup is an isError result; only malformed
 // JSON-RPC and unknown tools are protocol errors (the SDK handles those).
 // Handlers recover panics. Nothing here writes to stdout: in serve and run,
@@ -28,10 +28,12 @@ import (
 
 	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/httpx"
+	"github.com/swayam5342/plugit/internal/invoke"
 	"github.com/swayam5342/plugit/internal/jsonpick"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/policy"
-	"github.com/swayam5342/plugit/internal/proxy"
+	"github.com/swayam5342/plugit/internal/protocol"
+	"github.com/swayam5342/plugit/internal/protocol/rest"
 	"github.com/swayam5342/plugit/internal/redact"
 	"github.com/swayam5342/plugit/internal/schema"
 	"github.com/swayam5342/plugit/internal/store"
@@ -52,7 +54,8 @@ type Config struct {
 	Version  string
 	Tools    []Tool
 	Mode     policy.Mode
-	Target   proxy.Target
+	Target   rest.Target
+	Proto    protocol.Protocol // the protocol that serves these tools; defaults to REST
 	Doer     httpx.Doer
 	Redactor *redact.Redactor
 	Logger   *slog.Logger
@@ -78,6 +81,9 @@ func New(cfg Config) *mcp.Server {
 	}
 	if cfg.Redactor == nil {
 		cfg.Redactor = redact.New(redact.Options{Secrets: cfg.Target.SecretValues()})
+	}
+	if cfg.Proto == nil {
+		cfg.Proto = rest.REST{Target: cfg.Target}
 	}
 	srv := mcp.NewServer(
 		&mcp.Implementation{Name: cfg.Name, Version: cfg.Version},
@@ -115,10 +121,7 @@ func annotations(t model.Tool) *mcp.ToolAnnotations {
 	if t.Safety == model.Destructive {
 		a.DestructiveHint = &tr
 	}
-	switch strings.ToUpper(t.Method) {
-	case "GET", "HEAD", "OPTIONS", "PUT", "DELETE":
-		a.IdempotentHint = true
-	}
+	a.IdempotentHint = t.Idempotent
 	return a
 }
 
@@ -198,12 +201,15 @@ func (h *handler) handle(ctx context.Context, req *mcp.CallToolRequest) (res *mc
 		}
 	}
 
-	r := proxy.Call(ctx, h.cfg.Doer, h.tool.Tool, args, h.cfg.Target, h.cfg.Redactor, h.tool.Fields)
+	r := invoke.Perform(ctx, invoke.Deps{
+		Proto: h.cfg.Proto, Doer: h.cfg.Doer, Target: h.cfg.Target,
+		Endpoint: h.cfg.Target.BaseURL, Redactor: h.cfg.Redactor,
+	}, h.tool.Tool, args, h.tool.Fields)
 	h.log(name, start, r.Status, r.IsError, "", "bytes", r.Bytes, "truncated", r.Truncated)
-	rec.Status, rec.Bytes = r.Status, r.Bytes
+	rec.Code, rec.Bytes = r.Code, r.Bytes
 	switch {
 	case r.Status >= 400:
-		rec.Outcome = store.HTTPError
+		rec.Outcome = store.UpstreamError
 	case r.IsError:
 		rec.Outcome = store.Failed
 	}
@@ -288,7 +294,7 @@ func (h *handler) confirm(req *mcp.CallToolRequest, args map[string]any, reason 
 		shown = shown[:maxShownArgs] + "\n… (truncated)"
 	}
 	msg := fmt.Sprintf("%s wants to call %s (%s %s, a %s tool).\n\nArguments:\n%s\n\nAllow this call?",
-		h.cfg.Name, t.Name, t.Method, t.Path, t.Safety, shown)
+		h.cfg.Name, t.Name, t.Key.Method(), t.Key.Path(), t.Safety, shown)
 	return &mcp.CallToolResult{
 		InputRequests: mcp.InputRequestMap{confirmID: &mcp.ElicitParams{Mode: "form", Message: msg, RequestedSchema: confirmSchema}},
 		RequestState:  h.state(now(), args),

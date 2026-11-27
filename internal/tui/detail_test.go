@@ -35,7 +35,7 @@ func newLintPicker(selected ...string) (*Picker, *fakeLint) {
 	}
 	tools := testTools()
 	tools[2].Params = append(tools[2].Params,
-		model.Param{Name: "X-Api-Key", UpstreamName: "X-Api-Key", In: model.InHeader, Hidden: true, Schema: json.RawMessage(`{}`)})
+		model.Param{Name: "X-Api-Key", Bind: model.Binding{Upstream: "X-Api-Key", In: model.InHeader}, Hidden: true, Schema: json.RawMessage(`{}`)})
 	p := NewPicker(PickerInput{API: "pets", Tools: tools, Prefix: "pp", Mode: policy.ReadOnly, Selected: ts, Lint: f.run})
 	p.Update(tea.WindowSizeMsg{Width: 120, Height: 60})
 	return p, f

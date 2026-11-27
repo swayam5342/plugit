@@ -25,9 +25,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/swayam5342/plugit/internal/ingest"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/naming"
-	"github.com/swayam5342/plugit/internal/openapi"
+	"github.com/swayam5342/plugit/internal/protocol/rest/openapi"
 )
 
 // ChildArg is the hidden first argument that turns plugit into a parse child.
@@ -48,6 +49,7 @@ var (
 
 type request struct {
 	Spec           []byte `json:"spec"`
+	Format         string `json:"format,omitempty"`
 	Prefix         string `json:"prefix,omitempty"`
 	MaxDescription int    `json:"maxDescription,omitempty"`
 	UnsafePaths    bool   `json:"unsafePaths,omitempty"`
@@ -160,7 +162,7 @@ func ChildMain(stdin io.Reader, stdout io.Writer) int {
 		return 2
 	}
 
-	m, err := openapi.Parse(req.Spec, openapi.Options{Prefix: req.Prefix, MaxDescription: req.MaxDescription, AllowUnsafePaths: req.UnsafePaths})
+	m, err := ingest.Dispatch(req.Spec, req.Format, openapi.Options{Prefix: req.Prefix, MaxDescription: req.MaxDescription, AllowUnsafePaths: req.UnsafePaths})
 	if err != nil {
 		resp := response{Err: err.Error()}
 		for _, k := range errorKinds {
