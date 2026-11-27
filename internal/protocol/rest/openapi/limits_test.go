@@ -322,6 +322,24 @@ components:
 	}
 }
 
+// A source libopenapi can't build a document from (a YAML or JSON syntax
+// error) is an invalid spec: callers and the isolate child branch on
+// ErrInvalidSpec, so a parser upgrade that rejects input earlier must not
+// change the error class.
+func TestParseSyntaxErrorIsInvalidSpec(t *testing.T) {
+	for name, src := range map[string]string{
+		"yaml comment glued to a value": "openapi: 3.0.0\ninfo: {title: t, version: '1'}\npaths:\n  /x:\n    get: {responses: {'200': {description: ok}}}#bad\n",
+		"yaml unterminated quote":       "swagger: '2.0'\ninfo: {title: 't, version: '1'}\npaths: {}\n",
+		"json syntax error":             `{"openapi": "3.0.0", "info": {"title": "t", "version": "1"}, "paths": {,}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Parse([]byte(src), Options{}); !errors.Is(err, ErrInvalidSpec) {
+				t.Errorf("err = %v, want ErrInvalidSpec", err)
+			}
+		})
+	}
+}
+
 // libopenapi v0.42.5 reads past the end of a Swagger 2.0 path item whose
 // last value is a scalar containing "$ref", and panics on its own
 // goroutine (v2/path_item.go:83; found by FuzzParse, seed 2e86b8e3bffd3ebb).
