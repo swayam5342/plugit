@@ -2,7 +2,6 @@ package graphql
 
 import (
 	"cmp"
-	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/vektah/gqlparser/v2"
 	"github.com/vektah/gqlparser/v2/ast"
-	"github.com/vektah/gqlparser/v2/formatter"
 	"github.com/vektah/gqlparser/v2/validator/rules"
 
 	"github.com/swayam5342/plugit/internal/ingest"
@@ -47,7 +45,6 @@ const operationPrefix = "PlugIt_"
 //   - Names follow naming's rules with every query named before every
 //     mutation, so "query user" keeps user and "mutation user" gets user_2.
 //
-// Manifest.GraphQL.NormalizedSDL is s printed back to SDL without built-ins.
 // opts.ResponseFields (toolset -> tool key -> paths) is compiled into
 // OverrideDocs (with each document's selected paths in OverrideSelections),
 // or into OverrideErrors for paths that don't compile (see
@@ -57,15 +54,11 @@ func Build(s *ast.Schema, format string, opts ingest.Options) (*model.Manifest, 
 	if s == nil || s.Query == nil {
 		return nil, fmt.Errorf("%w: schema has no query root type", ErrUnsupportedSpec)
 	}
-	sdl, err := normalizedSDL(s)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrUnsupportedSpec, err)
-	}
 	b := &builder{s: s, opts: opts, rules: rules.NewDefaultRules(), ops: map[model.OpKey]opParts{}}
 	b.m = model.Manifest{
 		Protocol: model.GraphQL,
 		Format:   format,
-		GraphQL:  &model.GraphQLSchema{NormalizedSDL: sdl},
+		GraphQL:  &model.GraphQLSchema{},
 	}
 
 	var tools []*model.Tool
@@ -348,17 +341,4 @@ func cutBytes(s string, n int) string {
 		return s[:n]
 	}
 	return s
-}
-
-// normalizedSDL prints s back to SDL, built-in types and directives and
-// introspection fields left out, so it reloads with LoadSchema.
-func normalizedSDL(s *ast.Schema) (sdl string, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			sdl, err = "", errors.New("printing the schema failed")
-		}
-	}()
-	var buf strings.Builder
-	formatter.NewFormatter(&buf).FormatSchema(s)
-	return buf.String(), nil
 }

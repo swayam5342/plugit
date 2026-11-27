@@ -1,6 +1,7 @@
 package graphql
 
 import (
+	"encoding/json"
 	"os"
 	"reflect"
 	"regexp"
@@ -274,49 +275,38 @@ func TestBuildDescriptionsAndDeprecation(t *testing.T) {
 	}
 }
 
-func TestBuildNormalizedSDLRoundTrip(t *testing.T) {
-	for _, name := range []string{"sdl", "introspection"} {
+// The manifest carries no copy of the schema: sync re-validates by parsing
+// the new source in the child, so a printed SDL would only be dead weight
+// (about 1.2 MB for GitHub) in every manifest.json serve reads at start.
+// GraphQL data stays non-nil for the override maps.
+func TestBuildManifestCarriesNoSchemaCopy(t *testing.T) {
+	for _, name := range []string{"user.graphql", "user.introspection.json"} {
 		t.Run(name, func(t *testing.T) {
-			var s1Data []byte
-			var err error
+			data, err := os.ReadFile(fixtureDir + "/" + name)
+			if err != nil {
+				t.Fatal(err)
+			}
 			format := FormatSDL
-			if name == "sdl" {
-				s1Data, err = os.ReadFile(fixtureDir + "/user.graphql")
-			} else {
+			if strings.HasSuffix(name, ".json") {
 				format = FormatIntrospection
-				s1Data, err = os.ReadFile(fixtureDir + "/user.introspection.json")
 			}
+			s, err := LoadSchema(data, format)
 			if err != nil {
 				t.Fatal(err)
 			}
-			s1, err := LoadSchema(s1Data, format)
+			m, err := Build(s, format, ingest.Options{})
 			if err != nil {
 				t.Fatal(err)
 			}
-			m1, err := Build(s1, format, ingest.Options{})
+			if m.GraphQL == nil || m.GraphQL.OverrideDocs != nil {
+				t.Fatalf("GraphQL = %+v", m.GraphQL)
+			}
+			b, err := json.Marshal(m)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if m1.GraphQL == nil || m1.GraphQL.NormalizedSDL == "" || m1.GraphQL.OverrideDocs != nil {
-				t.Fatalf("GraphQL = %+v", m1.GraphQL)
-			}
-			sdl := m1.GraphQL.NormalizedSDL
-			if strings.Contains(sdl, "__Schema") || strings.Contains(sdl, "scalar String") {
-				t.Errorf("normalized SDL contains built-ins:\n%s", sdl)
-			}
-			s2, err := LoadSchema([]byte(sdl), FormatSDL)
-			if err != nil {
-				t.Fatalf("reload normalized SDL: %v\n%s", err, sdl)
-			}
-			m2, err := Build(s2, FormatSDL, ingest.Options{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(m1.Tools, m2.Tools) {
-				t.Errorf("tools differ after round-trip:\n%+v\n%+v", m1.Tools, m2.Tools)
-			}
-			if m2.GraphQL.NormalizedSDL != sdl {
-				t.Errorf("normalized SDL is not a fixed point")
+			if strings.Contains(string(b), "normalizedSDL") || strings.Contains(string(b), "type Query") {
+				t.Errorf("manifest carries a copy of the schema: %.300s", b)
 			}
 		})
 	}

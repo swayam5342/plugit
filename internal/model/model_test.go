@@ -126,8 +126,8 @@ func TestParseLocation(t *testing.T) {
 
 func TestManifestGraphQLRoundTrips(t *testing.T) {
 	in := Manifest{Protocol: GraphQL, Title: "g", Tools: []Tool{}, GraphQL: &GraphQLSchema{
-		NormalizedSDL: "type Query{x:Int}",
-		OverrideDocs:  map[string]map[string]string{"ro": {"query x": "query PlugIt_x{x}"}},
+		OverrideDocs:       map[string]map[string]string{"ro": {"query x": "query PlugIt_x{x}"}},
+		OverrideSelections: map[string]map[string][]string{"ro": {"query x": {"x"}}},
 	}}
 	b, err := json.Marshal(in)
 	if err != nil {
@@ -140,8 +140,8 @@ func TestManifestGraphQLRoundTrips(t *testing.T) {
 	if out.GraphQL == nil {
 		t.Fatalf("GraphQL dropped in round trip: %s", b)
 	}
-	if out.GraphQL.NormalizedSDL != "type Query{x:Int}" {
-		t.Errorf("NormalizedSDL = %q", out.GraphQL.NormalizedSDL)
+	if got := out.GraphQL.OverrideSelections["ro"]["query x"]; len(got) != 1 || got[0] != "x" {
+		t.Errorf("OverrideSelections[ro][query x] = %q", got)
 	}
 	if got := out.GraphQL.OverrideDocs["ro"]["query x"]; got != "query PlugIt_x{x}" {
 		t.Errorf("OverrideDocs[ro][query x] = %q", got)

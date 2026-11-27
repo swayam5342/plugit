@@ -122,6 +122,29 @@ func TestReadSnapshot(t *testing.T) {
 	}
 }
 
+// A manifest.json written before Manifest.GraphQL.NormalizedSDL was dropped
+// still carries the field: it is ignored like any unknown JSON field, so the
+// cache still loads (its other GraphQL data intact) rather than failing.
+// (A new build's parser ID differs anyway, so such a cache is normally
+// rebuilt as a miss; this guards a cache that matches.)
+func TestReadManifestIgnoresLegacyNormalizedSDL(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "manifest.json")
+	key := CacheKey{SpecSHA256: strings.Repeat("a", 64), Prefix: "gh", Parser: "v1.2.3", SelectionDepth: 2, MaxFields: 100}
+	legacy := `{"format":1,"key":{"spec_sha256":"` + key.SpecSHA256 + `","prefix":"gh","parser":"v1.2.3","selection_depth":2,"max_fields":100},` +
+		`"manifest":{"protocol":"graphql","title":"","version":"","specVersion":"","tools":[],` +
+		`"graphql":{"normalizedSDL":"type Query { x: Int }","overrideDocs":{"ro":{"query x":"query PlugIt_x { x }"}}}}}`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m, err := ReadManifest(path, key)
+	if err != nil {
+		t.Fatalf("a manifest with the legacy normalizedSDL field must load: %v", err)
+	}
+	if m.Protocol != model.GraphQL || m.GraphQL == nil || m.GraphQL.OverrideDocs["ro"]["query x"] != "query PlugIt_x { x }" {
+		t.Errorf("manifest = %+v, GraphQL = %+v", m, m.GraphQL)
+	}
+}
+
 func TestManifestPath(t *testing.T) {
 	p := NewPaths(filepath.FromSlash("/root"))
 	got, err := p.Manifest("pets")

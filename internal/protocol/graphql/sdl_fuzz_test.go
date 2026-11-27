@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vektah/gqlparser/v2"
+	"github.com/vektah/gqlparser/v2/ast"
 	"github.com/vektah/gqlparser/v2/validator/rules"
 
 	"github.com/swayam5342/plugit/internal/ingest"
@@ -22,8 +23,8 @@ import (
 // runs on hostile input. It must never panic; an error must wrap
 // ErrUnsupportedSpec; and a built manifest must respect its caps: valid,
 // unique tool names, descriptions within the cap, warnings capped, every
-// selection within max_fields, every document valid against the schema, the
-// normalized SDL reloadable, and the build deterministic.
+// selection within max_fields, every document valid against the schema, and
+// the build deterministic.
 func FuzzSDL(f *testing.F) {
 	for _, glob := range []string{fixtureDir + "/*.graphql", fixtureDir + "/*.json", hostileDir + "/*.graphql"} {
 		files, err := filepath.Glob(glob)
@@ -71,7 +72,7 @@ func FuzzSDL(f *testing.F) {
 			if err != nil {
 				continue
 			}
-			checkFuzzManifest(t, format, m, opts)
+			checkFuzzManifest(t, format, s, m, opts)
 			again, err := Build(s, format, opts)
 			if err != nil {
 				t.Fatalf("%s: second build failed: %v", format, err)
@@ -85,12 +86,8 @@ func FuzzSDL(f *testing.F) {
 	})
 }
 
-func checkFuzzManifest(t *testing.T, format string, m *model.Manifest, opts ingest.Options) {
+func checkFuzzManifest(t *testing.T, format string, s *ast.Schema, m *model.Manifest, opts ingest.Options) {
 	t.Helper()
-	s, err := LoadSchema([]byte(m.GraphQL.NormalizedSDL), FormatSDL)
-	if err != nil {
-		t.Fatalf("%s: normalized SDL does not reload: %v\n%s", format, err, m.GraphQL.NormalizedSDL)
-	}
 	if len(m.Warnings) > maxWarnings+1 {
 		t.Fatalf("%s: %d warnings, over the cap", format, len(m.Warnings))
 	}
@@ -119,7 +116,7 @@ func checkFuzzManifest(t *testing.T, format string, m *model.Manifest, opts inge
 			}
 		}
 		if _, errs := gqlparser.LoadQueryWithRules(s, tl.GraphQL.Document, rules.NewDefaultRules()); errs != nil {
-			t.Fatalf("%s: %s document invalid against the normalized schema: %v\n%s", format, tl.Key, errs, tl.GraphQL.Document)
+			t.Fatalf("%s: %s document invalid against the schema: %v\n%s", format, tl.Key, errs, tl.GraphQL.Document)
 		}
 	}
 }
