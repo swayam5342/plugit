@@ -76,7 +76,9 @@ func Parse(data []byte, opts Options) (m *model.Manifest, err error) {
 
 	doc, err := libopenapi.NewDocumentWithConfiguration(data, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("parsing spec: %w", err)
+		// No document could be built at all (a YAML or JSON syntax error):
+		// the source is an invalid spec, whichever parser stage rejected it.
+		return nil, fmt.Errorf("parsing spec: %w: %w", ErrInvalidSpec, err)
 	}
 	defer doc.Release()
 
