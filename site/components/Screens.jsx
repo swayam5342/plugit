@@ -115,7 +115,7 @@ const PANELS = [
         <div className="tui-box"><div className="tui-head"><span><span className="tui-accent">{STAR}</span> <b>plugit</b> <span className="tui-dim">· sync ·</span> <b>pets</b></span><span className="tui-dim">+1 ~1 -1</span></div></div>
         <div><span className="tui-warn">! The spec&apos;s servers changed:</span></div>
         <div>  petstore3.swagger.io → new-home.example.test</div>
-        <div className="tui-dim">  base_url stays https://petstore3.swagger.io/api/v3</div>
+        <div className="tui-dim">  endpoint stays https://petstore3.swagger.io/api/v3</div>
         <div className="tui-sec">Added (1)</div>
         <div>  <span className="tui-accent">›</span> <span className="tui-accent">●</span> <span className="m get">GET</span> /pet/{'{petId}'}/visits  <b>listVisits</b></div>
         <div className="tui-sec">Changed (1)</div>

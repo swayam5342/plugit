@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/swayam5342/plugit/internal/config"
+	"github.com/swayam5342/plugit/internal/invoke"
 	"github.com/swayam5342/plugit/internal/policy"
-	"github.com/swayam5342/plugit/internal/proxy"
 	"github.com/swayam5342/plugit/internal/store"
 )
 
@@ -47,7 +47,7 @@ func TestCallsAreRecorded(t *testing.T) {
 	}
 	c := rec.last(t)
 	if c.API != "pets" || c.Toolset != "default" || c.Tool != "listPets" || c.Op != "GET /pets" ||
-		c.Outcome != store.OK || c.Status != 200 || c.Bytes == 0 || c.Time.IsZero() || c.Duration < 0 {
+		c.Outcome != store.OK || c.Code != "HTTP 200" || c.Bytes == 0 || c.Time.IsZero() || c.Duration < 0 {
 		t.Errorf("record = %+v", c)
 	}
 	if string(c.Args) != `{"limit":5}` || c.Preview != "" || c.Error != "" {
@@ -65,12 +65,12 @@ func TestRecordsAreRedacted(t *testing.T) {
 	withSecretArg := tool("GET /pets", "listPets", qparam("limit", false, `{"type":"integer"}`), qparam("note", false, `{"type":"string"}`), qparam("api_key", false, `{"type":"string"}`))
 	rec := &recorded{}
 	r := setup(t, Config{Tools: served(withSecretArg), Mode: policy.ReadOnly, Log: callLog(rec, config.LogArgsRedacted, true),
-		Target: proxy.Target{Auth: proxy.Auth{Type: proxy.AuthBearer, Secret: secret}}}, echo)
+		Cred: invoke.Credential{Type: "bearer", Secret: secret}}, echo)
 	if _, err := r.call(t, "listPets", map[string]any{"note": "my " + secret, "api_key": "xyz-not-a-real-key"}); err != nil {
 		t.Fatal(err)
 	}
 	c := rec.last(t)
-	if c.Outcome != store.HTTPError || c.Status != 401 || c.Error == "" || c.Preview == "" {
+	if c.Outcome != store.UpstreamError || c.Code != "HTTP 401" || c.Error == "" || c.Preview == "" {
 		t.Errorf("record = %+v", c)
 	}
 	all, _ := json.Marshal(c)

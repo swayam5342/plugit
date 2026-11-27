@@ -7,12 +7,13 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/swayam5342/plugit/internal/config"
+	"github.com/swayam5342/plugit/internal/ingest"
 	"github.com/swayam5342/plugit/internal/isolate"
 	"github.com/swayam5342/plugit/internal/model"
-	"github.com/swayam5342/plugit/internal/openapi"
 	"github.com/swayam5342/plugit/internal/policy"
 )
 
@@ -106,7 +107,7 @@ func TestAddWithPicker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.BaseURL != up.URL || cfg.Prefix != "pp" || cfg.PolicyMode() != policy.ReadOnly || cfg.Source.URL != specPath {
+	if cfg.Endpoint != up.URL || cfg.Prefix != "pp" || cfg.PolicyMode() != policy.ReadOnly || cfg.Source.URL != specPath {
 		t.Errorf("config = %+v", cfg)
 	}
 	if len(cfg.Source.SHA256) != 64 {
@@ -127,7 +128,7 @@ func TestAddWithPicker(t *testing.T) {
 		}
 	}
 
-	cs, _ := startServe(t, serveSettings{paths: p, name: "pets"}, serveDeps(func(context.Context, []byte, openapi.Options) (*model.Manifest, error) {
+	cs, _ := startServe(t, serveSettings{paths: p, name: "pets"}, serveDeps(func(context.Context, []byte, string, ingest.Options) (*model.Manifest, error) {
 		t.Error("serve re-parsed right after add")
 		return nil, fmt.Errorf("unexpected")
 	}))
@@ -161,8 +162,8 @@ func TestAddFromRun(t *testing.T) {
 	if len(cfg.Fixed) != 2 || cfg.Fixed[0].Value != "literal:acme" || cfg.Fixed[1].Value != "keyring:plugit/pets-sig" {
 		t.Errorf("fixed = %+v", cfg.Fixed)
 	}
-	if !cfg.Network.AllowPrivate || cfg.BaseURL != up.URL {
-		t.Errorf("network/base = %+v %s", cfg.Network, cfg.BaseURL)
+	if !cfg.Network.AllowPrivate || cfg.Endpoint != up.URL {
+		t.Errorf("network/base = %+v %s", cfg.Network, cfg.Endpoint)
 	}
 	if ts := cfg.Toolsets["default"]; len(ts.Tools) != 1 || !ts.Tools["GET /pets/{id}"].IsZero() {
 		t.Errorf("toolset = %+v", ts)
@@ -170,6 +171,38 @@ func TestAddFromRun(t *testing.T) {
 	raw, _ := os.ReadFile(must(p.APIConfig("pets")))
 	if strings.Contains(string(raw), runSecret) || !strings.Contains(string(raw), "env:PETS_KEY") {
 		t.Errorf("plugit.yaml:\n%s", raw)
+	}
+}
+
+// add prints the manifest's warnings (operations that became no tool, and
+// the like) to stderr for every protocol, since no other command shows
+// them; stdout, which carries the summary, doesn't change.
+func TestAddPrintsManifestWarnings(t *testing.T) {
+	restSpec := fmt.Sprintf(petSpec, "https://api.example.test") + `    trace:
+      operationId: tracePets
+      responses: {'200': {description: ok}}
+`
+	cases := []struct {
+		name, spec, want string
+	}{
+		{"rest", writeSpec(t, restSpec), "warning: TRACE /pets/{id} skipped"},
+		{"graphql", writeSDL(t, gqlSDL+"type Subscription { onEvent: String }"), `warning: subscription "onEvent": subscriptions aren't supported yet`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, d, out := addEnv(t)
+			if err := addAPI(t.Context(), addSettingsFor(tc.spec, func(s *addSettings) {
+				s.fromRun, s.baseURL = true, "https://api.example.test/graphql"
+			}), d); err != nil {
+				t.Fatal(err)
+			}
+			if stderr := d.stderr.(*bytes.Buffer).String(); !strings.Contains(stderr, tc.want) {
+				t.Errorf("stderr = %q, want a line starting %q", stderr, tc.want)
+			}
+			if strings.Contains(out.String(), "warning") {
+				t.Errorf("stdout carries the warnings: %s", out)
+			}
+		})
 	}
 }
 
@@ -190,9 +223,9 @@ func TestAddRefuses(t *testing.T) {
 		want string
 	}{
 		"invalid name":                        {good, func(s *addSettings, _ *addDeps) { s.name = "Bad Name" }, "invalid API name"},
-		"base URL declined":                   {good, func(_ *addSettings, d *addDeps) { d.confirm = no }, "--base-url"},
-		"no terminal to confirm the base URL": {good, func(_ *addSettings, d *addDeps) { d.confirm = nil }, "--base-url"},
-		"several servers":                     {twoServers, nil, "--base-url"},
+		"base URL declined":                   {good, func(_ *addSettings, d *addDeps) { d.confirm = no }, "--endpoint"},
+		"no terminal to confirm the base URL": {good, func(_ *addSettings, d *addDeps) { d.confirm = nil }, "--endpoint"},
+		"several servers":                     {twoServers, nil, "--endpoint"},
 		"no picker without a terminal":        {good, func(_ *addSettings, d *addDeps) { d.pick = nil }, "--from-run"},
 		"picker selects nothing":              {good, func(_ *addSettings, d *addDeps) { d.pick = pickKeys(nil) }, "no tools"},
 		"literal secret header": {good, func(s *addSettings, _ *addDeps) {
@@ -258,5 +291,59 @@ func TestAddAllowInsecure(t *testing.T) {
 	}
 	if !cfg.Network.AllowInsecure || cfg.Network.AllowPrivate {
 		t.Errorf("network = %+v, want only allow_insecure", cfg.Network)
+	}
+}
+
+const swaggerSpec = `swagger: '2.0'
+info: {title: Pets, version: '1'}
+host: %s
+schemes: [http]
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses: {'200': {description: ok}}
+%s`
+
+// Regression: a Swagger 2.0 spec is added with source.format openapi (the
+// ingest format that parsed it; "swagger" is no format name, so plugit.yaml
+// would be invalid and every forced re-parse would fail). sync and the
+// stale-cache re-parse then force openapi and work.
+func TestAddSwagger2(t *testing.T) {
+	up := newUpstream(t)
+	host := strings.TrimPrefix(up.URL, "http://")
+	p, d, _ := addEnv(t)
+	specPath := writeSpec(t, fmt.Sprintf(swaggerSpec, host, ""))
+	if err := addAPI(t.Context(), addSettingsFor(specPath, func(s *addSettings) {
+		s.fromRun, s.baseURL, s.allowPrivate = true, up.URL, true
+	}), d); err != nil {
+		t.Fatalf("add a Swagger 2.0 spec: %v", err)
+	}
+	cfg, err := config.LoadAPI(p, "pets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Source.Format != "openapi" || cfg.Protocol != string(model.REST) {
+		t.Errorf("saved protocol/format = %q/%q, want rest/openapi", cfg.Protocol, cfg.Source.Format)
+	}
+
+	s := syncDeps(&bytes.Buffer{})
+	s.info, s.yes, s.addNew = d.info, true, true
+	s.spec = writeSpec(t, fmt.Sprintf(swaggerSpec, host, "  /owners:\n    get:\n      operationId: listOwners\n      responses: {'200': {description: ok}}\n"))
+	if err := syncAPI(t.Context(), p, "pets", s); err != nil {
+		t.Fatalf("sync a Swagger 2.0 spec: %v", err)
+	}
+
+	cache, _ := p.Manifest("pets")
+	if err := os.Remove(cache); err != nil {
+		t.Fatal(err)
+	}
+	var parses atomic.Int32
+	cs, _ := startServe(t, serveSettings{paths: p, name: "pets"}, serveDeps(countingParse(&parses)))
+	if got := toolNames(t, cs); !slices.Equal(got, []string{"listOwners", "listPets"}) {
+		t.Errorf("served tools after a stale-cache re-parse = %v", got)
+	}
+	if parses.Load() != 1 {
+		t.Errorf("parses = %d, want 1 (the stale-cache re-parse)", parses.Load())
 	}
 }

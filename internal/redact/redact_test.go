@@ -1,11 +1,14 @@
 package redact
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -322,5 +325,265 @@ func TestWith(t *testing.T) {
 	}
 	if base.With() != base {
 		t.Error("With() without secrets should return the receiver")
+	}
+}
+
+// ContainsSecret detects a configured secret in every form String masks
+// (raw, percent-encoded, base64, JSON-escaped), so a caller can refuse text
+// instead of masking it (an introspection result that becomes spec text).
+// Well-known token formats that were never configured don't count: a schema
+// may document an example token.
+func TestContainsSecret(t *testing.T) {
+	const secret = `s3cr+t/=x y"q\z`
+	r := New(Options{Secrets: []string{secret}})
+	jsonForm, err := json.Marshal(secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, form := range map[string]string{
+		"raw":          secret,
+		"query-escape": url.QueryEscape(secret),
+		"path-escape":  url.PathEscape(secret),
+		"base64-std":   base64.StdEncoding.EncodeToString([]byte(secret)),
+		"base64-url":   base64.RawURLEncoding.EncodeToString([]byte(secret)),
+		"json-escaped": strings.Trim(string(jsonForm), `"`),
+	} {
+		if !r.ContainsSecret(`{"description":"key ` + form + ` here"}`) {
+			t.Errorf("ContainsSecret missed the %s form", name)
+		}
+	}
+	for _, s := range []string{"", "ordinary text", "example " + fakeGitHub, "Bearer abcdefghijkl"} {
+		if r.ContainsSecret(s) {
+			t.Errorf("ContainsSecret(%q) = true, want false (no configured secret)", s)
+		}
+	}
+	if New(Options{}).ContainsSecret(secret) {
+		t.Error("a Redactor without secrets reported one")
+	}
+}
+
+// A JSON document may spell a string with any escapes (PHP's json_encode
+// writes "\/" for "/"; any character may be "\uXXXX"), and a JSON parser
+// decodes them all, so ContainsSecret checks a JSON document's canonical
+// spelling too: every escape spelling of every secret form is caught,
+// in values and keys, and in a duplicate key's discarded value.
+func TestContainsSecretAnyJSONEscape(t *testing.T) {
+	const secret = "tok/en+123="
+	r := New(Options{Secrets: []string{secret}})
+	b64 := base64.StdEncoding.EncodeToString([]byte(secret))
+	for name, doc := range map[string]string{
+		"solidus escaped":       `{"d":"key tok\/en+123= here"}`,
+		"fully u-escaped":       `{"d":"` + jsonU(secret) + `"}`,
+		"mixed escapes":         `{"d":"t\u006fk\/en\u002B123\u003d"}`,
+		"u-escaped query form":  `{"d":"` + jsonU(url.QueryEscape(secret)) + `"}`,
+		"u-escaped base64 form": `["` + jsonU(b64) + `"]`,
+		"in a key":              `{"tok\/en+123=":1}`,
+		"duplicate key's first": `{"a":"tok\/en+123=","a":"x"}`,
+		"deep and pretty": `{
+  "a": [1, 2.50, true, null, {"b": "tok\/en+123="}]
+}`,
+	} {
+		if !r.ContainsSecret(doc) {
+			t.Errorf("ContainsSecret missed the %s spelling: %s", name, doc)
+		}
+	}
+	for _, s := range []string{`{"d":"caf\u00e9 \/ \n"}`, `{"d":"tok\/en"}`, `not json \/`} {
+		if r.ContainsSecret(s) {
+			t.Errorf("ContainsSecret(%q) = true, want false", s)
+		}
+	}
+}
+
+// jsonU spells every rune of s (BMP) as a \uXXXX escape.
+func jsonU(s string) string {
+	var b strings.Builder
+	for _, c := range s {
+		fmt.Fprintf(&b, `\u%04x`, c)
+	}
+	return b.String()
+}
+
+// CanonicalJSON re-spells a JSON document: compact, every string with Go's
+// escapes (no HTML escaping), numbers as written, key order and duplicate
+// keys kept. Anything that isn't one valid JSON document is refused.
+func TestCanonicalJSON(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`{"b":"\u00e9\/<&>","a":[1.50,true,null,{"x":"\"\\"}],"a":2}`, `{"b":"é/<&>","a":[1.50,true,null,{"x":"\"\\"}],"a":2}`},
+		{" [ ] ", `[]`},
+		{`{}`, `{}`},
+		{`"t\u006fk"`, `"tok"`},
+		{`-0.5e10`, `-0.5e10`},
+		{"{\n \"a\" : { \"b\" : [ ] } , \"c\" : " + `"\n"` + " }", `{"a":{"b":[]},"c":"\n"}`},
+	}
+	for _, tc := range cases {
+		got, ok := CanonicalJSON([]byte(tc.in))
+		if !ok || string(got) != tc.want {
+			t.Errorf("CanonicalJSON(%s) = %s, %v; want %s", tc.in, got, ok, tc.want)
+		}
+	}
+	for _, bad := range []string{``, `{"a":1`, `{} {}`, `{"a":1,}`, `tok`} {
+		if got, ok := CanonicalJSON([]byte(bad)); ok {
+			t.Errorf("CanonicalJSON(%q) = %s, true; want refused", bad, got)
+		}
+	}
+}
+
+// JSON returns a body unchanged unless it is a JSON document whose canonical
+// spelling carries something String masks; then it returns that spelling, so
+// a secret hidden behind escapes is masked before the model (or a client that
+// decodes the JSON) sees it.
+func TestJSONCanonicalOnlyWhenMasked(t *testing.T) {
+	const secret = "tok/en+123="
+	r := New(Options{Secrets: []string{secret}})
+	for _, body := range []string{
+		`{"d":"` + jsonU(secret) + `"}`,
+		`{"d":"tok\/en+123="}`,
+		`{"d":"` + jsonU(fakeGitHub) + `"}`, // token-pattern backstop
+	} {
+		got := r.String(string(r.JSON([]byte(body))))
+		if strings.Contains(got, secret) || strings.Contains(got, fakeGitHub) || !strings.Contains(got, Mask) {
+			t.Errorf("JSON(%s) then String = %s; want the secret masked", body, got)
+		}
+	}
+	for _, body := range []string{`{"d":"caf\u00e9 \/ \u003c"}`, `{"d":"plain"}`, `not json \u0074`, `{"d":"tok\/en+123=`} {
+		if got := r.JSON([]byte(body)); string(got) != body {
+			t.Errorf("JSON(%s) = %s; want it unchanged", body, got)
+		}
+	}
+	if r.JSON(nil) != nil {
+		t.Error("JSON(nil) != nil")
+	}
+}
+
+// A body that is not one valid JSON document (cut at the response cap, or
+// with trailing junk) still has each complete "..." string literal decoded
+// and checked: a secret behind escapes inside one is re-spelled so String
+// masks it, and ContainsSecret reports it. Bodies with nothing to mask are
+// returned unchanged.
+func TestJSONLenientOnInvalidBodies(t *testing.T) {
+	const secret = "tok/en+123="
+	r := New(Options{Secrets: []string{secret}})
+	for name, body := range map[string]string{
+		"truncated after the secret": `{"d":"tok\/en+123=","e":"more`,
+		"trailing junk":              `{"d":"` + jsonU(secret) + `"} trailing`,
+		"two documents":              `{} {"d":"tok\/en+123="}`,
+		"in markup":                  `<p>"tok\/en+123="</p>`,
+		// An odd number of quotes, or an escaped quote, before the secret
+		// must not throw the literal pairing off.
+		"odd quote before":     `x"y {"d":"tok\/en+123="}`,
+		"escaped quote before": `"a\"{"d":"tok\/en+123="} more`,
+		"stray escaped quote":  `a \" b "tok\/en+123="`,
+		"token pattern":        `{"d":"` + jsonU(fakeGitHub) + `",`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := r.String(string(r.JSON([]byte(body))))
+			if strings.Contains(got, secret) || strings.Contains(got, fakeGitHub) || !strings.Contains(got, Mask) {
+				t.Errorf("JSON(%s) then String = %s; want the secret masked", body, got)
+			}
+			if name != "token pattern" && !r.ContainsSecret(body) {
+				t.Errorf("ContainsSecret(%s) = false, want true", body)
+			}
+		})
+	}
+	for _, body := range []string{`{"d":"café","e":`, `"a\/b" "c`, `"\x"`, `{"d":"tok\/en+123=`} {
+		if got := r.JSON([]byte(body)); string(got) != body {
+			t.Errorf("JSON(%s) = %s; want it unchanged", body, got)
+		}
+		if r.ContainsSecret(body) {
+			t.Errorf("ContainsSecret(%s) = true, want false", body)
+		}
+	}
+}
+
+// CanonicalJSON accepts exactly the valid JSON documents, and its output is
+// valid JSON that decodes to the same value.
+func FuzzCanonicalJSON(f *testing.F) {
+	for _, s := range []string{`{"a":"t\u006fk\/x","a":[1.50,true,null]}`, `[]`, `"x"`, `{"a":1`, `{} {}`, "\"\xff\""} {
+		f.Add([]byte(s))
+	}
+	f.Fuzz(func(t *testing.T, b []byte) {
+		c, ok := CanonicalJSON(b)
+		if ok != json.Valid(b) {
+			t.Fatalf("CanonicalJSON ok = %v, json.Valid = %v", ok, !ok)
+		}
+		if !ok {
+			return
+		}
+		decode := func(x []byte) any {
+			d := json.NewDecoder(bytes.NewReader(x))
+			d.UseNumber()
+			var v any
+			if err := d.Decode(&v); err != nil {
+				t.Fatalf("decode %q: %v", x, err)
+			}
+			return v
+		}
+		if !json.Valid(c) || !reflect.DeepEqual(decode(b), decode(c)) {
+			t.Fatalf("CanonicalJSON(%q) = %q: not the same value", b, c)
+		}
+		// The canonical spelling is a fixed point.
+		if again, ok := CanonicalJSON(c); !ok || !bytes.Equal(again, c) {
+			t.Fatalf("CanonicalJSON is not idempotent: %q -> %q", c, again)
+		}
+	})
+}
+
+// A fixed secret spelled with any mix of per-rune escapes (\uXXXX, "\/")
+// inside a JSON string is always caught by ContainsSecret and masked by
+// JSON then String, whether the document is valid or cut short, and
+// whatever comes before it (an odd number of quotes, escaped quotes). The
+// fuzz input picks which runes are escaped and the bytes around the document.
+func FuzzEscapedSecretCaught(f *testing.F) {
+	f.Add([]byte{0}, []byte(""), []byte(""))
+	f.Add([]byte{0xff, 0x0f}, []byte(""), []byte(" junk"))
+	f.Add([]byte{0xaa, 0x55, 0x33}, []byte(""), []byte(`,"x":"`))
+	f.Add([]byte{0x0f}, []byte(`x"y `), []byte(""))
+	f.Add([]byte{0xf0, 0x01}, []byte(`"a\"`), []byte(` "`))
+	const secret = "tok/en+123=é"
+	r := New(Options{Secrets: []string{secret}})
+	f.Fuzz(func(t *testing.T, mask, prefix, tail []byte) {
+		var lit strings.Builder
+		for i, c := range secret {
+			bit := len(mask) > 0 && mask[(i/8)%len(mask)]&(1<<(i%8)) != 0
+			switch {
+			case bit:
+				fmt.Fprintf(&lit, `\u%04x`, c)
+			case c == '/' && len(mask) > 1 && mask[1]&1 != 0:
+				lit.WriteString(`\/`)
+			default:
+				lit.WriteRune(c)
+			}
+		}
+		body := string(prefix) + `{"d":"` + lit.String() + `"}` + string(tail)
+		if !r.ContainsSecret(body) {
+			t.Fatalf("ContainsSecret(%q) = false", body)
+		}
+		if got := r.String(string(r.JSON([]byte(body)))); strings.Contains(got, secret) || !strings.Contains(got, Mask) {
+			t.Fatalf("JSON then String(%q) = %q; want the secret masked", body, got)
+		}
+	})
+}
+
+// canonicalStrings streams its quote scan: an untrusted body made of quotes
+// (up to max_response_bytes) must not make it hold an index per quote. A
+// 1 MiB all-quotes body (its leading backslash only escapes the first quote)
+// allocates a small constant; the index-slice version allocated about
+// 100 MB on it (measured). Heap accounting is skipped under -race, whose
+// instrumentation allocates on its own; CI runs this test once without it.
+func TestCanonicalStringsStreamsQuotes(t *testing.T) {
+	b := append([]byte{'\\'}, bytes.Repeat([]byte{'"'}, 1<<20)...)
+	if got := canonicalStrings(b); !bytes.Equal(got, b) {
+		t.Fatal("canonicalStrings changed a body with nothing to re-spell")
+	}
+	if raceEnabled {
+		t.Skip("heap accounting is not meaningful under -race")
+	}
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	_ = canonicalStrings(b)
+	runtime.ReadMemStats(&after)
+	if n := after.TotalAlloc - before.TotalAlloc; n > 64<<10 {
+		t.Errorf("canonicalStrings allocated %d bytes on a %d-byte all-quotes body; want a small constant", n, len(b))
 	}
 }

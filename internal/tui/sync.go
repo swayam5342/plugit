@@ -112,14 +112,21 @@ func (s *SyncScreen) body(w int) (lines []string, cursorLine int) {
 	if d.ServersChanged {
 		before, after := strings.Join(d.ServersBefore, ", "), strings.Join(d.ServersAfter, ", ")
 		add("  " + th.Warn.Render("! The spec's servers changed: ") + safe(cmp.Or(before, "(none)")) + th.Dim.Render(" → ") + safe(cmp.Or(after, "(none)")))
-		add("    " + th.Dim.Render("base_url stays "+safe(s.in.BaseURL)+" (sync never changes it; edit plugit.yaml if you trust the new server)"))
+		add("    " + th.Dim.Render("endpoint stays "+safe(s.in.BaseURL)+" (sync never changes it; edit plugit.yaml if you trust the new server)"))
 		if !d.BaseURLListed {
-			add("    " + th.Warn.Render("The new spec no longer lists your base_url."))
+			add("    " + th.Warn.Render("The new spec no longer lists your endpoint."))
 		}
 		add("")
 	}
 	if s.in.LintNote != "" {
 		add("  " + th.Err.Render("✗ "+safe(s.in.LintNote)))
+		add("")
+	}
+	if len(d.FieldErrors) > 0 {
+		add("  " + th.Err.Render(fmt.Sprintf("✗ response_fields that no longer compile (%d); serve refuses these toolsets until you fix them with plugit edit", len(d.FieldErrors))))
+		for _, fe := range d.FieldErrors {
+			add("    " + safe(fe.Toolset) + th.Dim.Render(" · ") + safe(string(fe.Key)) + th.Dim.Render("  "+safe(fe.Err)))
+		}
 		add("")
 	}
 

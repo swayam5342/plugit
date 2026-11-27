@@ -17,7 +17,7 @@ name: github
 source:
   url: https://example.test/api.github.com.json
   sha256: 3f9a000000000000000000000000000000000000000000000000000000000000
-base_url: https://api.github.com
+endpoint: https://api.github.com
 prefix: gh
 fixed:
   - name: X-GitHub-Api-Version
@@ -58,7 +58,7 @@ func TestParseAPIFull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Name != "github" || c.BaseURL != "https://api.github.com" || c.Prefix != "gh" {
+	if c.Name != "github" || c.Endpoint != "https://api.github.com" || c.Prefix != "gh" {
 		t.Errorf("basic fields: %+v", c)
 	}
 	if c.Network.Timeout != 10*time.Second || c.Network.MaxResponseBytes != 2048 {
@@ -88,7 +88,7 @@ func TestParseAPIFull(t *testing.T) {
 const minimalConfig = `version: 1
 name: pets
 source: {url: https://example.test/openapi.json}
-base_url: https://pets.example.test/v1
+endpoint: https://pets.example.test/v1
 toolsets:
   default:
     tools:
@@ -129,21 +129,26 @@ func TestParseAPIRejects(t *testing.T) {
 		want string
 		is   error
 	}{
-		"unknown top-level key": {base + "polcy: {mode: full}\n", "polcy", ErrInvalidConfig},
-		"unknown nested key":    {strings.Replace(base, "base_url:", "network: {allow_privat: true}\nbase_url:", 1), "allow_privat", ErrInvalidConfig},
-		"duplicate key":         {base + "base_url: https://other.example.test\n", "base_url", ErrInvalidConfig},
-		"multiple documents":    {base + "---\nversion: 1\n", "single document", ErrInvalidConfig},
-		"empty file":            {"", "no documents", ErrInvalidConfig},
-		"not a mapping":         {"- 1\n", "", ErrInvalidConfig},
-		"missing version":       {strings.Replace(base, "version: 1\n", "", 1), "version", ErrInvalidConfig},
-		"future version":        {strings.Replace(base, "version: 1", "version: 7", 1), "newer", ErrUnsupportedVersion},
-		"bad name":              {strings.Replace(base, "name: pets", "name: ../etc", 1), "name", ErrInvalidConfig},
-		"missing base_url":      {strings.Replace(base, "base_url: https://pets.example.test/v1\n", "", 1), "base_url", ErrInvalidConfig},
-		"relative base_url":     {strings.Replace(base, "https://pets.example.test/v1", "/v1", 1), "base_url", ErrInvalidConfig},
-		"ftp base_url":          {strings.Replace(base, "https://pets", "ftp://pets", 1), "base_url", ErrInvalidConfig},
-		"base_url with userinfo": {strings.Replace(base, "https://pets", "https://u:"+secret+"@pets", 1),
-			"base_url", ErrInvalidConfig},
-		"base_url with query":   {strings.Replace(base, "/v1", "/v1?key=x", 1), "base_url", ErrInvalidConfig},
+		"unknown top-level key":  {base + "polcy: {mode: full}\n", "polcy", ErrInvalidConfig},
+		"unknown nested key":     {strings.Replace(base, "endpoint:", "network: {allow_privat: true}\nendpoint:", 1), "allow_privat", ErrInvalidConfig},
+		"duplicate key":          {base + "endpoint: https://other.example.test\n", "endpoint", ErrInvalidConfig},
+		"multiple documents":     {base + "---\nversion: 1\n", "single document", ErrInvalidConfig},
+		"empty file":             {"", "no documents", ErrInvalidConfig},
+		"not a mapping":          {"- 1\n", "", ErrInvalidConfig},
+		"missing version":        {strings.Replace(base, "version: 1\n", "", 1), "version", ErrInvalidConfig},
+		"future version":         {strings.Replace(base, "version: 1", "version: 7", 1), "pre-1.0", ErrUnsupportedVersion},
+		"unknown protocol":       {strings.Replace(base, "version: 1\n", "version: 1\nprotocol: carrier-pigeon\n", 1), "needs a newer plugit", ErrInvalidConfig},
+		"invalid toolset safety": {base + "  typed:\n    safety: [bogus]\n", "safety", ErrInvalidConfig},
+		"bad name":               {strings.Replace(base, "name: pets", "name: ../etc", 1), "name", ErrInvalidConfig},
+		"bad tool override name": {strings.Replace(base, `"GET /pets": {}`, `"GET /pets": {name: "list.pets"}`, 1), "tools[GET /pets].name", ErrInvalidConfig},
+		"tool override name too long": {strings.Replace(base, `"GET /pets": {}`, `"GET /pets": {name: `+strings.Repeat("x", 65)+`}`, 1),
+			"tools[GET /pets].name", ErrInvalidConfig},
+		"missing endpoint":  {strings.Replace(base, "endpoint: https://pets.example.test/v1\n", "", 1), "endpoint", ErrInvalidConfig},
+		"relative endpoint": {strings.Replace(base, "https://pets.example.test/v1", "/v1", 1), "endpoint", ErrInvalidConfig},
+		"ftp endpoint":      {strings.Replace(base, "https://pets", "ftp://pets", 1), "endpoint", ErrInvalidConfig},
+		"endpoint with userinfo": {strings.Replace(base, "https://pets", "https://u:"+secret+"@pets", 1),
+			"endpoint", ErrInvalidConfig},
+		"endpoint with query":   {strings.Replace(base, "/v1", "/v1?key=x", 1), "endpoint", ErrInvalidConfig},
 		"missing source":        {strings.Replace(base, "source: {url: https://example.test/openapi.json}\n", "", 1), "source.url", ErrInvalidConfig},
 		"bad sha256":            {strings.Replace(base, "openapi.json}", "openapi.json, sha256: xyz}", 1), "sha256", ErrInvalidConfig},
 		"bad prefix":            {base + "prefix: 'has space'\n", "prefix", ErrInvalidConfig},
@@ -353,26 +358,26 @@ func TestRetentionPeriod(t *testing.T) {
 	}
 }
 
-// Version 2 adds per-tool rate_limit. Version 1 files load unchanged and
-// come out as version 2 (the migration has nothing to rewrite).
-func TestVersionMigration(t *testing.T) {
-	if CurrentVersion != 6 {
+// The config schema restarted at 1 for the protocol-core rebuild: there is no
+// migration, and a higher (pre-rebuild) version is rejected.
+func TestSchemaVersion(t *testing.T) {
+	if CurrentVersion != 1 {
 		t.Fatalf("CurrentVersion = %d", CurrentVersion)
 	}
 	c, err := ParseAPI([]byte(minimalConfig))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Version != CurrentVersion {
-		t.Errorf("v1 config loaded as version %d, want %d", c.Version, CurrentVersion)
+	if c.Version != 1 {
+		t.Errorf("config loaded as version %d, want 1", c.Version)
 	}
 	out, err := MarshalAPI(c)
-	if err != nil || !strings.Contains(string(out), "version: 6") {
+	if err != nil || !strings.Contains(string(out), "version: 1") {
 		t.Errorf("marshal = %s, %v", out, err)
 	}
-	v2 := strings.Replace(minimalConfig, "version: 1", "version: 2", 1)
-	if _, err := ParseAPI([]byte(v2)); err != nil {
-		t.Errorf("v2: %v", err)
+	old := strings.Replace(minimalConfig, "version: 1", "version: 6", 1)
+	if _, err := ParseAPI([]byte(old)); err == nil || !strings.Contains(err.Error(), "pre-1.0") {
+		t.Errorf("a pre-rebuild config should be rejected: %v", err)
 	}
 }
 
@@ -410,120 +415,6 @@ func TestToolResponseFields(t *testing.T) {
 		if _, err := ParseAPI([]byte(y)); err == nil || !strings.Contains(err.Error(), "response_fields") {
 			t.Errorf("%s: %v", bad, err)
 		}
-	}
-	v2 := strings.Replace(minimalConfig, "version: 1", "version: 2", 1)
-	if c, err := ParseAPI([]byte(v2)); err != nil || c.Version != CurrentVersion {
-		t.Errorf("v2 config: %v, version %d", err, c.Version)
-	}
-}
-
-// Version 4 adds OAuth2 (SPEC M6 design note: OAuth2).
-func TestOAuth2Auth(t *testing.T) {
-	withAuth := func(auth string) string {
-		return strings.Replace(minimalConfig, "toolsets:", auth+"\ntoolsets:", 1)
-	}
-	cc := withAuth(`auth: {type: oauth2, flow: client_credentials, token_url: "https://auth.example.test/oauth/token", client_id: my-client, secret: "keyring:plugit/pets-client", scopes: [read, write]}`)
-	c, err := ParseAPI([]byte(cc))
-	if err != nil {
-		t.Fatal(err)
-	}
-	a := c.Auth
-	if a.Type != AuthOAuth2 || a.Flow != "client_credentials" || a.TokenURL != "https://auth.example.test/oauth/token" || a.ClientID != "my-client" || len(a.Scopes) != 2 {
-		t.Errorf("auth = %+v", a)
-	}
-	device := withAuth(`auth: {type: oauth2, flow: device_code, token_url: "https://auth.example.test/token", device_url: "https://auth.example.test/device", client_id: cli}`)
-	if _, err := ParseAPI([]byte(device)); err != nil {
-		t.Errorf("device flow without a client secret: %v", err)
-	}
-	local := withAuth(`auth: {type: oauth2, flow: device_code, token_url: "http://127.0.0.1:9000/token", device_url: "http://localhost:9000/device", client_id: cli}`)
-	if _, err := ParseAPI([]byte(local)); err != nil {
-		t.Errorf("loopback http endpoints: %v", err)
-	}
-
-	bad := map[string]string{
-		"no flow":               `auth: {type: oauth2, token_url: "https://a.example.test/t", client_id: c, secret: "env:S"}`,
-		"unknown flow":          `auth: {type: oauth2, flow: password, token_url: "https://a.example.test/t", client_id: c, secret: "env:S"}`,
-		"no token_url":          `auth: {type: oauth2, flow: client_credentials, client_id: c, secret: "env:S"}`,
-		"http token_url":        `auth: {type: oauth2, flow: client_credentials, token_url: "http://a.example.test/t", client_id: c, secret: "env:S"}`,
-		"token_url query":       `auth: {type: oauth2, flow: client_credentials, token_url: "https://a.example.test/t?k=v", client_id: c, secret: "env:S"}`,
-		"token_url userinfo":    `auth: {type: oauth2, flow: client_credentials, token_url: "https://u:p@a.example.test/t", client_id: c, secret: "env:S"}`,
-		"no client_id":          `auth: {type: oauth2, flow: client_credentials, token_url: "https://a.example.test/t", secret: "env:S"}`,
-		"cc without secret":     `auth: {type: oauth2, flow: client_credentials, token_url: "https://a.example.test/t", client_id: c}`,
-		"literal secret":        `auth: {type: oauth2, flow: client_credentials, token_url: "https://a.example.test/t", client_id: c, secret: "hunter2"}`,
-		"device no device_url":  `auth: {type: oauth2, flow: device_code, token_url: "https://a.example.test/t", client_id: c}`,
-		"oauth with header":     `auth: {type: oauth2, flow: device_code, token_url: "https://a.example.test/t", device_url: "https://a.example.test/d", client_id: c, header: X-Key}`,
-		"bad scope":             `auth: {type: oauth2, flow: device_code, token_url: "https://a.example.test/t", device_url: "https://a.example.test/d", client_id: c, scopes: ["a b"]}`,
-		"oauth field on bearer": `auth: {type: bearer, secret: "env:S", token_url: "https://a.example.test/t"}`,
-	}
-	for name, auth := range bad {
-		t.Run(name, func(t *testing.T) {
-			if _, err := ParseAPI([]byte(withAuth(auth))); err == nil || !strings.Contains(err.Error(), "auth") {
-				t.Errorf("err = %v", err)
-			}
-		})
-	}
-}
-
-func TestCredentialsNeedHTTPS(t *testing.T) {
-	const (
-		bearer = "auth: {type: bearer, secret: \"env:PETS_TOKEN\"}\n"
-		secret = "fixed: [{name: api_key, value: \"env:PETS_KEY\"}]\n"
-		public = "fixed: [{name: version, value: \"literal:2\"}]\n"
-	)
-	with := func(baseURL, extra string) string {
-		return strings.Replace(minimalConfig, "base_url: https://pets.example.test/v1", "base_url: "+baseURL, 1) + extra
-	}
-	if !strings.Contains(minimalConfig, "base_url: https://pets.example.test/v1") {
-		t.Fatal("minimalConfig changed: update this test")
-	}
-	cases := map[string]struct {
-		yaml string
-		ok   bool
-	}{
-		"https with auth":               {with("https://pets.example.test/v1", bearer), true},
-		"http without credentials":      {with("http://pets.example.test/v1", ""), true},
-		"http with a literal fixed":     {with("http://pets.example.test/v1", public), true},
-		"http with auth":                {with("http://pets.example.test/v1", bearer), false},
-		"http with a secret fixed":      {with("http://pets.example.test/v1", secret), false},
-		"http to localhost with auth":   {with("http://localhost:8080/v1", bearer), true},
-		"http to 127.0.0.1 with auth":   {with("http://127.0.0.1:8080/v1", bearer), true},
-		"http to [::1] with auth":       {with("http://[::1]:8080/v1", bearer), true},
-		"http, allow_private, auth":     {with("http://intranet.example.test/v1", bearer+"network: {allow_private: true}\n"), false},
-		"http, allow_insecure, auth":    {with("http://intranet.example.test/v1", bearer+"network: {allow_insecure: true}\n"), true},
-		"http, allow_insecure, fixed":   {with("http://pets.example.test/v1", secret+"network: {allow_insecure: true}\n"), true},
-		"http to a lookalike with auth": {with("http://localhost.example.test/v1", bearer), false},
-	}
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			_, err := ParseAPI([]byte(tc.yaml))
-			switch {
-			case tc.ok && err != nil:
-				t.Errorf("unexpected error: %v", err)
-			case !tc.ok && (!errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), "https") || !strings.Contains(err.Error(), "allow_insecure")):
-				t.Errorf("err = %v, want an ErrInvalidConfig about https that names allow_insecure", err)
-			}
-		})
-	}
-}
-
-func TestAllowInsecure(t *testing.T) {
-	c, err := ParseAPI([]byte(minimalConfig))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.Network.AllowInsecure {
-		t.Error("allow_insecure defaults to on")
-	}
-	if out, err := MarshalAPI(c); err != nil || strings.Contains(string(out), "allow_insecure") {
-		t.Errorf("an off switch is written out: %s, %v", out, err)
-	}
-	on := strings.Replace(minimalConfig, "toolsets:", "network: {allow_insecure: true}\ntoolsets:", 1)
-	c, err = ParseAPI([]byte(on))
-	if err != nil || !c.Network.AllowInsecure {
-		t.Fatalf("allow_insecure: true not read: %+v, %v", c, err)
-	}
-	if out, err := MarshalAPI(c); err != nil || !strings.Contains(string(out), "allow_insecure: true") {
-		t.Errorf("marshal = %s, %v", out, err)
 	}
 }
 

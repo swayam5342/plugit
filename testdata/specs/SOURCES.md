@@ -8,6 +8,13 @@ update this table, and regenerate the goldens (`go test ./internal/openapi -run 
 | `petstore3.json` | https://petstore3.swagger.io/api/v3/openapi.json | `00441c05add60f28da55eb4563d3fb6bbda364ba8eb7b381e2e2c98613005c82` |
 | `github.json.gz` | https://raw.githubusercontent.com/github/rest-api-description/5c36b6f685bae2acccf24a442f3240bf121cb488/descriptions/api.github.com/api.github.com.json | `2a93393cfccb292caeaa0ad9ab250900e361bda28f76743cc812dd0951cae8f0` |
 | `stripe.json.gz` | https://raw.githubusercontent.com/stripe/openapi/6763e1a3f199026b0893cf190d95130d3700c045/openapi/spec3.json | `7cff4cc46d0654101a36a3302f7544640f5f73e4f3cad6f264f0e23c19fa1776` |
+| `github.graphql.gz` | https://raw.githubusercontent.com/octokit/graphql-schema/503d8f18a265230ec224669241c2f1957811faf8/schema.graphql | `4dea7bd74e69637bd55795157eef5bfd89af3a32a6f05e8ac69004f223896415` |
 
 The `.gz` files are gzip-compressed (`gzip -9 -n`) to keep the repository small.
 The golden test checks each file's uncompressed SHA-256 against this table.
+
+`github.graphql.gz` is GitHub's public GraphQL SDL as published by octokit/graphql-schema
+(downloaded 2026-11-26). It is pinned at commit `503d8f1` (2024-07-08), not the repository's
+current head: the SDL at head (`82ff2d4`, last changed by `597478f` on 2025-02-27) declares
+`EnterpriseOwnerInfo.repositoryDeployKeySetting` twice, which is invalid GraphQL that every
+conforming parser rejects. `TestGitHubSDLPinned` checks its SHA-256 against this table.

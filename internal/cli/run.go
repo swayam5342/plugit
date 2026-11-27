@@ -1,19 +1,13 @@
 package cli
 
 import (
-	"cmp"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/url"
 	"os"
-	"path"
-	"regexp"
 	"slices"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -21,22 +15,19 @@ import (
 
 	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/httpx"
+	"github.com/swayam5342/plugit/internal/ingest"
+	"github.com/swayam5342/plugit/internal/invoke"
 	"github.com/swayam5342/plugit/internal/isolate"
 	"github.com/swayam5342/plugit/internal/mcpserver"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/naming"
-	"github.com/swayam5342/plugit/internal/openapi"
 	"github.com/swayam5342/plugit/internal/policy"
-	"github.com/swayam5342/plugit/internal/proxy"
+	"github.com/swayam5342/plugit/internal/protocol/graphql"
 	"github.com/swayam5342/plugit/internal/redact"
 	"github.com/swayam5342/plugit/internal/schema"
 	"github.com/swayam5342/plugit/internal/secrets"
 	"github.com/swayam5342/plugit/internal/spec"
 )
-
-var errTooManyTools = errors.New("too many tools selected")
-
-const defaultMaxTools = 40
 
 type runFlags struct {
 	spec, baseURL, prefix, mode string
@@ -45,359 +36,52 @@ type runFlags struct {
 	maxTools                    int
 	timeout                     time.Duration
 	allowPrivate, allowInsecure bool
+	format                      string
+	introspect                  bool
 }
 
-type runSettings struct {
-	spec, baseURL, prefix string
-	headers, fixed        []string
-	tags, methods, paths  []string
-	maxTools              int
-	timeout               time.Duration
-	allowPrivate          bool
-	allowInsecure         bool
-	mode                  policy.Mode
-}
-
-func resolveRunSettings(f runFlags, changed map[string]bool, lookup func(string) (string, bool)) (runSettings, error) {
-	str := func(flagName, flagVal, envName, def string) string {
-		if changed[flagName] || (flagName == "" && flagVal != "") {
-			return flagVal
-		}
-		if v, ok := lookup(envName); ok && v != "" {
-			return v
-		}
-		return def
-	}
-	list := func(flagName string, flagVal []string, envName string) []string {
-		if changed[flagName] {
-			return flagVal
-		}
-		if v, ok := lookup(envName); ok && v != "" {
-			return splitList(v)
-		}
-		return nil
-	}
-
-	s := runSettings{
-		spec:    str("", f.spec, "PLUGIT_SPEC", ""),
-		baseURL: str("base-url", f.baseURL, "PLUGIT_BASE_URL", ""),
-		prefix:  str("prefix", f.prefix, "PLUGIT_PREFIX", ""),
-		headers: list("header", f.headers, "PLUGIT_HEADER"),
-		fixed:   list("fixed", f.fixed, "PLUGIT_FIXED"),
-		tags:    list("tags", f.tags, "PLUGIT_TAGS"),
-		methods: list("methods", f.methods, "PLUGIT_METHODS"),
-		paths:   list("paths", f.paths, "PLUGIT_PATHS"),
-	}
-	if s.spec == "" {
-		return s, errors.New("no spec given: pass a file or URL, or set PLUGIT_SPEC")
-	}
-
-	mode, err := policy.ParseMode(str("mode", f.mode, "PLUGIT_MODE", string(policy.ReadOnly)))
-	if err != nil {
-		return s, err
-	}
-	s.mode = mode
-
-	switch {
-	case changed["max-tools"]:
-		s.maxTools = f.maxTools
-	default:
-		s.maxTools = defaultMaxTools
-		if v, ok := lookup("PLUGIT_MAX_TOOLS"); ok && v != "" {
-			n, err := strconv.Atoi(v)
-			if err != nil {
-				return s, fmt.Errorf("PLUGIT_MAX_TOOLS: %q is not a number", v)
-			}
-			s.maxTools = n
-		}
-	}
-	if s.maxTools < 1 {
-		return s, errors.New("--max-tools must be at least 1")
-	}
-
-	switch {
-	case changed["timeout"]:
-		s.timeout = f.timeout
-	default:
-		s.timeout = httpx.DefaultTimeout
-		if v, ok := lookup("PLUGIT_TIMEOUT"); ok && v != "" {
-			d, err := time.ParseDuration(v)
-			if err != nil {
-				return s, fmt.Errorf("PLUGIT_TIMEOUT: %q is not a duration like 30s", v)
-			}
-			s.timeout = d
-		}
-	}
-	if s.timeout <= 0 {
-		return s, errors.New("--timeout must be positive")
-	}
-
-	switch {
-	case changed["allow-private"]:
-		s.allowPrivate = f.allowPrivate
-	default:
-		if v, ok := lookup("PLUGIT_ALLOW_PRIVATE"); ok && v != "" {
-			b, err := strconv.ParseBool(v)
-			if err != nil {
-				return s, fmt.Errorf("PLUGIT_ALLOW_PRIVATE: %q is not true or false", v)
-			}
-			s.allowPrivate = b
-		}
-	}
-
-	switch {
-	case changed["allow-insecure"]:
-		s.allowInsecure = f.allowInsecure
-	default:
-		if v, ok := lookup("PLUGIT_ALLOW_INSECURE"); ok && v != "" {
-			b, err := strconv.ParseBool(v)
-			if err != nil {
-				return s, fmt.Errorf("PLUGIT_ALLOW_INSECURE: %q is not true or false", v)
-			}
-			s.allowInsecure = b
-		}
-	}
-	return s, nil
-}
-
-func splitList(v string) []string {
-	var out []string
-	for p := range strings.SplitSeq(v, ",") {
-		if p = strings.TrimSpace(p); p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-type credFlag struct {
-	name string
-	ref  secrets.Ref
-}
-
-var headerNameRe = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
-
-// parseHeaderFlags parses --header Name=env:VAR|keyring:svc/key. Header
-// values are credentials, and command lines are visible to other local
-// users, so literal values are rejected (SPEC §2.4, T10).
-func parseHeaderFlags(in []string) ([]credFlag, error) {
-	out := make([]credFlag, 0, len(in))
-	for _, h := range in {
-		name, val, ok := strings.Cut(h, "=")
-		if !ok || !headerNameRe.MatchString(name) {
-			return nil, fmt.Errorf("--header: expected Name=env:VAR or Name=keyring:service/key, got an entry for %q", safeName(name))
-		}
-		ref, err := secrets.ParseSecretRef(val)
-		if err != nil {
-			return nil, fmt.Errorf("--header %s: %w", name, err)
-		}
-		out = append(out, credFlag{name: name, ref: ref})
-	}
-	return out, nil
-}
-
-// parseFixedFlags parses --fixed name=literal:V|env:VAR|keyring:svc/key.
-func parseFixedFlags(in []string) ([]credFlag, error) {
-	out := make([]credFlag, 0, len(in))
-	for _, f := range in {
-		name, val, ok := strings.Cut(f, "=")
-		if !ok || name == "" || strings.ContainsAny(name, " \t\r\n") {
-			return nil, fmt.Errorf("--fixed: expected name=literal:value, name=env:VAR or name=keyring:service/key, got an entry for %q", safeName(name))
-		}
-		ref, err := secrets.ParseRef(val)
-		if err != nil {
-			return nil, fmt.Errorf("--fixed %s: %w", name, err)
-		}
-		out = append(out, credFlag{name: name, ref: ref})
-	}
-	return out, nil
-}
-
-func safeName(s string) string {
-	if len(s) > 40 {
-		s = s[:40] + "…"
-	}
-	return s
-}
-
-// chooseBaseURL picks the pinned base URL. --base-url always wins. Otherwise
-// the spec must declare exactly one absolute server, and no credentials may
-// be configured: a spec's servers[ ] is untrusted, so credentials only ever
-// go to a URL the user typed (SPEC T3).
-func chooseBaseURL(flag string, servers []string, credentials bool) (*url.URL, error) {
-	if flag != "" {
-		return validateBaseURL(flag, "--base-url")
-	}
-	servers = collapseSchemeVariants(servers)
-	switch {
-	case len(servers) == 0:
-		return nil, errors.New("the spec declares no server; pass --base-url")
-	case len(servers) > 1:
-		return nil, fmt.Errorf("the spec declares %d servers (%s); pass --base-url to choose one", len(servers), listServers(servers))
-	}
-	s := servers[0]
-	u, err := validateBaseURL(s, "the spec's server")
-	if err != nil {
-		return nil, fmt.Errorf("%w; pass --base-url", err)
-	}
-	if credentials {
-		return nil, fmt.Errorf("credentials are configured, so pass --base-url explicitly: the spec's server (%s) is not trusted to receive them", listServers(servers))
-	}
-	return u, nil
-}
-
-// collapseSchemeVariants drops exact duplicates and, when the remaining
-// servers are the same host and path differing only in http vs https (a
-// Swagger 2.0 `schemes: [https, http]`), keeps just the https one. That
-// choice never sends anything to a new origin. Anything else is returned
-// unchanged, so run still never guesses between real alternatives.
-func collapseSchemeVariants(servers []string) []string {
-	uniq := slices.Compact(slices.Sorted(slices.Values(servers)))
-	if len(uniq) != 2 {
-		return uniq
-	}
-	a, errA := url.Parse(uniq[0])
-	b, errB := url.Parse(uniq[1])
-	if errA != nil || errB != nil || a.Host != b.Host || a.Path != b.Path ||
-		a.RawQuery != b.RawQuery || a.Fragment != b.Fragment || a.User.String() != b.User.String() {
-		return uniq
-	}
-	switch {
-	case a.Scheme == "http" && b.Scheme == "https":
-		return uniq[1:]
-	case a.Scheme == "https" && b.Scheme == "http":
-		return uniq[:1]
-	}
-	return uniq
-}
-
-func validateBaseURL(raw, what string) (*url.URL, error) {
-	shown := naming.CleanText(raw, 120)
-	u, err := url.Parse(raw)
-	switch {
-	case err != nil:
-		return nil, fmt.Errorf("%s %q is not a valid URL", what, shown)
-	case u.Scheme != "http" && u.Scheme != "https":
-		return nil, fmt.Errorf("%s %q must be an absolute http(s) URL", what, shown)
-	case u.Host == "":
-		return nil, fmt.Errorf("%s %q has no host", what, shown)
-	case u.User != nil:
-		return nil, fmt.Errorf("%s must not contain credentials", what)
-	case u.RawQuery != "" || u.Fragment != "":
-		return nil, fmt.Errorf("%s %q must not have a query or fragment", what, shown)
-	}
-	return u, nil
-}
-
-func listServers(servers []string) string {
-	shown := make([]string, 0, min(len(servers), 3))
-	for _, s := range servers[:min(len(servers), 3)] {
-		shown = append(shown, naming.CleanText(s, 80))
-	}
-	if len(servers) > 3 {
-		shown = append(shown, "…")
-	}
-	return strings.Join(shown, ", ")
-}
-
-// selectTools keeps the tools the mode could run, narrowed by tags, methods
-// and paths. A path filter with *, ? or [ is a glob, otherwise a prefix.
-func selectTools(all []model.Tool, mode policy.Mode, tags, methods, paths []string) []model.Tool {
-	var out []model.Tool
-	for _, t := range all {
-		if !policy.Lists(t.Safety, mode) {
-			continue
-		}
-		if len(tags) > 0 && !slices.ContainsFunc(t.Tags, func(tag string) bool {
-			return slices.ContainsFunc(tags, func(want string) bool { return strings.EqualFold(tag, want) })
-		}) {
-			continue
-		}
-		if len(methods) > 0 && !slices.ContainsFunc(methods, func(m string) bool { return strings.EqualFold(m, t.Method) }) {
-			continue
-		}
-		if len(paths) > 0 && !slices.ContainsFunc(paths, func(p string) bool { return pathMatches(p, t.Path) }) {
-			continue
-		}
-		out = append(out, t)
-	}
-	return out
-}
-
-func pathMatches(pattern, p string) bool {
-	if strings.ContainsAny(pattern, "*?[") {
-		ok, err := path.Match(pattern, p)
-		return err == nil && ok
-	}
-	return strings.HasPrefix(p, pattern)
-}
-
-// checkToolCount stops a huge spec from silently flooding the model's
-// context (SPEC §2.4).
-func checkToolCount(tools []model.Tool, maxTools int) error {
-	if len(tools) == 0 {
-		return errors.New("no tools selected: check --mode, --tags, --methods and --paths (read-only mode lists only GET, HEAD and OPTIONS operations)")
-	}
-	if len(tools) <= maxTools {
-		return nil
-	}
-	counts := map[string]int{}
-	for _, t := range tools {
-		for _, tag := range t.Tags {
-			counts[tag]++
-		}
-	}
-	tags := make([]string, 0, len(counts))
-	for tag := range counts {
-		tags = append(tags, tag)
-	}
-	slices.SortFunc(tags, func(a, b string) int {
-		return cmp.Or(cmp.Compare(counts[b], counts[a]), cmp.Compare(a, b))
-	})
-	var hint []string
-	for _, tag := range tags[:min(len(tags), 5)] {
-		hint = append(hint, fmt.Sprintf("%s (%d)", naming.CleanText(tag, 40), counts[tag]))
-	}
-	tagHint := ""
-	if len(hint) > 0 {
-		tagHint = " Most common tags: " + strings.Join(hint, ", ") + "."
-	}
-	return fmt.Errorf("%w: %d tools match, more than --max-tools %d. Narrow the selection with --tags, --methods or --paths, raise --max-tools, or curate a toolset with `plugit add`.%s",
-		errTooManyTools, len(tools), maxTools, tagHint)
-}
+// parseFunc parses untrusted source bytes in the isolate child (isolate.Parse;
+// tests substitute counting or failing fakes). format names the format to
+// use, skipping detection; "" detects.
+type parseFunc func(ctx context.Context, data []byte, format string, opts ingest.Options) (*model.Manifest, error)
 
 type runDeps struct {
 	transport mcp.Transport
 	stderr    io.Writer
 	resolver  *secrets.Resolver
 	keyring   keyringSetter
-	parse     func(ctx context.Context, data []byte, opts openapi.Options) (*model.Manifest, error)
+	parse     parseFunc
 	info      BuildInfo
 }
 
 func newRunCmd(info BuildInfo) *cobra.Command {
 	var f runFlags
 	cmd := &cobra.Command{
-		Use:   "run <spec-url|file>",
+		Use:   "run <spec-url|file|graphql-endpoint>",
 		Short: "Serve a spec as MCP tools on stdio, with no setup (read-only by default)",
 		Long: `Serve a spec's operations as MCP tools on stdio, without saving anything.
 
 Settings come from flags, then PLUGIT_* environment variables (PLUGIT_SPEC,
-PLUGIT_BASE_URL, PLUGIT_PREFIX, PLUGIT_MODE, PLUGIT_TAGS, PLUGIT_METHODS,
+PLUGIT_ENDPOINT, PLUGIT_PREFIX, PLUGIT_MODE, PLUGIT_TAGS, PLUGIT_METHODS,
 PLUGIT_PATHS, PLUGIT_MAX_TOOLS, PLUGIT_TIMEOUT, PLUGIT_ALLOW_PRIVATE,
-PLUGIT_ALLOW_INSECURE,
+PLUGIT_ALLOW_INSECURE, PLUGIT_FORMAT, PLUGIT_INTROSPECT,
 PLUGIT_HEADER, PLUGIT_FIXED), then defaults.
+
+--introspect treats the URL as a GraphQL endpoint: the standard
+introspection query is POSTed there instead of reading a schema file. For
+GraphQL the Authorization --header, if one is given, is the credential,
+sent only to the endpoint; otherwise the first --header is.
 
 Secrets in --header and --fixed must be env: or keyring: references; put the
 real value in the MCP client's env block. When any credential is configured,
---base-url is required: a spec's servers entry is never trusted with it.`,
+--endpoint is required: a spec's servers entry is never trusted with it.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 {
 				f.spec = args[0]
 			}
 			changed := map[string]bool{}
-			for _, n := range []string{"base-url", "prefix", "mode", "header", "fixed", "tags", "methods", "paths", "max-tools", "timeout", "allow-private", "allow-insecure"} {
+			for _, n := range []string{"endpoint", "prefix", "mode", "header", "fixed", "tags", "methods", "paths", "max-tools", "timeout", "allow-private", "allow-insecure", "format", "introspect"} {
 				changed[n] = cmd.Flags().Changed(n)
 			}
 			s, err := resolveRunSettings(f, changed, os.LookupEnv)
@@ -415,7 +99,7 @@ real value in the MCP client's env block. When any credential is configured,
 		},
 	}
 	fl := cmd.Flags()
-	fl.StringVar(&f.baseURL, "base-url", "", "pinned API base URL (required when the spec has no single absolute server, or when credentials are set)")
+	fl.StringVar(&f.baseURL, "endpoint", "", "pinned API base URL (required when the spec has no single absolute server, or when credentials are set)")
 	fl.StringVar(&f.prefix, "prefix", "", "tool name prefix, e.g. pets -> pets_listPets")
 	fl.StringVar(&f.mode, "mode", string(policy.ReadOnly), "policy mode: read-only, confirm-writes or full")
 	fl.StringArrayVar(&f.headers, "header", nil, "credential header Name=env:VAR or Name=keyring:service/key (repeatable)")
@@ -426,6 +110,8 @@ real value in the MCP client's env block. When any credential is configured,
 	fl.IntVar(&f.maxTools, "max-tools", defaultMaxTools, "refuse to start if more tools than this are selected")
 	fl.DurationVar(&f.timeout, "timeout", httpx.DefaultTimeout, "per-request timeout")
 	fl.BoolVar(&f.allowPrivate, "allow-private", false, "allow loopback and private-network addresses (spec fetch and API calls)")
+	fl.StringVar(&f.format, "format", "", "source format, skipping detection: openapi, postman, graphql-sdl or graphql-introspection")
+	fl.BoolVar(&f.introspect, "introspect", false, "GraphQL: the URL is the endpoint; fetch the schema there by introspection")
 	fl.BoolVar(&f.allowInsecure, "allow-insecure", false, "accept what plugit otherwise refuses: credentials over plain http to a remote host, and spec paths with spaces, '..' or backslashes")
 	return cmd
 }
@@ -442,62 +128,94 @@ func runServe(ctx context.Context, s runSettings, d runDeps) error {
 		return err
 	}
 	credentials := len(headers) > 0 || slices.ContainsFunc(fixedFlags, func(c credFlag) bool { return c.ref.IsSecret() })
+	userAgent := "plugit/" + d.info.withDefaults().Version
+	opts := ingest.Options{Prefix: s.prefix, AllowUnsafePaths: s.allowInsecure}
+	checkTransport := func(u *url.URL) error {
+		if !credentials {
+			return nil
+		}
+		if err := config.CheckCredentialTransport(u.String(), s.allowInsecure); err != nil {
+			return fmt.Errorf("--endpoint %w; to send it over http anyway, pass --allow-insecure", err)
+		}
+		return nil
+	}
 
-	sp, err := spec.New(spec.Options{AllowPrivate: s.allowPrivate}).Load(ctx, s.spec)
-	if err != nil {
-		return err
-	}
-	m, err := d.parse(ctx, sp.Bytes, openapi.Options{Prefix: s.prefix, AllowUnsafePaths: s.allowInsecure})
-	if err != nil {
-		return err
-	}
-	baseURL, err := chooseBaseURL(s.baseURL, m.Servers, credentials)
-	if err != nil {
-		return err
-	}
-	if credentials {
-		if err := config.CheckCredentialTransport(baseURL.String(), s.allowInsecure); err != nil {
-			return fmt.Errorf("--base-url %w; to send it over http anyway, pass --allow-insecure", err)
+	var (
+		m       *model.Manifest
+		baseURL *url.URL
+		creds   runCredentials
+	)
+	if s.introspect {
+		// The URL is the GraphQL endpoint: pin it, then send the introspection
+		// query there with the credentials.
+		if s.format != "" && s.format != graphql.FormatIntrospection {
+			return fmt.Errorf("--introspect reads an introspection result; --format %s doesn't apply", naming.CleanText(s.format, 40))
+		}
+		if baseURL, err = introspectEndpoint(s.spec, s.baseURL); err != nil {
+			return err
+		}
+		if err := checkTransport(baseURL); err != nil {
+			return err
+		}
+		if creds, err = resolveRunCredentials(headers, fixedFlags, d.resolver, true); err != nil {
+			return err
+		}
+		creds.fixed.userAgent = userAgent
+		raw, err := introspect(ctx, baseURL, creds.cred, creds.fixed, s.allowPrivate, runIntrospectionHint)
+		if err != nil {
+			return err
+		}
+		if m, err = d.parse(ctx, raw, graphql.FormatIntrospection, opts); err != nil {
+			return fmt.Errorf("introspection result from %s: %w", baseURL, err)
+		}
+	} else {
+		sp, err := spec.New(spec.Options{AllowPrivate: s.allowPrivate}).Load(ctx, s.spec)
+		if err != nil {
+			return err
+		}
+		if m, err = d.parse(ctx, sp.Bytes, s.format, opts); err != nil {
+			return err
+		}
+		if baseURL, err = chooseBaseURL(s.baseURL, m.Endpoints, credentials); err != nil {
+			return err
+		}
+		if err := checkTransport(baseURL); err != nil {
+			return err
 		}
 	}
 	selected := selectTools(m.Tools, s.mode, s.tags, s.methods, s.paths)
 	if err := checkToolCount(selected, s.maxTools); err != nil {
 		return err
 	}
-
-	var fixed []proxy.Fixed
-	var hidden []string
-	for _, h := range headers {
-		v, err := d.resolver.Resolve(h.ref)
-		if err != nil {
-			return fmt.Errorf("--header %s: %w", h.name, err)
+	if !s.introspect {
+		if creds, err = resolveRunCredentials(headers, fixedFlags, d.resolver, m.Protocol == model.GraphQL); err != nil {
+			return err
 		}
-		fixed = append(fixed, proxy.Fixed{Name: h.name, In: model.InHeader, Value: v, Secret: true})
-		hidden = append(hidden, h.name)
-	}
-	for _, f := range fixedFlags {
-		v, err := d.resolver.Resolve(f.ref)
-		if err != nil {
-			return fmt.Errorf("--fixed %s: %w", f.name, err)
-		}
-		fixed = append(fixed, proxy.Fixed{Name: f.name, In: model.InQuery, Value: v, Secret: f.ref.IsSecret()})
-		hidden = append(hidden, f.name)
+		creds.fixed.userAgent = userAgent
 	}
 
 	tools := make([]mcpserver.Tool, 0, len(selected))
 	for _, t := range selected {
-		tools = append(tools, mcpserver.Tool{Tool: schema.Prepare(t, schema.Options{Fixed: hidden})})
+		tools = append(tools, mcpserver.Tool{Tool: schema.Prepare(t, schema.Options{Fixed: creds.hidden})})
+	}
+	logger := slog.New(slog.NewTextHandler(d.stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	if m.Protocol == model.GraphQL {
+		if err := checkFixedVariables(tools, creds.fixed, logger); err != nil {
+			return err
+		}
 	}
 
-	target := proxy.Target{BaseURL: baseURL, Fixed: fixed, UserAgent: "plugit/" + d.info.withDefaults().Version}
+	proto, err := resolveProto(m.Protocol, creds.fixed, baseURL)
+	if err != nil {
+		return err
+	}
 	red := redact.New(redact.Options{
-		Secrets:           target.SecretValues(),
-		SecretHeaders:     hidden,
-		SecretQueryParams: hidden,
+		Secrets:           append(creds.cred.SecretValues(), creds.fixed.secretValues()...),
+		SecretHeaders:     creds.hidden,
+		SecretQueryParams: creds.hidden,
 	})
-	logger := slog.New(slog.NewTextHandler(d.stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	logger.Info("plugit run serving",
-		"tools", len(tools), "mode", string(s.mode), "base_url", baseURL.String(),
+		"tools", len(tools), "mode", string(s.mode), "endpoint", baseURL.String(),
 		"spec", red.String(safeLocation(s.spec)), "warnings", len(m.Warnings))
 
 	return mcpserver.Serve(ctx, mcpserver.Config{
@@ -505,11 +223,55 @@ func runServe(ctx context.Context, s runSettings, d runDeps) error {
 		Version:  d.info.withDefaults().Version,
 		Tools:    tools,
 		Mode:     s.mode,
-		Target:   target,
+		Cred:     creds.cred,
+		Endpoint: baseURL,
+		Proto:    proto,
 		Doer:     httpx.NewClient(httpx.Options{AllowPrivate: s.allowPrivate, Timeout: s.timeout}),
 		Redactor: red,
 		Logger:   logger,
 	}, d.transport)
+}
+
+// runCredentials are run's resolved --header and --fixed values: the
+// credential (GraphQL only), the fixed params, and the names to hide from
+// the model and redact by name.
+type runCredentials struct {
+	cred   invoke.Credential
+	fixed  resolvedFixed
+	hidden []string
+}
+
+// resolveRunCredentials resolves --header and --fixed. For REST every
+// header is a fixed header and --fixed goes to the query string, as before.
+// For GraphQL the credential header (credentialHeader: Authorization if
+// given, else the first) is the credential, as plugit add makes it:
+// invoke attaches it only to the pinned endpoint's origin (T8), and an
+// Authorization header (the bearer form SPEC 2.4 documents) can't be a
+// GraphQL fixed header; --fixed values are variables.
+func resolveRunCredentials(headers, fixedFlags []credFlag, res *secrets.Resolver, gql bool) (runCredentials, error) {
+	var rc runCredentials
+	ci := credentialHeader(headers)
+	for i, h := range headers {
+		v, err := res.Resolve(h.ref)
+		if err != nil {
+			return rc, fmt.Errorf("--header %s: %w", h.name, err)
+		}
+		if gql && i == ci {
+			rc.cred = invoke.Credential{Type: string(config.AuthHeader), Header: h.name, Secret: v}
+		} else {
+			rc.fixed.items = append(rc.fixed.items, fixedItem{Name: h.name, In: "header", Value: v, Secret: true})
+		}
+		rc.hidden = append(rc.hidden, h.name)
+	}
+	for _, f := range fixedFlags {
+		v, err := res.Resolve(f.ref)
+		if err != nil {
+			return rc, fmt.Errorf("--fixed %s: %w", f.name, err)
+		}
+		rc.fixed.items = append(rc.fixed.items, fixedItem{Name: f.name, In: "query", Value: v, Secret: f.ref.IsSecret()})
+		rc.hidden = append(rc.hidden, f.name)
+	}
+	return rc, nil
 }
 
 // safeLocation drops userinfo, query and fragment from URL locations.

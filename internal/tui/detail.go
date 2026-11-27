@@ -104,12 +104,12 @@ func (p *Picker) detailBody(w int) []string {
 		nameW = max(nameW, len([]rune(safe(prm.Name))))
 	}
 	for _, prm := range t.Params {
-		cols := []string{fmt.Sprintf("%-8s", prm.In), fmt.Sprintf("%-8s", paramType(prm))}
+		cols := []string{fmt.Sprintf("%-8s", prm.Bind.In), fmt.Sprintf("%-8s", paramType(prm))}
 		if prm.Required {
 			cols = append(cols, "required")
 		}
-		if prm.UpstreamName != "" && prm.UpstreamName != prm.Name {
-			cols = append(cols, "sent as "+safe(prm.UpstreamName))
+		if prm.Bind.Upstream != "" && prm.Bind.Upstream != prm.Name {
+			cols = append(cols, "sent as "+safe(prm.Bind.Upstream))
 		}
 		line := "    " + th.Bold.Render(padRight(safe(prm.Name), nameW)) + "  " + th.Dim.Render(strings.Join(cols, "  "))
 		if prm.Hidden {
@@ -119,8 +119,8 @@ func (p *Picker) detailBody(w int) []string {
 		}
 		add(line)
 	}
-	if t.Body != nil {
-		add("    " + th.Dim.Render("request body: "+safe(t.Body.ContentType)))
+	if t.HTTP != nil && t.HTTP.Body != nil {
+		add("    " + th.Dim.Render("request body: "+safe(t.HTTP.Body.ContentType)))
 	}
 
 	section("Response fields")
@@ -168,7 +168,8 @@ func (p *Picker) detailView() tea.View {
 	w := max(p.width, 20)
 	t := p.finalTool(p.detail.tool)
 	title := th.Accent.Render("✦ ") + th.Title.Render("plugit") + th.Dim.Render(" · tool · ") + th.Title.Render(safe(t.Name))
-	sub := th.method(t.Method).Render(safe(t.Method)) + " " + safe(t.Path)
+	badge, target := describe(p.in.Describe, t)
+	sub := th.method(badge).Render(safe(badge)) + " " + safe(target)
 	lines := th.box(w, th.Border, spread(title, th.pill(p.policyMode), w-4), sub)
 
 	body := p.detailBody(w)

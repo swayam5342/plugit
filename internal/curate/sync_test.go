@@ -23,17 +23,17 @@ func syncFixture() (old, updated *model.Manifest, cfg config.API) {
 	keep := tool("GET", "/pets", "gh_listPets", "pets")
 	changed := tool("GET", "/pets/{id}", "gh_getPet", "pets")
 	gone := tool("DELETE", "/pets/{id}", "gh_deletePet", "pets")
-	old = &model.Manifest{Servers: []string{"https://api.example.test/v1"}, Tools: []model.Tool{keep, changed, gone}}
+	old = &model.Manifest{Endpoints: []string{"https://api.example.test/v1"}, Tools: []model.Tool{keep, changed, gone}}
 
 	changed2 := changed
 	changed2.Description = "Get one pet. Now with more words."
-	changed2.Params = []model.Param{{Name: "id", UpstreamName: "id", In: model.InPath, Required: true, Schema: json.RawMessage(`{"type":"integer"}`)}}
+	changed2.Params = []model.Param{{Name: "id", Bind: model.Binding{Upstream: "id", In: model.InPath}, Required: true, Schema: json.RawMessage(`{"type":"integer"}`)}}
 	changed2.Deprecated = true
 	added := tool("POST", "/pets/{id}/photos", "gh_addPhoto", "pets")
-	updated = &model.Manifest{Servers: []string{"https://evil.example.test"}, Tools: []model.Tool{keep, changed2, added}}
+	updated = &model.Manifest{Endpoints: []string{"https://evil.example.test"}, Tools: []model.Tool{keep, changed2, added}}
 
 	cfg = config.API{
-		BaseURL: "https://api.example.test/v1",
+		Endpoint: "https://api.example.test/v1",
 		Toolsets: map[string]config.Toolset{
 			"default": {Tools: map[string]config.ToolOverride{
 				"GET /pets":         {Name: "list", Description: "List pets.", RateLimit: "5/min"},
@@ -77,16 +77,16 @@ func TestDiffManifests(t *testing.T) {
 	}
 }
 
-// Trailing slashes don't count as a server change, and a base_url the new
+// Trailing slashes don't count as a server change, and an endpoint the new
 // spec still lists is reported as such.
 func TestDiffServersNormalized(t *testing.T) {
-	old := &model.Manifest{Servers: []string{"https://api.example.test/v1/"}}
-	updated := &model.Manifest{Servers: []string{"https://api.example.test/v1", "https://mirror.example.test"}}
-	d := DiffManifests(old, updated, config.API{BaseURL: "https://api.example.test/v1"})
+	old := &model.Manifest{Endpoints: []string{"https://api.example.test/v1/"}}
+	updated := &model.Manifest{Endpoints: []string{"https://api.example.test/v1", "https://mirror.example.test"}}
+	d := DiffManifests(old, updated, config.API{Endpoint: "https://api.example.test/v1"})
 	if !d.ServersChanged || !d.BaseURLListed {
 		t.Errorf("changed=%v listed=%v", d.ServersChanged, d.BaseURLListed)
 	}
-	if DiffManifests(old, &model.Manifest{Servers: []string{"https://api.example.test/v1"}}, config.API{}).ServersChanged {
+	if DiffManifests(old, &model.Manifest{Endpoints: []string{"https://api.example.test/v1"}}, config.API{}).ServersChanged {
 		t.Error("a trailing slash counted as a change")
 	}
 }
@@ -132,5 +132,34 @@ func TestDiffAddedAutoSelected(t *testing.T) {
 	}
 	if got := d.Added[0].Listed; len(got) != 0 {
 		t.Errorf("listed = %v", got)
+	}
+}
+
+// A GraphQL tool whose generated document changed (a field the server
+// removed) is a change, and each toolset's response_fields that no longer
+// compile against the new schema are their own diff entries, sorted.
+func TestDiffManifestsGraphQLDocumentsAndFieldErrors(t *testing.T) {
+	op := func(doc string) model.Tool {
+		return model.Tool{Key: "query user", Name: "user", GraphQL: &model.GraphQLOp{Operation: "query", Field: "user", Document: doc}}
+	}
+	old := &model.Manifest{Protocol: model.GraphQL, Tools: []model.Tool{op("query PlugIt_user { user { id name } }")}}
+	updated := &model.Manifest{Protocol: model.GraphQL, Tools: []model.Tool{op("query PlugIt_user { user { id } }")},
+		GraphQL: &model.GraphQLSchema{OverrideErrors: map[string]map[string]string{
+			"lean":    {"query user": `response_fields path "name": no field`},
+			"default": {"query user": `response_fields path "name": no field`},
+		}}}
+	d := DiffManifests(old, updated, config.API{})
+	if len(d.Changed) != 1 || !slices.Contains(d.Changed[0].What, "document") {
+		t.Errorf("changed = %+v, want query user with a document change", d.Changed)
+	}
+	want := []FieldError{
+		{Toolset: "default", Key: "query user", Err: `response_fields path "name": no field`},
+		{Toolset: "lean", Key: "query user", Err: `response_fields path "name": no field`},
+	}
+	if !reflect.DeepEqual(d.FieldErrors, want) {
+		t.Errorf("FieldErrors = %+v, want %+v", d.FieldErrors, want)
+	}
+	if d.Empty() {
+		t.Error("a diff with field errors is not empty")
 	}
 }

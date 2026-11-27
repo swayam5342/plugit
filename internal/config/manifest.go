@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/swayam5342/plugit/internal/model"
 )
@@ -31,6 +32,77 @@ type CacheKey struct {
 	Prefix      string `json:"prefix"`
 	Parser      string `json:"parser"`
 	UnsafePaths bool   `json:"unsafe_paths,omitempty"`
+
+	// GraphQL selection settings (zero for every other protocol, so a REST
+	// key is unchanged from before they existed).
+	SelectionDepth int `json:"selection_depth,omitempty"`
+	MaxFields      int `json:"max_fields,omitempty"`
+	// ResponseFieldsSHA256 hashes every toolset's GraphQL response_fields,
+	// which the parse child compiles into the manifest's override documents
+	// (empty when there are none, and always for REST).
+	ResponseFieldsSHA256 string `json:"response_fields_sha256,omitempty"`
+}
+
+// CacheKey is the manifest cache key for c's spec (sha256 specSHA256)
+// parsed by plugit build parser. It holds every config value that changes
+// the generated tools; for GraphQL that includes the effective selection
+// settings, so an absent graphql: section and the explicit defaults match.
+func (c *API) CacheKey(specSHA256, parser string) CacheKey {
+	k := CacheKey{SpecSHA256: specSHA256, Prefix: c.Prefix, Parser: parser, UnsafePaths: c.Network.AllowInsecure}
+	if model.Protocol(c.Protocol) == model.GraphQL {
+		g := c.GraphQLSettings()
+		k.SelectionDepth, k.MaxFields = g.SelectionDepth, g.MaxFields
+		if rf := c.GraphQLResponseFields(); rf != nil {
+			b, _ := json.Marshal(rf) // a map of string slices always encodes; map keys come out sorted
+			sum := sha256.Sum256(b)
+			k.ResponseFieldsSHA256 = hex.EncodeToString(sum[:])
+		}
+	}
+	return k
+}
+
+// GraphQLResponseFields is what the parse child compiles into a GraphQL
+// manifest's override documents: toolset -> tool key -> response_fields,
+// for every toolset entry that lists any. REST's [*] list markers are
+// stripped (a GraphQL selection follows lists by itself, so items[*].id is
+// items.id). It is nil for a non-GraphQL config or when no entry lists any.
+func (c *API) GraphQLResponseFields() map[string]map[string][]string {
+	if model.Protocol(c.Protocol) != model.GraphQL {
+		return nil
+	}
+	var out map[string]map[string][]string
+	for ts, set := range c.Toolsets {
+		for key, o := range set.Tools {
+			if len(o.ResponseFields) == 0 {
+				continue
+			}
+			paths := make([]string, 0, len(o.ResponseFields))
+			for _, p := range o.ResponseFields {
+				paths = append(paths, stripListMarkers(p))
+			}
+			if out == nil {
+				out = map[string]map[string][]string{}
+			}
+			if out[ts] == nil {
+				out[ts] = map[string][]string{}
+			}
+			out[ts][key] = paths
+		}
+	}
+	return out
+}
+
+// stripListMarkers drops jsonpick's [*] segment suffixes and the empty
+// segments they leave ("[*].id" -> "id", "items[*].id" -> "items.id").
+func stripListMarkers(path string) string {
+	segs := strings.Split(path, ".")
+	out := segs[:0]
+	for _, seg := range segs {
+		if seg = strings.TrimSuffix(seg, "[*]"); seg != "" {
+			out = append(out, seg)
+		}
+	}
+	return strings.Join(out, ".")
 }
 
 type manifestFile struct {

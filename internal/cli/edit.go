@@ -69,7 +69,7 @@ func editAPI(ctx context.Context, p config.Paths, name, toolset string, d addDep
 		current.Tools = map[string]config.ToolOverride{}
 	}
 	res, err := d.pick(ctx, pickInput{api: name, tools: tools, prefix: cfg.Prefix, mode: cfg.PolicyMode(), selected: current,
-		lint: pickerLint(*cfg, tsName, m.Tools)})
+		lint: pickerLint(*cfg, tsName, m.Tools), proto: m.Protocol})
 	if errors.Is(err, tui.ErrCancelled) {
 		_, err := fmt.Fprintln(d.out, "Cancelled; nothing saved.")
 		return err
@@ -87,7 +87,12 @@ func editAPI(ctx context.Context, p config.Paths, name, toolset string, d addDep
 	if err != nil {
 		return err
 	}
+	before := *cfg
+	before.Toolsets = maps.Clone(cfg.Toolsets)
 	cfg.Toolsets[tsName] = ts
+	if err := recompileManifest(ctx, p, &before, cfg, m, tsName, d); err != nil {
+		return err
+	}
 	if err := config.SaveAPI(p, cfg); err != nil {
 		return err
 	}
@@ -98,6 +103,36 @@ func editAPI(ctx context.Context, p config.Paths, name, toolset string, d addDep
 	_, err = fmt.Fprintf(d.out, "Saved toolset %s of %s: %d tools, %s tokens%s. Restart your MCP client to pick up the change.\n",
 		tsName, name, len(sel), tokens.Format(tokens.Total(sel)), modeNote)
 	return err
+}
+
+// recompileManifest re-parses the snapshot in the isolate child when an edit
+// changed what the manifest is built from (for GraphQL, the toolsets'
+// response_fields) and rewrites the cache, so the next serve starts without
+// parsing. response_fields in the edited toolset that don't compile are an
+// error, before anything is saved; other toolsets' are warnings on stderr.
+func recompileManifest(ctx context.Context, p config.Paths, before, after *config.API, m *model.Manifest, toolset string, d addDeps) error {
+	snapPath, err := p.SpecSnapshot(after.Name)
+	if err != nil {
+		return err
+	}
+	data, sum, err := config.ReadSnapshot(snapPath)
+	if err != nil {
+		return err
+	}
+	parser := parserID(d.info)
+	key := after.CacheKey(sum, parser)
+	if key == before.CacheKey(sum, parser) {
+		return nil
+	}
+	m, err = compileResponseFields(ctx, d.parse, after, data, m, []string{toolset}, d.stderr)
+	if err != nil {
+		return err
+	}
+	cachePath, err := p.Manifest(after.Name)
+	if err != nil {
+		return err
+	}
+	return config.WriteManifest(cachePath, key, m)
 }
 
 // hiddenParams are the parameter names plugit fills itself: the auth

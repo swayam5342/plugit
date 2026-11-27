@@ -18,16 +18,29 @@ func NewOpKey(method, path string) OpKey {
 	return OpKey(strings.ToUpper(method) + " " + path)
 }
 
-// Method returns the HTTP method part of k.
+// Method returns the HTTP method part of a REST key, or "" for a non-REST
+// key (callers use Tool.HTTP once the protocol is known).
 func (k OpKey) Method() string {
-	m, _, _ := strings.Cut(string(k), " ")
+	m, p, ok := strings.Cut(string(k), " ")
+	if !ok || !isRESTForm(m, p) {
+		return ""
+	}
 	return m
 }
 
-// Path returns the path template part of k.
+// Path returns the path-template part of a REST key, or "" for a non-REST key.
 func (k OpKey) Path() string {
-	_, p, _ := strings.Cut(string(k), " ")
+	m, p, ok := strings.Cut(string(k), " ")
+	if !ok || !isRESTForm(m, p) {
+		return ""
+	}
 	return p
+}
+
+// isRESTForm reports whether "<m> <p>" is a REST key: an upper-case method
+// and a path starting with "/" (SPEC §8.1.4).
+func isRESTForm(m, p string) bool {
+	return m != "" && m == strings.ToUpper(m) && strings.HasPrefix(p, "/")
 }
 
 // Safety classifies what calling a tool can do.
@@ -54,6 +67,16 @@ func SafetyForMethod(method string) Safety {
 }
 
 var safetyNames = [...]string{ReadOnly: "read-only", Write: "write", Destructive: "destructive"}
+
+// ParseSafety parses a Safety name as produced by Safety.String.
+func ParseSafety(s string) (Safety, bool) {
+	for i, n := range safetyNames {
+		if n == s {
+			return Safety(i), true
+		}
+	}
+	return 0, false
+}
 
 func (s Safety) String() string {
 	if s >= 0 && int(s) < len(safetyNames) {
@@ -83,7 +106,8 @@ func (s *Safety) UnmarshalJSON(b []byte) error {
 // Location is where an argument is sent in the HTTP request.
 type Location int
 
-// Argument locations.
+// Argument locations. The first six are REST; the rest belong to other
+// protocols (SPEC §3.4 P3 Binding set).
 const (
 	InPath Location = iota
 	InQuery
@@ -91,10 +115,14 @@ const (
 	InCookie
 	InBody
 	InBodyRoot
+	InVariable // GraphQL
+	InField    // gRPC
+	InMetadata // gRPC
 )
 
 var locationNames = [...]string{
 	InPath: "path", InQuery: "query", InHeader: "header", InCookie: "cookie", InBody: "body", InBodyRoot: "bodyRoot",
+	InVariable: "variable", InField: "field", InMetadata: "metadata",
 }
 
 func (l Location) String() string {
@@ -131,31 +159,64 @@ func ParseLocation(s string) (Location, bool) {
 	return 0, false
 }
 
-// Tool is one API operation exposed (or exposable) as an MCP tool.
+// Tool is one API operation exposed (or exposable) as an MCP tool. The
+// fields above the line are shared by every protocol; exactly one of HTTP,
+// GraphQL, GRPC is set, matching Manifest.Protocol (SPEC §3.4 P2).
 type Tool struct {
 	Key         OpKey    `json:"key"`
 	ID          string   `json:"id"`
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
-	Method      string   `json:"method"`
-	Path        string   `json:"path"`
 	Params      []Param  `json:"params,omitempty"`
-	Body        *Body    `json:"body,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
 	Deprecated  bool     `json:"deprecated,omitempty"`
 	Safety      Safety   `json:"safety"`
+	Idempotent  bool     `json:"idempotent,omitempty"`
 	Issues      []Issue  `json:"issues,omitempty"`
+
+	HTTP    *HTTPOp    `json:"http,omitempty"`
+	GraphQL *GraphQLOp `json:"graphql,omitempty"`
+	GRPC    *GRPCOp    `json:"grpc,omitempty"`
+}
+
+// HTTPOp is everything REST-specific about a tool.
+type HTTPOp struct {
+	Method string `json:"method"`
+	Path   string `json:"path"`
+	Body   *Body  `json:"body,omitempty"`
+}
+
+// GraphQLOp is everything GraphQL-specific about a tool (M8).
+type GraphQLOp struct {
+	Operation string   `json:"operation"`
+	Field     string   `json:"field"`
+	Document  string   `json:"document"`
+	Selection []string `json:"selection,omitempty"`
+}
+
+// GRPCOp is everything gRPC-specific about a tool (M11).
+type GRPCOp struct {
+	Service string `json:"service"`
+	Method  string `json:"method"`
+	Input   string `json:"input"`
+	Output  string `json:"output"`
 }
 
 // Param is one argument of a tool.
 type Param struct {
-	Name         string          `json:"name"`
-	UpstreamName string          `json:"upstreamName"`
-	In           Location        `json:"in"`
-	Required     bool            `json:"required,omitempty"`
-	Schema       json.RawMessage `json:"schema"`
-	Desc         string          `json:"desc,omitempty"`
-	Hidden       bool            `json:"hidden,omitempty"`
+	Name     string          `json:"name"`
+	Bind     Binding         `json:"bind"`
+	Required bool            `json:"required,omitempty"`
+	Schema   json.RawMessage `json:"schema"`
+	Desc     string          `json:"desc,omitempty"`
+	Hidden   bool            `json:"hidden,omitempty"`
+}
+
+// Binding is where a param's value goes on the wire; never guessed at call
+// time (SPEC §3.4). In is a validated location from the per-protocol set.
+type Binding struct {
+	In       Location `json:"in"`
+	Upstream string   `json:"upstream"`
 }
 
 // Body is a tool's request body.
@@ -183,6 +244,9 @@ const (
 	IssueBodyNested     IssueKind = "body-nested"
 	IssueUnsupported    IssueKind = "unsupported"
 	IssueHiddenText     IssueKind = "hidden-text"
+	// IssueSelectionTruncated: a GraphQL default selection hit
+	// graphql.max_fields (lint L020).
+	IssueSelectionTruncated IssueKind = "selection-truncated"
 )
 
 // Issue is a problem found while ingesting one tool.
@@ -191,12 +255,55 @@ type Issue struct {
 	Detail string    `json:"detail"`
 }
 
-// Manifest is the result of ingesting one spec.
+// Manifest is the result of ingesting one source (SPEC §3.4 P2).
 type Manifest struct {
+	Protocol    Protocol `json:"protocol"`
+	Format      string   `json:"format,omitempty"`
 	Title       string   `json:"title"`
 	Version     string   `json:"version"`
 	SpecVersion string   `json:"specVersion"`
-	Servers     []string `json:"servers,omitempty"`
+	Endpoints   []string `json:"endpoints,omitempty"`
 	Tools       []Tool   `json:"tools"`
 	Warnings    []string `json:"warnings,omitempty"`
+	// Unsupported lists every source operation that became no tool, uncapped
+	// (Warnings stop at a cap and are for people); lint reports each as L013.
+	Unsupported []UnsupportedOp `json:"unsupported,omitempty"`
+	GraphQL     *GraphQLSchema  `json:"graphql,omitempty"`
+	GRPC        *GRPCSchema     `json:"grpc,omitempty"`
 }
+
+// UnsupportedOp is a source operation that became no tool: its operation
+// type ("subscription", "query", "mutation"), its root field name and why.
+type UnsupportedOp struct {
+	Operation string `json:"operation"`
+	Field     string `json:"field"`
+	Reason    string `json:"reason"`
+}
+
+// UnsupportedOp reasons.
+const (
+	// UnsupportedSubscription: subscriptions aren't supported yet.
+	UnsupportedSubscription = "subscription"
+	// UnsupportedInvalidDocument: the generated document failed validation.
+	UnsupportedInvalidDocument = "invalid-document"
+)
+
+// GraphQLSchema is the derived GraphQL data serve and sync need, cached in
+// manifest.json so serve never parses a schema (SPEC §3.6, no migration).
+// It holds no copy of the schema: sync re-validates by parsing the new source
+// in the child. OverrideDocs maps toolset -> tool key -> the operation document compiled from that
+// toolset's response_fields, and OverrideSelections the same keys -> the
+// dotted response paths that document selects (GraphQLOp.Selection for the
+// served tool). OverrideErrors maps toolset -> tool key -> why
+// that toolset's response_fields didn't compile (a cleaned message naming
+// the path): it is recorded, not fatal, so sync can show it as a diff entry,
+// add and edit refuse it, and serve refuses to start with it.
+type GraphQLSchema struct {
+	OverrideDocs       map[string]map[string]string   `json:"overrideDocs,omitempty"`
+	OverrideSelections map[string]map[string][]string `json:"overrideSelections,omitempty"`
+	OverrideErrors     map[string]map[string]string   `json:"overrideErrors,omitempty"`
+}
+
+// GRPCSchema holds the trimmed descriptor set gRPC tools need (M11); an
+// empty placeholder until then.
+type GRPCSchema struct{}

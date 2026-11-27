@@ -15,11 +15,11 @@ import (
 
 func tryTool() model.Tool {
 	return model.Tool{
-		Key: "GET /pets/{id}", Name: "pp_get_pet", Description: "Returns a single pet.", Method: "GET", Path: "/pets/{id}",
+		Key: "GET /pets/{id}", Name: "pp_get_pet", Description: "Returns a single pet.", HTTP: &model.HTTPOp{Method: "GET", Path: "/pets/{id}"},
 		Params: []model.Param{
-			{Name: "id", UpstreamName: "id", In: model.InPath, Required: true, Schema: json.RawMessage(`{"type":"string"}`), Desc: "The pet's ID"},
-			{Name: "verbose", UpstreamName: "verbose", In: model.InQuery, Schema: json.RawMessage(`{"type":"boolean"}`)},
-			{Name: "X-Api-Key", UpstreamName: "X-Api-Key", In: model.InHeader, Hidden: true, Schema: json.RawMessage(`{}`)},
+			{Name: "id", Bind: model.Binding{Upstream: "id", In: model.InPath}, Required: true, Schema: json.RawMessage(`{"type":"string"}`), Desc: "The pet's ID"},
+			{Name: "verbose", Bind: model.Binding{Upstream: "verbose", In: model.InQuery}, Schema: json.RawMessage(`{"type":"boolean"}`)},
+			{Name: "X-Api-Key", Bind: model.Binding{Upstream: "X-Api-Key", In: model.InHeader}, Hidden: true, Schema: json.RawMessage(`{}`)},
 		},
 	}
 }
@@ -63,6 +63,17 @@ func typeInto(m *TryIt, s string) {
 }
 
 func ctrlS() tea.KeyPressMsg { return tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl} }
+
+func TestTryItUsesProtocolDescribe(t *testing.T) {
+	m := NewTryIt(TryInput{
+		API: "pets", Tool: tryTool(), Mode: policy.ReadOnly,
+		Describe: func(model.Tool) (string, string) { return "QRY", "svc.v1/Get" },
+	})
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if v := tryView(m); !strings.Contains(v, "QRY") || !strings.Contains(v, "svc.v1/Get") {
+		t.Errorf("try-it subtitle should show the protocol badge/target from Describe:\n%s", v)
+	}
+}
 
 func TestTryItForm(t *testing.T) {
 	m, _ := newTryTest("", TryResult{})

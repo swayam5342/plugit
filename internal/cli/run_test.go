@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -28,7 +29,7 @@ func TestRunSettingsDefaults(t *testing.T) {
 
 func TestRunSettingsPrecedence(t *testing.T) {
 	e := env(map[string]string{
-		"PLUGIT_SPEC": "from-env.json", "PLUGIT_BASE_URL": "https://env.example.test",
+		"PLUGIT_SPEC": "from-env.json", "PLUGIT_ENDPOINT": "https://env.example.test",
 		"PLUGIT_PREFIX": "envp", "PLUGIT_MODE": "full", "PLUGIT_MAX_TOOLS": "7",
 		"PLUGIT_TIMEOUT": "5s", "PLUGIT_ALLOW_PRIVATE": "true", "PLUGIT_ALLOW_INSECURE": "true", "PLUGIT_TAGS": "a,b",
 	})
@@ -42,7 +43,7 @@ func TestRunSettingsPrecedence(t *testing.T) {
 	}
 
 	f := runFlags{spec: "flag.json", baseURL: "https://flag.example.test", mode: "read-only", maxTools: 3, tags: []string{"c"}}
-	s, err = resolveRunSettings(f, map[string]bool{"base-url": true, "mode": true, "max-tools": true, "tags": true}, e)
+	s, err = resolveRunSettings(f, map[string]bool{"endpoint": true, "mode": true, "max-tools": true, "tags": true}, e)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,14 +165,14 @@ func TestChooseBaseURL(t *testing.T) {
 
 func TestChooseBaseURLExplainsCredentialRule(t *testing.T) {
 	_, err := chooseBaseURL("", []string{"https://attacker.example.test"}, true)
-	if err == nil || !strings.Contains(err.Error(), "--base-url") || !strings.Contains(err.Error(), "attacker.example.test") {
+	if err == nil || !strings.Contains(err.Error(), "--endpoint") || !strings.Contains(err.Error(), "attacker.example.test") {
 		t.Errorf("err = %v", err)
 	}
 }
 
 func mtool(key model.OpKey, tags ...string) model.Tool {
 	return model.Tool{Key: key, Name: strings.NewReplacer(" ", "_", "/", "_", "{", "", "}", "").Replace(string(key)),
-		Method: key.Method(), Path: key.Path(), Tags: tags, Safety: model.SafetyForMethod(key.Method())}
+		HTTP: &model.HTTPOp{Method: key.Method(), Path: key.Path()}, Tags: tags, Safety: model.SafetyForMethod(key.Method())}
 }
 
 func keys(ts []model.Tool) []string {
@@ -233,5 +234,36 @@ func TestMaxToolsGuard(t *testing.T) {
 	}
 	if err := checkToolCount(nil, 40); err == nil {
 		t.Error("zero tools must be an error")
+	}
+}
+
+// The PLUGIT_* variables plugit run --help lists are exactly the ones
+// resolveRunSettings reads (the M7 rename made PLUGIT_BASE_URL
+// PLUGIT_ENDPOINT).
+func TestRunHelpListsTheEnvVarsItReads(t *testing.T) {
+	read := map[string]bool{}
+	lookup := func(k string) (string, bool) {
+		read[k] = true
+		if k == "PLUGIT_SPEC" {
+			return "api.json", true
+		}
+		return "", false
+	}
+	if _, err := resolveRunSettings(runFlags{}, nil, lookup); err != nil {
+		t.Fatal(err)
+	}
+	listed := map[string]bool{}
+	for _, v := range regexp.MustCompile(`PLUGIT_[A-Z_]+`).FindAllString(newRunCmd(BuildInfo{}).Long, -1) {
+		listed[strings.TrimRight(v, "_")] = true
+	}
+	for k := range read {
+		if !listed[k] {
+			t.Errorf("run reads %s, but --help doesn't list it", k)
+		}
+	}
+	for k := range listed {
+		if !read[k] {
+			t.Errorf("--help lists %s, but run never reads it", k)
+		}
 	}
 }

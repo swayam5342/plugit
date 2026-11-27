@@ -18,9 +18,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/swayam5342/plugit/internal/httpx"
+	"github.com/swayam5342/plugit/internal/invoke"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/policy"
-	"github.com/swayam5342/plugit/internal/proxy"
 	"github.com/swayam5342/plugit/internal/redact"
 	"github.com/swayam5342/plugit/internal/schema"
 )
@@ -29,19 +29,20 @@ const secret = "test-token-123"
 
 func tool(key model.OpKey, name string, params ...model.Param) model.Tool {
 	return schema.Prepare(model.Tool{
-		Key: key, Name: name, Method: key.Method(), Path: key.Path(),
-		Description: "desc of " + name, Safety: model.SafetyForMethod(key.Method()), Params: params,
+		Key: key, Name: name, HTTP: &model.HTTPOp{Method: key.Method(), Path: key.Path()},
+		Description: "desc of " + name, Safety: model.SafetyForMethod(key.Method()),
+		Idempotent: model.IdempotentForMethod(key.Method()), Params: params,
 	}, schema.Options{})
 }
 
 func qparam(name string, required bool, s string) model.Param {
-	return model.Param{Name: name, UpstreamName: name, In: model.InQuery, Required: required, Schema: json.RawMessage(s)}
+	return model.Param{Name: name, Bind: model.Binding{Upstream: name, In: model.InQuery}, Required: required, Schema: json.RawMessage(s)}
 }
 
 var (
 	listPets  = tool("GET /pets", "listPets", qparam("limit", false, `{"type":"integer","maximum":100}`))
 	createPet = tool("POST /pets", "createPet")
-	deletePet = tool("DELETE /pets/{id}", "deletePet", model.Param{Name: "id", UpstreamName: "id", In: model.InPath, Required: true, Schema: json.RawMessage(`{"type":"string"}`)})
+	deletePet = tool("DELETE /pets/{id}", "deletePet", model.Param{Name: "id", Bind: model.Binding{Upstream: "id", In: model.InPath}, Required: true, Schema: json.RawMessage(`{"type":"string"}`)})
 	headPets  = tool("HEAD /pets", "headPets")
 )
 
@@ -109,7 +110,7 @@ func setupFull(t *testing.T, cfg Config, upstream http.HandlerFunc, opts *mcp.Cl
 		cfg.Doer = httpx.NewClient(httpx.Options{AllowPrivate: true})
 	}
 	if cfg.Redactor == nil {
-		cfg.Redactor = redact.New(redact.Options{Secrets: cfg.Target.SecretValues()})
+		cfg.Redactor = redact.New(redact.Options{Secrets: append(cfg.Cred.SecretValues(), cfg.Target.SecretValues()...)})
 	}
 	cfg.Logger = slog.New(slog.NewTextHandler(r.logs, nil))
 	if cfg.Name == "" {
@@ -311,7 +312,7 @@ func (p *panicDoer) Do(req *http.Request) (*http.Response, error) {
 
 func TestPanicIsRecoveredAsToolError(t *testing.T) {
 	r := setup(t, Config{Tools: served(listPets), Mode: policy.ReadOnly, Doer: &panicDoer{},
-		Target: proxy.Target{Auth: proxy.Auth{Type: proxy.AuthBearer, Secret: secret}}}, nil)
+		Cred: invoke.Credential{Type: "bearer", Secret: secret}}, nil)
 	res, err := r.call(t, "listPets", map[string]any{})
 	if err != nil {
 		t.Fatal(err)
@@ -334,7 +335,7 @@ func TestSecretsNeverReachResultsOrLogs(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":"bad token ` + r.Header.Get("Authorization") + `"}`))
 	}
 	r := setup(t, Config{Tools: served(listPets), Mode: policy.ReadOnly,
-		Target: proxy.Target{Auth: proxy.Auth{Type: proxy.AuthBearer, Secret: secret}}}, echo)
+		Cred: invoke.Credential{Type: "bearer", Secret: secret}}, echo)
 	res, err := r.call(t, "listPets", map[string]any{"limit": 1})
 	if err != nil {
 		t.Fatal(err)

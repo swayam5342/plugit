@@ -3,4 +3,4 @@
 *.gif binary
 # Pinned specs and goldens are byte-exact test inputs: never convert line endings.
 testdata/specs/** -text
-internal/*/testdata/golden/** -text
+testdata/golden/** -text

@@ -1,0 +1,22 @@
+# Hostile: type cycles (T18, SPEC 6.3). Object types that reach themselves
+# directly, through each other, through lists and through a union; input
+# objects that do the same. Building must terminate with every cap holding:
+# the selection stops at selection_depth and max_fields, argument schemas at
+# the depth cap and node budget, and every document validates.
+
+interface Node { id: ID! next: Node }
+
+type A implements Node { id: ID! next: Node self: A b: B many: [A!]! any: AB }
+type B implements Node { id: ID! next: Node a: A bs: [[B]] }
+union AB = A | B
+
+input Tree { value: Int children: [Tree!] parent: Tree }
+input P { q: Q n: Int }
+input Q { p: P s: String }
+
+type Query {
+  a: A
+  ab: [AB!]!
+  node(id: ID!): Node
+  grow(tree: Tree, p: P, ps: [P!]): A
+}

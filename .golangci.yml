@@ -10,6 +10,7 @@ linters:
     - gosec
     - revive
     - bodyclose
+    - depguard
     - errorlint
     - forbidigo
     - misspell
@@ -18,6 +19,37 @@ linters:
     - unconvert
     - usestdlibvars
   settings:
+    depguard:
+      # T17 (SPEC §5.3): a protocol package only Encode/Decodes — it never dials,
+      # never calls httpx and never resolves a secret. `invoke` does every network
+      # step. Rules are written against the internal/protocol/... prefix so the
+      # P12 package move (Task 10) needs no change here.
+      rules:
+        # Credential handling stays in invoke, cli and config. config parses and
+        # validates secret *references* (keyring:/env:) at load; it never resolves
+        # them. A protocol or pure package must not import secrets at all.
+        secrets:
+          files:
+            - "!**/internal/invoke/**"
+            - "!**/internal/cli/**"
+            - "!**/internal/config/**"
+            - "!$test"
+          deny:
+            - pkg: github.com/swayam5342/plugit/internal/secrets
+              desc: T17 — secrets belong to invoke, cli and config; a protocol or pure package must never touch them
+        # A protocol never opens a connection or makes the call itself.
+        # (The raw "net" dialer is banned by forbidigo + the rest boundary test;
+        # it is not denied here because `net` would prefix-match net/http, which
+        # the Protocol seam needs for *http.Request. A future grpc protocol goes
+        # behind the `grpc` build tag with its own guarded, tested exception.)
+        protocol:
+          files:
+            - "**/internal/protocol/**"
+          deny:
+            - pkg: github.com/swayam5342/plugit/internal/httpx
+              desc: T17 — a protocol must not call httpx; invoke makes the one call
+            - pkg: github.com/swayam5342/plugit/internal/secrets
+              desc: T17 — a protocol must not resolve a secret; invoke attaches credentials
     forbidigo:
       # stdout is reserved for JSON-RPC in `serve` and `run`. Write to an explicit
       # io.Writer (cmd.OutOrStdout(), os.Stderr, a logger) instead.
@@ -26,6 +58,12 @@ linters:
           msg: write to an explicit io.Writer; stdout is reserved for JSON-RPC
         - pattern: ^print(ln)?$
           msg: use log/slog
+        # T17: only internal/httpx may dial or build an HTTP client; invoke owns
+        # the one call. Excluded for internal/httpx below.
+        - pattern: ^net\.Dial.*$
+          msg: T17 — only internal/httpx may dial; invoke owns the one call
+        - pattern: ^http\.(Client|DefaultClient|DefaultTransport).*$
+          msg: T17 — only internal/httpx may build an HTTP client; invoke owns the one call
     gosec:
       excludes:
         - G104 # duplicate of errcheck
@@ -73,6 +111,19 @@ linters:
       # cannot follow. Production code keeps the check.
       - path: _test\.go
         linters: [bodyclose]
+      # Tests drive fake clients against loopback test servers (the same reason
+      # gosec G704/G705 are excluded above): building an http.Client or dialing
+      # in a test is not the T17 production-boundary violation. The fmt.Print*
+      # ban still applies (text scopes this to the T17 dialer/client messages).
+      - path: _test\.go
+        linters: [forbidigo]
+        text: "T17 —"
+      # internal/httpx is the one place allowed to dial and construct the HTTP
+      # client (T17); the forbidigo dialer/client bans do not apply to it. The
+      # fmt.Print* ban still does (text scopes this to the T17 messages).
+      - path: internal/httpx/
+        linters: [forbidigo]
+        text: "T17 —"
 
 formatters:
   enable:

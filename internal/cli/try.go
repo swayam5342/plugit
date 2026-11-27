@@ -18,11 +18,11 @@ import (
 	"golang.org/x/term"
 
 	"github.com/swayam5342/plugit/internal/httpx"
+	"github.com/swayam5342/plugit/internal/invoke"
 	"github.com/swayam5342/plugit/internal/isolate"
 	"github.com/swayam5342/plugit/internal/mcpserver"
 	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/policy"
-	"github.com/swayam5342/plugit/internal/proxy"
 	"github.com/swayam5342/plugit/internal/redact"
 	"github.com/swayam5342/plugit/internal/schema"
 	"github.com/swayam5342/plugit/internal/secrets"
@@ -119,7 +119,8 @@ func tryTool(ctx context.Context, s serveSettings, toolName string, f tryFlags, 
 			}
 		}
 		return d.form(ctx, tui.TryInput{API: a.cfg.Name, Tool: t, Mode: a.cfg.PolicyMode(), Confirm: confirm,
-			Send: func(ctx context.Context, values map[string]string) tui.TryResult { return formSend(ctx, a, st, values) }})
+			Describe: protoDescribe(model.Protocol(a.cfg.Protocol)),
+			Send:     func(ctx context.Context, values map[string]string) tui.TryResult { return formSend(ctx, a, st, values) }})
 	}
 
 	switch dec.Decision {
@@ -130,7 +131,8 @@ func tryTool(ctx context.Context, s serveSettings, toolName string, f tryFlags, 
 			return fmt.Errorf("%s: %s and needs confirmation: run it from a terminal, or pass --yes", t.Name, dec.Reason)
 		}
 		if !ok {
-			if ok, err = d.confirm(fmt.Sprintf("%s (%s %s) %s. Make this call?", t.Name, t.Method, t.Path, dec.Reason)); err != nil {
+			badge, target := describeFor(model.Protocol(a.cfg.Protocol), t)
+			if ok, err = d.confirm(fmt.Sprintf("%s (%s %s) %s. Make this call?", t.Name, badge, target, dec.Reason)); err != nil {
 				return err
 			}
 		}
@@ -154,25 +156,29 @@ func tryTool(ctx context.Context, s serveSettings, toolName string, f tryFlags, 
 
 // callTool validates name=value arguments and makes the call, writing the
 // redacted request to reqOut. Policy has already been checked.
-func callTool(ctx context.Context, a *active, st mcpserver.Tool, kv []string, reqOut io.Writer) (proxy.Result, error) {
+func callTool(ctx context.Context, a *active, st mcpserver.Tool, kv []string, reqOut io.Writer) (invoke.Result, error) {
 	t := st.Tool
 	args, err := parseTryArgs(t, kv)
 	if err != nil {
-		return proxy.Result{}, fmt.Errorf("%s: %w", t.Name, err)
+		return invoke.Result{}, fmt.Errorf("%s: %w", t.Name, err)
 	}
 	raw, err := json.Marshal(args)
 	if err != nil {
-		return proxy.Result{}, fmt.Errorf("%s: %w", t.Name, err)
+		return invoke.Result{}, fmt.Errorf("%s: %w", t.Name, err)
 	}
 	if err := schema.NewValidator(t).Validate(raw); err != nil {
-		return proxy.Result{}, errors.New(a.red.String(t.Name + ": " + err.Error()))
+		return invoke.Result{}, errors.New(a.red.String(t.Name + ": " + err.Error()))
 	}
 	decoded, err := schema.DecodeArgs(raw)
 	if err != nil {
-		return proxy.Result{}, fmt.Errorf("%s: %w", t.Name, err)
+		return invoke.Result{}, fmt.Errorf("%s: %w", t.Name, err)
 	}
 	rec := &printingDoer{next: a.doer, out: reqOut, red: a.red}
-	r := proxy.Call(ctx, rec, t, decoded, a.target, a.red, st.Fields)
+	ir := invoke.Perform(ctx, invoke.Deps{
+		Proto: a.proto, Doer: rec, Cred: a.cred,
+		Endpoint: a.endpoint, Redactor: a.red,
+	}, t, decoded, st.Fields)
+	r := ir
 	if !rec.printed {
 		if _, err := fmt.Fprintln(reqOut, "→ (no request sent)"); err != nil {
 			return r, err

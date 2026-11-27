@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -78,9 +79,9 @@ func TestStringsAndJSON(t *testing.T) {
 }
 
 func TestManifestJSONRoundTrip(t *testing.T) {
-	in := Manifest{Title: "t", SpecVersion: "3.1.0", Tools: []Tool{{
-		Key: "POST /x", Name: "x", Method: "POST", Path: "/x", Safety: Write,
-		Params: []Param{{Name: "b", UpstreamName: "", In: InBodyRoot, Schema: json.RawMessage(`{"type":"array"}`)}},
+	in := Manifest{Protocol: REST, Title: "t", SpecVersion: "3.1.0", Tools: []Tool{{
+		Key: "POST /x", Name: "x", Safety: Write, HTTP: &HTTPOp{Method: "POST", Path: "/x"},
+		Params: []Param{{Name: "b", Bind: Binding{In: InBodyRoot}, Schema: json.RawMessage(`{"type":"array"}`)}},
 		Issues: []Issue{{Kind: IssueBodyNested, Detail: "d"}},
 	}}}
 	b, err := json.Marshal(in)
@@ -91,12 +92,15 @@ func TestManifestJSONRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(b, &out); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
-	b2, _ := json.Marshal(out)
+	b2, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if string(b) != string(b2) {
 		t.Errorf("round trip changed the manifest:\n%s\n%s", b, b2)
 	}
-	if out.Tools[0].Safety != Write || out.Tools[0].Params[0].In != InBodyRoot {
-		t.Errorf("enums not decoded: %v %v", out.Tools[0].Safety, out.Tools[0].Params[0].In)
+	if out.Tools[0].Safety != Write || out.Tools[0].Params[0].Bind.In != InBodyRoot {
+		t.Errorf("enums not decoded: %v %v", out.Tools[0].Safety, out.Tools[0].Params[0].Bind.In)
 	}
 }
 
@@ -120,5 +124,44 @@ func TestParseLocation(t *testing.T) {
 	}
 	if _, ok := ParseLocation("formData"); ok {
 		t.Error("ParseLocation(formData) should fail")
+	}
+}
+
+func TestManifestGraphQLRoundTrips(t *testing.T) {
+	in := Manifest{Protocol: GraphQL, Title: "g", Tools: []Tool{}, GraphQL: &GraphQLSchema{
+		OverrideDocs:       map[string]map[string]string{"ro": {"query x": "query PlugIt_x{x}"}},
+		OverrideSelections: map[string]map[string][]string{"ro": {"query x": {"x"}}},
+	}}
+	b, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out Manifest
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if out.GraphQL == nil {
+		t.Fatalf("GraphQL dropped in round trip: %s", b)
+	}
+	if got := out.GraphQL.OverrideSelections["ro"]["query x"]; len(got) != 1 || got[0] != "x" {
+		t.Errorf("OverrideSelections[ro][query x] = %q", got)
+	}
+	if got := out.GraphQL.OverrideDocs["ro"]["query x"]; got != "query PlugIt_x{x}" {
+		t.Errorf("OverrideDocs[ro][query x] = %q", got)
+	}
+	b2, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != string(b2) {
+		t.Errorf("round trip changed the manifest:\n%s\n%s", b, b2)
+	}
+
+	rest, err := json.Marshal(Manifest{Protocol: REST, Title: "t", Tools: []Tool{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(rest), `"graphql"`) {
+		t.Errorf("REST manifest serialized a graphql field: %s", rest)
 	}
 }

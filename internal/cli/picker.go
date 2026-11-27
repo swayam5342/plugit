@@ -8,8 +8,16 @@ import (
 	"golang.org/x/term"
 
 	"github.com/swayam5342/plugit/internal/clients"
+	"github.com/swayam5342/plugit/internal/model"
 	"github.com/swayam5342/plugit/internal/tui"
 )
+
+// protoDescribe returns the per-protocol badge/target function the TUI uses
+// (SPEC §2.3), bound to the API's protocol through describeFor. An empty name
+// is a pre-field manifest and means REST.
+func protoDescribe(name model.Protocol) func(model.Tool) (string, string) {
+	return func(t model.Tool) (string, string) { return describeFor(name, t) }
+}
 
 // runPicker runs the terminal picker (SPEC §2.3). The picker draws on
 // stdout: add and edit are interactive commands, never MCP servers.
@@ -21,6 +29,7 @@ func runPicker(ctx context.Context, in pickInput) (pickResult, error) {
 		Mode:     in.mode,
 		Selected: in.selected,
 		Lint:     in.lint,
+		Describe: protoDescribe(in.proto),
 	}, os.Stdin, os.Stdout)
 	return pickResult{toolset: ts, mode: mode}, err
 }

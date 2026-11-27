@@ -1,13 +1,11 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
+	"net/url"
 	"os"
-	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -17,9 +15,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/swayam5342/plugit/internal/config"
+	"github.com/swayam5342/plugit/internal/ingest"
 	"github.com/swayam5342/plugit/internal/isolate"
 	"github.com/swayam5342/plugit/internal/model"
-	"github.com/swayam5342/plugit/internal/openapi"
 	"github.com/swayam5342/plugit/internal/secrets"
 	"github.com/swayam5342/plugit/internal/store"
 )
@@ -27,7 +25,7 @@ import (
 const petsYAML = `version: 1
 name: pets
 source: {url: https://example.test/openapi.yaml}
-base_url: %s
+endpoint: %s
 prefix: pp
 network: {allow_private: true}
 auth: {type: header, header: X-Api-Key, secret: env:PETS_KEY}
@@ -49,7 +47,7 @@ toolsets:
 `
 
 // setupAPI writes apis/pets/{plugit.yaml,spec.snapshot.json}. The spec's
-// own server is an attacker host: serve must only ever use base_url.
+// own server is an attacker host: serve must only ever use endpoint.
 func setupAPI(t *testing.T, baseURL string) config.Paths {
 	t.Helper()
 	p := config.NewPaths(t.TempDir())
@@ -97,14 +95,14 @@ func writeSnapshot(t *testing.T, p config.Paths, content string) {
 }
 
 // countingParse wraps the real child-process parser and counts calls.
-func countingParse(n *atomic.Int32) func(context.Context, []byte, openapi.Options) (*model.Manifest, error) {
-	return func(ctx context.Context, data []byte, opts openapi.Options) (*model.Manifest, error) {
+func countingParse(n *atomic.Int32) parseFunc {
+	return func(ctx context.Context, data []byte, format string, opts ingest.Options) (*model.Manifest, error) {
 		n.Add(1)
-		return isolate.Parse(ctx, data, opts)
+		return isolate.Parse(ctx, data, format, opts)
 	}
 }
 
-func serveDeps(parse func(context.Context, []byte, openapi.Options) (*model.Manifest, error)) runDeps {
+func serveDeps(parse parseFunc) runDeps {
 	d := deps(nil, nil, map[string]string{"PETS_KEY": runSecret})
 	d.parse = parse
 	return d
@@ -175,7 +173,7 @@ func TestServeUsesManifestCache(t *testing.T) {
 		t.Fatalf("cold start parsed %d times", parses.Load())
 	}
 
-	noParse := func(context.Context, []byte, openapi.Options) (*model.Manifest, error) {
+	noParse := func(context.Context, []byte, string, ingest.Options) (*model.Manifest, error) {
 		t.Error("warm start re-parsed the spec")
 		return nil, errors.New("unexpected parse")
 	}
@@ -276,6 +274,33 @@ func TestServeSetupFailures(t *testing.T) {
 	}
 }
 
+// A fixed param declared with in: cookie must resolve to model.InCookie,
+// not be silently collapsed to the query string, where a secret would leak
+// into access/proxy logs. Config accepts cookie via the P3 table.
+func TestBuildTargetFixedCookieLocation(t *testing.T) {
+	cfg := &config.API{Name: "pets", Protocol: "rest",
+		Auth: config.Auth{Type: config.AuthNone},
+		Fixed: []config.Fixed{
+			{Name: "sid", In: "cookie", Value: "env:PETS_SID"},
+		}}
+	d := runDeps{resolver: &secrets.Resolver{LookupEnv: func(k string) (string, bool) {
+		if k == "PETS_SID" {
+			return "s3cr3t", true
+		}
+		return "", false
+	}}}
+	u, _ := url.Parse("https://api.example.test")
+	fx, _, err := buildFixedTarget(cfg, d.resolver)
+	if err != nil {
+		t.Fatalf("buildFixedTarget: %v", err)
+	}
+	fx.userAgent = "ua"
+	tg := restTargetFrom(fx, u)
+	if len(tg.Fixed) != 1 || tg.Fixed[0].In != model.InCookie {
+		t.Errorf("fixed cookie location = %+v, want In=InCookie", tg.Fixed)
+	}
+}
+
 // serve records each call (redacted) in the call log and prunes calls past
 // log.retention when it starts.
 func TestServeRecordsCalls(t *testing.T) {
@@ -349,109 +374,26 @@ func TestServeRateLimits(t *testing.T) {
 	}
 }
 
-// serve --http: the Streamable HTTP transport on loopback with a bearer
-// token kept in an owner-only file, reused across restarts (SPEC T15).
-func TestServeHTTP(t *testing.T) {
-	up := newUpstream(t)
-	p := setupAPI(t, up.URL)
-	stderr := &syncBuf{}
-	start := func(newToken bool) (string, context.CancelFunc, chan error) {
-		ctx, cancel := context.WithCancel(t.Context())
-		urls := make(chan string, 1)
-		done := make(chan error, 1)
-		d := serveDeps(isolate.Parse)
-		d.stderr = stderr
-		go func() {
-			done <- serveAPI(ctx, serveSettings{paths: p, name: "pets", http: "127.0.0.1:0", newToken: newToken,
-				ready: func(u string) { urls <- u }}, d)
-		}()
-		select {
-		case u := <-urls:
-			return u, cancel, done
-		case err := <-done:
-			cancel()
-			t.Fatalf("serve --http: %v\n%s", err, stderr)
-		case <-time.After(10 * time.Second):
-			cancel()
-			t.Fatal("serve --http didn't start")
+// A configured credential resolves to a protocol-neutral invoke.Credential,
+// and its hidden name is reported; oauth2 resolves to a bearer token source
+// whose client secret is redacted.
+func TestBuildCredential(t *testing.T) {
+	d := runDeps{resolver: &secrets.Resolver{LookupEnv: func(k string) (string, bool) {
+		if k == "PETS_KEY" {
+			return "test-token-123", true
 		}
-		return "", cancel, done
-	}
-
-	endpoint, stop, done := start(false)
-	tokenPath, _ := p.HTTPToken("pets")
-	raw, err := os.ReadFile(tokenPath)
+		return "", false
+	}}}
+	cfg := &config.API{Name: "pets", Protocol: "rest",
+		Auth: config.Auth{Type: config.AuthHeader, Header: "X-Api-Key", Secret: "env:PETS_KEY"}}
+	cred, hidden, err := buildCredential(cfg, d.resolver, d)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("buildCredential: %v", err)
 	}
-	token := strings.TrimSpace(string(raw))
-	if len(token) < 40 {
-		t.Fatalf("token too short: %d characters", len(token))
+	if cred.Type != "header" || cred.Header != "X-Api-Key" || cred.Secret != "test-token-123" {
+		t.Errorf("cred = %+v", cred)
 	}
-	if fi, _ := os.Stat(tokenPath); runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
-		t.Errorf("token file mode = %v", fi.Mode().Perm())
+	if len(hidden) != 1 || hidden[0] != "X-Api-Key" {
+		t.Errorf("hidden = %v", hidden)
 	}
-
-	client := mcp.NewClient(&mcp.Implementation{Name: "t", Version: "1"}, nil)
-	tr := &mcp.StreamableClientTransport{Endpoint: endpoint, HTTPClient: &http.Client{Transport: bearerRT{token}}}
-	cs, err := client.Connect(t.Context(), tr, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "pp_list_pets", Arguments: map[string]any{}}); err != nil || r.IsError {
-		t.Fatalf("call over HTTP: %v %s", err, resultText(r))
-	}
-	_ = cs.Close()
-	req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, endpoint, strings.NewReader(`{}`))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err == nil {
-		_ = resp.Body.Close()
-	}
-	if err != nil || resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("no token: %v %v", resp, err)
-	}
-	stop()
-	if err := <-done; err != nil {
-		t.Errorf("serve returned %v", err)
-	}
-
-	_, stop, done = start(false)
-	if again, _ := os.ReadFile(tokenPath); strings.TrimSpace(string(again)) != token {
-		t.Error("token changed on restart")
-	}
-	stop()
-	if err := <-done; err != nil {
-		t.Errorf("serve returned %v", err)
-	}
-	_, stop, done = start(true)
-	if rotated, _ := os.ReadFile(tokenPath); strings.TrimSpace(string(rotated)) == token {
-		t.Error("--new-token kept the old token")
-	}
-	stop()
-	if err := <-done; err != nil {
-		t.Errorf("serve returned %v", err)
-	}
-
-	if log := stderr.String(); strings.Contains(log, token) || !strings.Contains(log, tokenPath) {
-		t.Errorf("stderr must name the token file and never show the token:\n%s", log)
-	}
-}
-
-func TestServeHTTPRefusesNonLoopback(t *testing.T) {
-	p := setupAPI(t, "https://pets.example.test")
-	d := serveDeps(isolate.Parse)
-	d.stderr = &bytes.Buffer{}
-	err := serveAPI(t.Context(), serveSettings{paths: p, name: "pets", http: "0.0.0.0:8931"}, d)
-	if err == nil || !strings.Contains(err.Error(), "loopback") {
-		t.Errorf("err = %v", err)
-	}
-}
-
-type bearerRT struct{ token string }
-
-func (b bearerRT) RoundTrip(r *http.Request) (*http.Response, error) {
-	r = r.Clone(r.Context())
-	r.Header.Set("Authorization", "Bearer "+b.token)
-	return http.DefaultTransport.RoundTrip(r)
 }

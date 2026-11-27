@@ -239,7 +239,7 @@ PlugIt treats the spec, the model's tool arguments and the API's responses as un
 | Guard | What it means |
 | :--- | :--- |
 | **Read-only by default** | Write tools need `policy.mode: confirm-writes` or `full`; per-tool `confirm` and `deny` can only tighten that. Change the mode with `m` in `plugit add` or `plugit edit <name>` (switching to `full` asks you to press `m` twice), then reconnect your client; no reinstall is needed. |
-| **The host never comes from the model or the spec** | You pin `base_url`; credentials are attached only to requests for exactly that origin; redirects stay on it. |
+| **The host never comes from the model or the spec** | You pin the `endpoint`; credentials are attached only to requests for exactly that origin; redirects stay on it. |
 | **SSRF guard** | The resolved IP is checked at connect time: loopback and private ranges need `allow_private: true`, and cloud metadata addresses are always blocked. |
 | **No credentials over plain http, no risky paths** | A config that would send a credential to a remote host over `http://` doesn't load, and spec paths with spaces, `..` or backslashes are skipped. `network.allow_insecure: true` (`--allow-insecure`) is the one switch for both. |
 | **Secrets** | Come from the OS keyring or env vars only, never from config files or the command line, and are redacted (raw, percent-encoded and base64) from logs, errors and every tool result. |

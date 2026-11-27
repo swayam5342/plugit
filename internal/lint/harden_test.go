@@ -152,7 +152,7 @@ func withParams(names ...string) model.Tool {
 	x := tl("GET", "/x", "x", "X.")
 	x.Params = nil
 	for _, n := range names {
-		x.Params = append(x.Params, model.Param{Name: n, UpstreamName: n, In: model.InQuery, Schema: json.RawMessage(`{"type":"string"}`)})
+		x.Params = append(x.Params, model.Param{Name: n, Bind: model.Binding{Upstream: n, In: model.InQuery}, Schema: json.RawMessage(`{"type":"string"}`)})
 	}
 	return x
 }
@@ -165,7 +165,7 @@ func TestL016CredentialParameters(t *testing.T) {
 		}
 	}
 	inPath := withParams("client_secret")
-	inPath.Params[0].In = model.InPath
+	inPath.Params[0].Bind.In = model.InPath
 	if f := find(Run(Input{API: api(all("GET /x")), Tools: []model.Tool{inPath}}), "L016"); f != nil {
 		t.Errorf("path parameter flagged: %s", f.Message)
 	}

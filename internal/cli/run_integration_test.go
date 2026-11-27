@@ -261,12 +261,12 @@ func TestRunSetupFailures(t *testing.T) {
 		is   error
 	}{
 		"1000-op spec without filters": {huge.String(), nil, nil, []string{"1000 tools", "--max-tools 40", "--tags"}, errTooManyTools},
-		"credentials need --base-url": {attackerSpec, func(s *runSettings) { s.headers = []string{"X-Api-Key=env:K"} },
-			map[string]string{"K": runSecret}, []string{"--base-url", "attacker.example.test"}, nil},
+		"credentials need --endpoint": {attackerSpec, func(s *runSettings) { s.headers = []string{"X-Api-Key=env:K"} },
+			map[string]string{"K": runSecret}, []string{"--endpoint", "attacker.example.test"}, nil},
 		"credentials over plain http": {attackerSpec, func(s *runSettings) {
 			s.baseURL = "http://api.example.test"
 			s.headers = []string{"X-Api-Key=env:K"}
-		}, map[string]string{"K": runSecret}, []string{"https", "--base-url", "--allow-insecure"}, nil},
+		}, map[string]string{"K": runSecret}, []string{"https", "--endpoint", "--allow-insecure"}, nil},
 		"credentials over plain http, private networks allowed": {attackerSpec, func(s *runSettings) {
 			s.baseURL = "http://api.example.test"
 			s.headers = []string{"X-Api-Key=env:K"}
@@ -328,5 +328,35 @@ func TestRunNeverWritesToStdout(t *testing.T) {
 	out, _ := io.ReadAll(rd)
 	if len(out) != 0 {
 		t.Errorf("plugit run wrote to stdout: %q", out)
+	}
+}
+
+// plugit run --introspect: the URL is the GraphQL endpoint; the introspection
+// result is parsed in the child, and the tools then call that endpoint. With
+// --header Authorization (the bearer form SPEC 2.4 documents) the credential
+// goes to the pinned origin on both the introspection and the calls.
+func TestRunIntrospectServesGraphQL(t *testing.T) {
+	fixture := introspectionFixture(t)
+	up := newGraphQLUpstream(t, func(u *gqlUpstream) { u.introspection = fixture })
+	cs, stderr := startRun(t, settings(up.URL+"/graphql", func(s *runSettings) {
+		s.introspect, s.allowPrivate = true, true
+		s.headers = []string{"Authorization=env:GH_TOKEN"}
+	}), map[string]string{"GH_TOKEN": "Bearer " + runSecret})
+
+	if got := toolNames(t, cs); !slices.Contains(got, "user") {
+		t.Fatalf("tools = %v", got)
+	}
+	r, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "user", Arguments: map[string]any{"id": "1"}})
+	if err != nil || r.IsError {
+		t.Fatalf("call: %v %s\n%s", err, resultText(r), stderr)
+	}
+	if !strings.Contains(up.body(t).Query, "query PlugIt_user(") {
+		t.Errorf("call sent %q", up.body(t).Query)
+	}
+	if got, _ := up.lastAuth.Load().(string); got != "Bearer "+runSecret {
+		t.Errorf("call Authorization = %q", got)
+	}
+	if strings.Contains(stderr.String(), runSecret) {
+		t.Errorf("stderr leaks the credential:\n%s", stderr)
 	}
 }

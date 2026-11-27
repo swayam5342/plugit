@@ -15,8 +15,6 @@ import (
 	"github.com/swayam5342/plugit/internal/config"
 	"github.com/swayam5342/plugit/internal/isolate"
 	"github.com/swayam5342/plugit/internal/lint"
-	"github.com/swayam5342/plugit/internal/model"
-	"github.com/swayam5342/plugit/internal/openapi"
 )
 
 type exitCodeError struct {
@@ -35,7 +33,7 @@ type lintSettings struct {
 	asJSON  bool
 	out     io.Writer
 	stderr  io.Writer
-	parse   func(ctx context.Context, data []byte, opts openapi.Options) (*model.Manifest, error)
+	parse   parseFunc
 	info    BuildInfo
 }
 
@@ -93,7 +91,7 @@ func lintAPI(ctx context.Context, p config.Paths, name string, s lintSettings) e
 	if err != nil {
 		return err
 	}
-	fs, ignored := lint.RunCounting(lint.Input{API: *cfg, Tools: m.Tools, Hidden: hiddenParams(cfg.Auth, cfg.Fixed)})
+	fs, ignored := lint.RunCounting(lint.Input{API: *cfg, Tools: m.Tools, Hidden: hiddenParams(cfg.Auth, cfg.Fixed), Unsupported: m.Unsupported})
 	if s.toolset != "" {
 		fs = slices.DeleteFunc(fs, func(f lint.Finding) bool { return f.Toolset != "" && f.Toolset != s.toolset })
 	}

@@ -18,10 +18,13 @@ import (
 	"cmp"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -41,6 +44,7 @@ type Redactor struct {
 	opts     Options
 	headers  map[string]bool
 	params   map[string]bool
+	forms    []string
 	replacer *strings.Replacer
 }
 
@@ -58,10 +62,10 @@ func New(opts Options) *Redactor {
 		r.params[normalizeName(p)] = true
 	}
 
-	forms := secretForms(opts.Secrets)
-	if len(forms) > 0 {
-		pairs := make([]string, 0, 2*len(forms))
-		for _, f := range forms {
+	r.forms = secretForms(opts.Secrets)
+	if len(r.forms) > 0 {
+		pairs := make([]string, 0, 2*len(r.forms))
+		for _, f := range r.forms {
 			pairs = append(pairs, f, Mask)
 		}
 		r.replacer = strings.NewReplacer(pairs...)
@@ -96,6 +100,45 @@ func (r *Redactor) String(s string) string {
 		s = p.re.ReplaceAllString(s, p.repl)
 	}
 	return s
+}
+
+// ContainsSecret reports whether s contains a configured secret in any form
+// String masks (raw, percent-encoded, base64 or JSON-escaped). Known token
+// formats that were never configured don't count. It is for text that must
+// be refused rather than masked, such as an introspection result that
+// becomes spec text.
+//
+// When s is a JSON document with escapes, its canonical spelling
+// (CanonicalJSON) is checked too, so every JSON-escape spelling of every
+// form counts ("tok\/en", \uXXXX escapes, or a mix): a JSON parser decodes them
+// all back to the secret. Text that is not one valid JSON document is
+// checked through canonicalStrings: every span between two consecutive
+// unescaped quotes, in both parities, that holds a backslash and decodes as
+// a JSON string is re-spelled on its own.
+func (r *Redactor) ContainsSecret(s string) bool {
+	if len(r.forms) == 0 {
+		return false
+	}
+	if r.containsForm(s) {
+		return true
+	}
+	if !strings.ContainsRune(s, '\\') {
+		return false
+	}
+	c, ok := CanonicalJSON([]byte(s))
+	if !ok {
+		c = canonicalStrings([]byte(s))
+	}
+	return r.containsForm(string(c))
+}
+
+func (r *Redactor) containsForm(s string) bool {
+	for _, f := range r.forms {
+		if strings.Contains(s, f) {
+			return true
+		}
+	}
+	return false
 }
 
 // Bytes is String for byte slices. It always returns a new slice.
@@ -220,6 +263,25 @@ func maskCookieValues(v string) string {
 	return strings.Join(parts, ";")
 }
 
+// SchemeToken returns the token of an auth header value "<scheme> <token>"
+// whose scheme is a single word of ASCII letters ("Bearer", "token"), or ""
+// for any other value. Callers list it as a secret of its own next to the
+// whole value: an upstream may echo just the token. A short token (as in
+// "Bearer x") then masks every occurrence of those bytes, which over-masks
+// but never leaks.
+func SchemeToken(v string) string {
+	scheme, tok, ok := strings.Cut(v, " ")
+	if !ok || scheme == "" {
+		return ""
+	}
+	for _, c := range scheme {
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') {
+			return ""
+		}
+	}
+	return strings.TrimSpace(tok)
+}
+
 // secretForms expands each secret into every encoding it may appear in,
 // deduplicated and ordered longest first so the longest match wins.
 func secretForms(secrets []string) []string {
@@ -323,4 +385,170 @@ func (r *Redactor) walk(v any, byName bool) any {
 		return r.String(v)
 	}
 	return v
+}
+
+// CanonicalJSON re-spells the JSON document b in one canonical form: compact,
+// every string (keys included) re-encoded with Go's escapes and no HTML
+// escaping, numbers exactly as written, key order and duplicate keys kept.
+// A JSON parser decodes "\/" as "/" and a \uXXXX escape as its character,
+// so a secret matches
+// the canonical spelling however the document escaped it. It reports false,
+// with no output, when b isn't exactly one valid JSON document.
+//
+// It walks the token stream rather than decoding into a map, so a duplicate
+// key's earlier value (which a map would drop, and a different parser might
+// keep) is still checked. It is pure and allocates in proportion to b;
+// callers pass bodies that are already size-capped.
+func CanonicalJSON(b []byte) ([]byte, bool) {
+	if !json.Valid(b) {
+		return nil, false
+	}
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
+	var out bytes.Buffer
+	out.Grow(len(b))
+	enc := json.NewEncoder(&out)
+	enc.SetEscapeHTML(false)
+	type frame struct {
+		object bool
+		n      int // tokens written in this container
+	}
+	var stack []frame
+	for {
+		tok, err := dec.Token()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, false
+		}
+		if d, ok := tok.(json.Delim); ok && (d == '}' || d == ']') {
+			stack = stack[:len(stack)-1]
+			out.WriteString(d.String())
+			continue
+		}
+		if len(stack) > 0 {
+			f := &stack[len(stack)-1]
+			switch {
+			case f.object && f.n%2 == 1:
+				out.WriteByte(':')
+			case f.n > 0:
+				out.WriteByte(',')
+			}
+			f.n++
+		}
+		switch v := tok.(type) {
+		case json.Delim:
+			out.WriteString(v.String())
+			stack = append(stack, frame{object: v == '{'})
+		case string:
+			if enc.Encode(v) != nil {
+				return nil, false
+			}
+			out.Truncate(out.Len() - 1) // Encode's trailing newline
+		case json.Number:
+			out.WriteString(string(v))
+		case bool:
+			out.WriteString(strconv.FormatBool(v))
+		case nil:
+			out.WriteString("null")
+		default:
+			return nil, false
+		}
+	}
+	return out.Bytes(), true
+}
+
+// JSON returns b unchanged, unless b is a JSON document whose canonical
+// spelling (CanonicalJSON) holds something String masks: a configured secret
+// or a known token format hidden behind JSON escapes ("tok\/en", \uXXXX).
+// Then it returns the canonical spelling, so String masks it before the text
+// reaches the model, which (like any JSON-parsing client) would decode the
+// escapes. A body without a backslash is returned at once: with no escapes,
+// its strings already read as they decode.
+//
+// A body that is not one valid JSON document (cut at the response cap, or
+// with trailing junk) gets canonicalStrings instead: every span between two
+// consecutive unescaped quotes, in both parities, that decodes as a JSON
+// string is re-spelled on its own.
+func (r *Redactor) JSON(b []byte) []byte {
+	if !bytes.ContainsRune(b, '\\') {
+		return b
+	}
+	c, ok := CanonicalJSON(b)
+	if !ok {
+		c = canonicalStrings(b)
+	}
+	if s := string(c); r.String(s) == s {
+		return b
+	}
+	return c
+}
+
+// canonicalStrings is the lenient fallback of CanonicalJSON for bytes that
+// are not one valid JSON document: it re-spells each candidate "..." span
+// that holds an escape and decodes as a JSON string, with Go's escapes and
+// no HTML escaping, and leaves every other byte as it is.
+//
+// In text that isn't JSON, which quote opens a literal is unknown: an odd
+// number of quotes, or a stray \" before a secret, would throw a single
+// left-to-right pairing off. So the candidates are the spans between every
+// two consecutive unescaped quotes (a quote is escaped when an odd run of
+// backslashes precedes it, which doesn't depend on where a literal began).
+// The spans of even and of odd index are re-spelled in two passes; a span
+// holds no unescaped quote, so re-spelling one keeps every quote's
+// escapedness and the second pass sees the same spans. A literal cut off
+// at the end of b, or with an invalid escape, is left alone. It is linear
+// in len(b), uses memory independent of the number of quotes, and returns
+// b itself when nothing changed.
+func canonicalStrings(b []byte) []byte {
+	return respellSpans(respellSpans(b, 0), 1)
+}
+
+// respellSpans re-spells the spans between consecutive unescaped quotes
+// whose index has the given parity (see canonicalStrings). It streams: one
+// pass over b keeps only the previous unescaped quote, the quote count and
+// whether a backslash came since that quote, so its memory doesn't grow
+// with the number of quotes (an untrusted body may be all quotes).
+func respellSpans(b []byte, parity int) []byte {
+	var out bytes.Buffer
+	var enc *json.Encoder
+	last, changed := 0, false
+	prev, count := -1, 0 // the previous unescaped quote; unescaped quotes seen
+	run := 0             // backslashes immediately before b[i]
+	slash := false       // a backslash came after prev
+	for i, c := range b {
+		if c == '\\' {
+			run++
+			slash = true
+			continue
+		}
+		escaped := run%2 == 1
+		run = 0
+		if c != '"' || escaped {
+			continue
+		}
+		// Span k runs from quote k to quote k+1; this quote is k+1 = count.
+		if count > 0 && (count-1)%2 == parity && slash {
+			var s string
+			if json.Unmarshal(b[prev:i+1], &s) == nil {
+				if enc == nil {
+					enc = json.NewEncoder(&out)
+					enc.SetEscapeHTML(false)
+				}
+				out.Write(b[last:prev])
+				if enc.Encode(s) != nil {
+					return b
+				}
+				out.Truncate(out.Len() - 1) // Encode's trailing newline
+				last, changed = i+1, true
+			}
+		}
+		prev, count, slash = i, count+1, false
+	}
+	if !changed {
+		return b
+	}
+	out.Write(b[last:])
+	return out.Bytes()
 }
