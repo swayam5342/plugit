@@ -69,6 +69,10 @@ func TestOrderedPairwiseDetection(t *testing.T) {
 		"sdl column-0 field":                {[]byte("type Query {\nopenapi: String\n}\n"), "graphql-sdl"},
 		"sdl description with swagger line": {[]byte("\"\"\"\nswagger: \"2.0\" mirror of /v1\n\"\"\"\ntype Query {\n  x: Int\n}\n"), "graphql-sdl"},
 		"sdl directive argument":            {[]byte("schema @link(\nopenapi: 3\n) {\n  query: Query\n}\n\ntype Query {\n  x: Int\n}\n"), "graphql-sdl"},
+		// Commas are GraphQL whitespace, so this first line is SDL, not a YAML key.
+		"sdl comma-separated first line": {[]byte("type,Query,{a:\nInt @d(\nopenapi: 3)}\n"), "graphql-sdl"},
+		// A contrived JSON object with a root openapi key and a __schema is OpenAPI only.
+		"json openapi with __schema": {[]byte(`{"openapi":"3.0.0","info":{"title":"t","version":"1"},"paths":{},"__schema":{"queryType":{"name":"Query"},"types":[]}}`), "openapi"},
 	}
 	hostile, err := filepath.Glob("../../testdata/hostile/*.yaml")
 	if err != nil || len(hostile) == 0 {
@@ -135,32 +139,38 @@ func TestForceGraphQLFormat(t *testing.T) {
 		{"graphql-sdl", sdl},
 		{"graphql-introspection", intro},
 	} {
-		m, err := ingest.Dispatch(Ordered(), tc.data, tc.force, ingest.Options{})
-		if err != nil {
-			t.Fatalf("forcing %s: %v", tc.force, err)
-		}
-		if m.Format != tc.force || m.Protocol != model.GraphQL {
-			t.Errorf("forcing %s: got %q/%q", tc.force, m.Protocol, m.Format)
-		}
+		t.Run(tc.force, func(t *testing.T) {
+			m, err := ingest.Dispatch(Ordered(), tc.data, tc.force, ingest.Options{})
+			if err != nil {
+				t.Fatalf("forcing %s: %v", tc.force, err)
+			}
+			if m.Format != tc.force || m.Protocol != model.GraphQL {
+				t.Errorf("forcing %s: got %q/%q", tc.force, m.Protocol, m.Format)
+			}
+		})
 	}
 
 	// A forced GraphQL format on the wrong input is tried and fails; it never
 	// falls back to the detected format.
 	for _, tc := range []struct {
-		force string
-		data  []byte
+		name, force string
+		data        []byte
 	}{
-		{"graphql-sdl", []byte(openapiDoc)},
-		{"graphql-sdl", intro},
-		{"graphql-introspection", sdl},
+		{"sdl on openapi", "graphql-sdl", []byte(openapiDoc)},
+		{"sdl on introspection", "graphql-sdl", intro},
+		{"introspection on sdl", "graphql-introspection", sdl},
 	} {
-		if _, err := ingest.Dispatch(Ordered(), tc.data, tc.force, ingest.Options{}); !errors.Is(err, graphql.ErrUnsupportedSpec) {
-			t.Errorf("forcing %s on the wrong input: err = %v, want graphql.ErrUnsupportedSpec", tc.force, err)
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := ingest.Dispatch(Ordered(), tc.data, tc.force, ingest.Options{}); !errors.Is(err, graphql.ErrUnsupportedSpec) {
+				t.Errorf("forcing %s on the wrong input: err = %v, want graphql.ErrUnsupportedSpec", tc.force, err)
+			}
+		})
+	}
+	t.Run("openapi on sdl", func(t *testing.T) {
+		if _, err := ingest.Dispatch(Ordered(), sdl, "openapi", ingest.Options{}); err == nil {
+			t.Error("forcing openapi on an SDL document should error")
 		}
-	}
-	if _, err := ingest.Dispatch(Ordered(), sdl, "openapi", ingest.Options{}); err == nil {
-		t.Error("forcing openapi on an SDL document should error")
-	}
+	})
 }
 
 func TestDispatchUnclaimedInput(t *testing.T) {

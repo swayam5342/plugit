@@ -338,6 +338,34 @@ func TestParseGraphQLSDLThroughChild(t *testing.T) {
 	if truncated(def) {
 		t.Error("default caps truncated a selection; this fixture can't tell the caps apart")
 	}
+
+	// SelectionDepth on its own must reach Build too: the child's result
+	// with only the depth cap matches the in-process build with it and
+	// differs from the default-caps result.
+	depthOnly := ingest.Options{SelectionDepth: 1}
+	dgot, err := runner("parse").Parse(t.Context(), data, "", depthOnly)
+	if err != nil {
+		t.Fatalf("Parse with SelectionDepth 1: %v", err)
+	}
+	dwant, err := graphql.Build(s, graphql.FormatSDL, depthOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mustJSON(t, dgot) != mustJSON(t, dwant) {
+		t.Errorf("SelectionDepth 1: child result differs from in-process build")
+	}
+	if mustJSON(t, dgot) == mustJSON(t, def) {
+		t.Error("SelectionDepth 1 built the same manifest as the default depth: the cap did not reach Build")
+	}
+}
+
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return string(b)
 }
 
 const userSDL = `type User { id: ID! name: String }

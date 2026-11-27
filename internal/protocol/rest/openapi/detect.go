@@ -21,13 +21,18 @@ var rootKeys = [...]string{"openapi", "swagger"}
 //
 // Anything else is scanned as YAML, line by line:
 //   - The first significant line must be a column-0 block-mapping entry: a
-//     plain key without blanks, or a quoted key, then ':'. Blank lines, #
+//     plain key without blanks, ',' or '(' directly followed by ':', or a
+//     quoted key, optional blanks, then ':'. Blank lines, #
 //     comments, % directives and --- are skipped first. A GraphQL SDL
 //     document starts with an SDL keyword or a """ description, never
 //     followed by ':', so this rules out all of SDL, including SDL with an
 //     openapi: line at column 0 further down.
 //   - Some column-0 line must then be openapi: or swagger: (the key plain or
 //     quoted) with a value starting with a digit or a quote, as a version does.
+//
+// Two valid but rare YAML spellings are not detected and need
+// --format openapi: a flow-mapping root ({openapi: 3.0.0, ...}) and a first
+// plain key with a blank before its ':' (openapi : 3.0.0).
 //
 // It is linear in len(data), does not allocate on the YAML path and never
 // panics.
@@ -103,9 +108,10 @@ func yamlSkippable(line []byte) bool {
 }
 
 // yamlMappingEntry reports whether line is a column-0 block-mapping entry:
-// a quoted key ("""…""" is a GraphQL description, not a key) or a plain key
-// without blanks, then optional blanks and ':' ending the line or followed by
-// a blank.
+// a quoted key ("""…""" is a GraphQL description, not a key) then optional
+// blanks, or a plain key without blanks, ',' or '(', then ':' ending the
+// line or followed by a blank. A plain key with a blank before the ':'
+// ("info : x") is valid YAML but not accepted here.
 func yamlMappingEntry(line []byte) bool {
 	if len(line) == 0 {
 		return false
@@ -128,7 +134,10 @@ func yamlMappingEntry(line []byte) bool {
 		}
 	}
 	for i := 0; i < len(line); i++ {
-		if isBlank(line[i]) {
+		// ',' and '(' are legal in a plain YAML key but never start an
+		// OpenAPI document; ',' is GraphQL whitespace, so "type,Query,{a:"
+		// is SDL.
+		if isBlank(line[i]) || line[i] == ',' || line[i] == '(' {
 			return false
 		}
 		if colonEntry(line[i:]) {

@@ -1,6 +1,7 @@
 package ingest_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/swayam5342/plugit/internal/formats"
@@ -115,5 +116,31 @@ func TestDispatchStampsFormatName(t *testing.T) {
 		if m.Format != "openapi" || m.SpecVersion != "2.0" {
 			t.Errorf("force %q: Swagger 2.0 Format/SpecVersion = %q/%q, want openapi/2.0", force, m.Format, m.SpecVersion)
 		}
+	}
+}
+
+// The sentinel and its wrap must not repeat themselves: an unknown --format
+// reads `unsupported spec format: unknown format "x"`, not "...unknown
+// source format: unknown format "x"".
+func TestDispatchErrorWording(t *testing.T) {
+	for _, tc := range []struct {
+		name, data, force, want string
+	}{
+		{"unknown forced format", postmanDoc, "nosuchformat", `unsupported spec format: unknown format "nosuchformat"`},
+		{"nothing detected", "!x", "", "unsupported spec format: no format recognized the source"},
+		// A JSON syntax error before the openapi key hides the key from
+		// detection; the error says why instead of a bare "unrecognized".
+		{"invalid json", "\xef\xbb\xbf {\"info\":{,\"openapi\":\"3.0.0\"}", "",
+			"unsupported spec format: no format recognized the source (it is not valid JSON: invalid character ',' looking for beginning of object key string)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ingest.Dispatch(formats.Ordered(), []byte(tc.data), tc.force, ingest.Options{})
+			if !errors.Is(err, ingest.ErrUnsupportedFormat) {
+				t.Fatalf("err = %v, want ErrUnsupportedFormat", err)
+			}
+			if err.Error() != tc.want {
+				t.Errorf("err = %q, want %q", err, tc.want)
+			}
+		})
 	}
 }

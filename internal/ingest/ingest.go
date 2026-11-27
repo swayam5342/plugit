@@ -6,15 +6,18 @@
 package ingest
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 
 	"github.com/swayam5342/plugit/internal/model"
+	"github.com/swayam5342/plugit/internal/utils"
 )
 
 // ErrUnsupportedFormat means no Format matched the source or the forced
 // format name is unknown.
-var ErrUnsupportedFormat = errors.New("unsupported spec: unrecognized or unknown source format")
+var ErrUnsupportedFormat = errors.New("unsupported spec format")
 
 // Format turns source bytes of one format into a Manifest.
 type Format interface {
@@ -43,7 +46,27 @@ func Dispatch(formats []Format, data []byte, forceName string, opts Options) (*m
 			return parseWith(f, data, opts)
 		}
 	}
-	return nil, fmt.Errorf("%w: unrecognized source format", ErrUnsupportedFormat)
+	if reason := jsonSyntaxError(data); reason != nil {
+		return nil, fmt.Errorf("%w: no format recognized the source (it is not valid JSON: %w)", ErrUnsupportedFormat, reason)
+	}
+	return nil, fmt.Errorf("%w: no format recognized the source", ErrUnsupportedFormat)
+}
+
+// jsonSyntaxError returns the JSON syntax error of data when it looks like a
+// JSON object (its first byte after a BOM and whitespace is '{') but does not
+// decode: a syntax error before a format's marker key hides the key from
+// detection, and the error says why. It returns nil for anything else.
+func jsonSyntaxError(data []byte) error {
+	data = bytes.TrimLeft(utils.TrimBOM(data), " \t\r\n")
+	if len(data) == 0 || data[0] != '{' {
+		return nil
+	}
+	var v struct{}
+	var syn *json.SyntaxError
+	if err := json.Unmarshal(data, &v); errors.As(err, &syn) {
+		return syn
+	}
+	return nil
 }
 
 func parseWith(f Format, data []byte, opts Options) (*model.Manifest, error) {

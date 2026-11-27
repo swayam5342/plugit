@@ -92,14 +92,16 @@ func isName(s string) bool {
 }
 
 // DetectIntrospection reports whether data is a JSON introspection result:
-// an object with a top-level "__schema" object, or one under "data".
+// an object with a top-level "__schema" object, or one under "data". An
+// object that also has a top-level "openapi" or "swagger" key is OpenAPI's,
+// so no fixture is detected by both formats (SPEC P4).
 func DetectIntrospection(data []byte) bool {
 	trimmed := trimJSONStart(data)
 	if len(trimmed) == 0 || trimmed[0] != '{' || !bytes.Contains(trimmed, []byte(`"__schema"`)) {
 		return false
 	}
-	_, err := introspectionRoot(trimmed)
-	return err == nil
+	raw, openapiKey, err := decodeIntrospection(trimmed)
+	return err == nil && raw != nil && !openapiKey
 }
 
 // trimJSONStart drops a leading UTF-8 BOM (which encoding/json rejects; PowerShell
@@ -111,24 +113,33 @@ func trimJSONStart(data []byte) []byte {
 
 // introspectionRoot returns the raw "__schema" object of an introspection result.
 func introspectionRoot(data []byte) (json.RawMessage, error) {
+	raw, _, err := decodeIntrospection(data)
+	return raw, err
+}
+
+// decodeIntrospection returns the raw "__schema" object of an introspection
+// result and whether the object also has a top-level openapi or swagger key.
+func decodeIntrospection(data []byte) (raw json.RawMessage, openapiKey bool, err error) {
 	data = trimJSONStart(data)
 	var env struct {
 		Data *struct {
 			Schema json.RawMessage `json:"__schema"`
 		} `json:"data"`
-		Schema json.RawMessage `json:"__schema"`
+		Schema  json.RawMessage `json:"__schema"`
+		OpenAPI json.RawMessage `json:"openapi"`
+		Swagger json.RawMessage `json:"swagger"`
 	}
 	if err := json.Unmarshal(data, &env); err != nil {
-		return nil, fmt.Errorf("decoding introspection result: %w", err)
+		return nil, false, fmt.Errorf("decoding introspection result: %w", err)
 	}
-	raw := env.Schema
+	raw = env.Schema
 	if env.Data != nil && len(env.Data.Schema) > 0 {
 		raw = env.Data.Schema
 	}
 	if len(raw) == 0 || raw[0] != '{' {
-		return nil, errors.New(`no "__schema" object at the top level or under "data"`)
+		return nil, false, errors.New(`no "__schema" object at the top level or under "data"`)
 	}
-	return raw, nil
+	return raw, env.OpenAPI != nil || env.Swagger != nil, nil
 }
 
 // LoadSchema loads data, in the named format (FormatSDL or
