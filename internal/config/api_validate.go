@@ -21,21 +21,27 @@ import (
 )
 
 // knownAuthTypes is every auth.type this plugit understands, under any
-// protocol.
+// protocol: the AuthType constants, and exactly the types the P3 table
+// (model.AuthTypes) allows somewhere. TestKnownAuthTypesMatchTable ties them.
 var knownAuthTypes = []AuthType{AuthNone, AuthBearer, AuthHeader, AuthQuery, AuthBasic, AuthOAuth2}
 
 // checkAuthType says whether auth.type t may be used with proto: a known
 // type the protocol's P3 row forbids, or a type no protocol knows (a newer
-// plugit's, SPEC §8.1.2 rule 4).
+// plugit's, SPEC §8.1.2 rule 4). The message starts with the quoted type;
+// the caller names the field.
 func checkAuthType(proto model.Protocol, t string) error {
 	if model.AuthTypeAllowed(proto, t) {
 		return nil
 	}
 	if slices.Contains(knownAuthTypes, AuthType(t)) {
-		return fmt.Errorf("auth.type %q isn't available for protocol %q", t, proto)
+		return fmt.Errorf("%q isn't available for protocol %q", t, proto)
 	}
-	return fmt.Errorf("auth.type %q: needs a newer plugit (this one knows none, bearer, header, query, basic and oauth2)",
-		naming.CleanText(t, 40))
+	names := make([]string, len(knownAuthTypes))
+	for i, at := range knownAuthTypes {
+		names[i] = string(at)
+	}
+	return fmt.Errorf("%q: needs a newer plugit (this one knows %s and %s)",
+		naming.CleanText(t, 40), strings.Join(names[:len(names)-1], ", "), names[len(names)-1])
 }
 
 var (
@@ -172,17 +178,17 @@ func (c *API) validateSections(proto model.Protocol, bad func(string, string, ..
 		return
 	}
 	if d := c.GraphQL.SelectionDepth; d < 0 || d > MaxSelectionDepth {
-		bad("graphql.selection_depth", "must be between 1 and %d (default %d)", MaxSelectionDepth, DefaultSelectionDepth)
+		bad("graphql.selection_depth", "must be between 0 and %d (0 or unset means the default, %d)", MaxSelectionDepth, DefaultSelectionDepth)
 	}
 	if n := c.GraphQL.MaxFields; n < 0 || n > MaxMaxFields {
-		bad("graphql.max_fields", "must be between 1 and %d (default %d)", MaxMaxFields, DefaultMaxFields)
+		bad("graphql.max_fields", "must be between 0 and %d (0 or unset means the default, %d)", MaxMaxFields, DefaultMaxFields)
 	}
 }
 
 func (c *API) validateAuth(proto model.Protocol, bad func(string, string, ...any), wrap func(string, error)) {
 	a := c.Auth
 	if err := checkAuthType(proto, string(a.Type)); err != nil {
-		bad("auth.type", "%s", strings.TrimPrefix(err.Error(), "auth.type "))
+		bad("auth.type", "%s", err)
 		return
 	}
 	needSecret := true
@@ -248,7 +254,7 @@ func (c *API) validateToolset(name string, ts Toolset, bad func(string, string, 
 			bad(kf, "not a valid %s tool key (REST keys look like \"GET /pets/{id}\")", proto)
 		}
 		if o.Name != "" && !naming.ValidToolName(o.Name) {
-			bad(kf+".name", "use 1-64 letters, digits, '_' or '-'")
+			bad(kf+".name", "use 1-%d letters, digits, '_' or '-'", naming.MaxNameLen)
 		}
 		if _, err := policy.ParseOverride(o.Policy); err != nil {
 			wrap(kf+".policy", err)

@@ -2,6 +2,8 @@ package config
 
 import (
 	"errors"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 
@@ -137,6 +139,58 @@ func TestSourceFormatMustMatchProtocol(t *testing.T) {
 	}
 }
 
+// knownAuthTypes is exactly the set of auth types the P3 table allows under
+// any protocol, and the AuthType constants: a type added to one but not the
+// other would read as "needs a newer plugit" or slip past validation.
+func TestKnownAuthTypesMatchTable(t *testing.T) {
+	table := map[string]bool{}
+	for _, p := range model.Protocols() {
+		for _, at := range model.AuthTypes(p) {
+			table[at] = true
+		}
+	}
+	known := map[string]bool{}
+	for _, at := range knownAuthTypes {
+		known[string(at)] = true
+	}
+	if !maps.Equal(table, known) {
+		t.Errorf("knownAuthTypes = %v, but the P3 table allows %v", known, table)
+	}
+	consts := []AuthType{AuthNone, AuthBearer, AuthHeader, AuthQuery, AuthBasic, AuthOAuth2}
+	if !slices.Equal(consts, knownAuthTypes) {
+		t.Errorf("knownAuthTypes = %v, want the AuthType constants %v", knownAuthTypes, consts)
+	}
+	// The newer-plugit message lists every known type.
+	err := checkAuthType(model.REST, "mtls")
+	for _, at := range knownAuthTypes {
+		if err == nil || !strings.Contains(err.Error(), string(at)) {
+			t.Errorf("message %v does not list %s", err, at)
+		}
+	}
+}
+
+// A null graphql: section under protocol rest decodes to no section, so it
+// is accepted and has no effect.
+func TestNullGraphQLSectionUnderREST(t *testing.T) {
+	c := mustParse(t, minimalConfig+"graphql: null\n")
+	if c.GraphQL != nil {
+		t.Errorf("GraphQL = %+v, want nil", c.GraphQL)
+	}
+}
+
+// A graphql range error says that 0 (or leaving it out) means the default.
+func TestGraphQLRangeMessage(t *testing.T) {
+	for sec, want := range map[string]string{
+		"{selection_depth: 13}": "graphql.selection_depth: must be between 0 and 12 (0 or unset means the default, 2)",
+		"{max_fields: 1001}":    "graphql.max_fields: must be between 0 and 1000 (0 or unset means the default, 100)",
+	} {
+		_, err := ParseAPI([]byte(graphqlConfig + "graphql: " + sec + "\n"))
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: err = %v, want it to contain %q", sec, err, want)
+		}
+	}
+}
+
 // An auth.type no protocol knows is a newer plugit's (SPEC §8.1.2 rule 4).
 func TestAuthTypeUnknownValue(t *testing.T) {
 	for _, base := range []string{minimalConfig, graphqlConfig} {
@@ -152,8 +206,9 @@ func TestAuthTypeUnknownValue(t *testing.T) {
 // M8 config reaches it (grpc has no serving implementation), so the helper
 // is called directly.
 func TestAuthTypeNotAllowedForProtocol(t *testing.T) {
+	// The message leaves the field name to the caller, which prefixes it.
 	err := checkAuthType(model.GRPC, "query")
-	if err == nil || err.Error() != `auth.type "query" isn't available for protocol "grpc"` {
+	if err == nil || err.Error() != `"query" isn't available for protocol "grpc"` {
 		t.Errorf("err = %v", err)
 	}
 	if err := checkAuthType(model.GRPC, "bearer"); err != nil {

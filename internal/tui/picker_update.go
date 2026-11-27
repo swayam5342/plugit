@@ -261,7 +261,7 @@ func (p *Picker) commitInput() tea.Cmd {
 		switch p.mode {
 		case modeRename:
 			if v != "" && !naming.ValidToolName(v) {
-				p.status = "names use 1-64 letters, digits, '_' or '-'"
+				p.status = fmt.Sprintf("names use 1-%d letters, digits, '_' or '-'", naming.MaxNameLen)
 				return nil
 			}
 			if p.in.Prefix != "" && len(p.in.Prefix)+1+len(v) > naming.MaxNameLen {
