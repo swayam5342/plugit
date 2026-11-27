@@ -49,7 +49,8 @@ const operationPrefix = "PlugIt_"
 //
 // Manifest.GraphQL.NormalizedSDL is s printed back to SDL without built-ins.
 // opts.ResponseFields (toolset -> tool key -> paths) is compiled into
-// OverrideDocs, or into OverrideErrors for paths that don't compile (see
+// OverrideDocs (with each document's selected paths in OverrideSelections),
+// or into OverrideErrors for paths that don't compile (see
 // compileOverrides). Title, Version and Endpoints stay empty: a schema
 // carries none of them. The output is deterministic, tools sorted by key.
 func Build(s *ast.Schema, format string, opts ingest.Options) (*model.Manifest, error) {
@@ -123,34 +124,37 @@ func (b *builder) compileOverrides() {
 			if !ok || len(paths) == 0 {
 				continue
 			}
-			doc, err := b.overrideDoc(parts, paths)
+			doc, sel, err := b.overrideDoc(parts, paths)
 			if err != nil {
 				setNested(&b.m.GraphQL.OverrideErrors, ts, key, naming.CleanText(err.Error(), maxIssueLen))
 				continue
 			}
 			setNested(&b.m.GraphQL.OverrideDocs, ts, key, doc)
+			setNested(&b.m.GraphQL.OverrideSelections, ts, key, sel)
 		}
 	}
 }
 
-func (b *builder) overrideDoc(p opParts, paths []string) (string, error) {
+// overrideDoc returns the document for p with paths as its selection, and
+// the dotted response paths that document selects (GraphQLOp.Selection).
+func (b *builder) overrideDoc(p opParts, paths []string) (string, []string, error) {
 	sel, err := SelectionFromPaths(b.s, p.ret, paths)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	doc := document(p.op, p.field, p.vars, p.args, sel.Render())
 	if err := b.validate(doc); err != nil {
-		return "", fmt.Errorf("response_fields %s: the compiled document failed validation: %w", strings.Join(paths, ", "), err)
+		return "", nil, fmt.Errorf("response_fields %s: the compiled document failed validation: %w", strings.Join(paths, ", "), err)
 	}
-	return doc, nil
+	return doc, sel.Paths(), nil
 }
 
-func setNested(m *map[string]map[string]string, outer, inner, v string) {
+func setNested[V any](m *map[string]map[string]V, outer, inner string, v V) {
 	if *m == nil {
-		*m = map[string]map[string]string{}
+		*m = map[string]map[string]V{}
 	}
 	if (*m)[outer] == nil {
-		(*m)[outer] = map[string]string{}
+		(*m)[outer] = map[string]V{}
 	}
 	(*m)[outer][inner] = v
 }

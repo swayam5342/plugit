@@ -102,6 +102,8 @@ func loadActive(ctx context.Context, s serveSettings, d runDeps, logger *slog.Lo
 		if doc, ok := docs[t.Key]; ok && t.GraphQL != nil {
 			op := *t.GraphQL
 			op.Document = doc
+			// Selection must describe the document served, not the default.
+			op.Selection = m.GraphQL.OverrideSelections[tsName][string(t.Key)]
 			t.GraphQL = &op
 		}
 		mt := mcpserver.Tool{Tool: schema.Prepare(t, schema.Options{Fixed: hidden}), Override: st.Override}

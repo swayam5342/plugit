@@ -460,6 +460,12 @@ func TestBuildCompilesResponseFieldOverrides(t *testing.T) {
 	if len(g.OverrideErrors) != 1 {
 		t.Errorf("OverrideErrors = %v, want only the broken toolset", g.OverrideErrors)
 	}
+	// Each override document's selected paths are stored next to it, so a
+	// served tool's Selection matches the document it sends.
+	wantSel := map[string]map[string][]string{"default": {"query user": {"id"}, "query org": {"name", "members.id"}}}
+	if !reflect.DeepEqual(g.OverrideSelections, wantSel) {
+		t.Errorf("OverrideSelections = %v, want %v", g.OverrideSelections, wantSel)
+	}
 	// The default documents are untouched.
 	if d := toolByKey(t, m, "query user").GraphQL.Document; strings.Contains(d, "{ id } }") {
 		t.Errorf("the default document was replaced: %q", d)

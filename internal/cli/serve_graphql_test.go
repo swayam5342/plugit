@@ -170,11 +170,21 @@ func TestServeSelectsGraphQLImpl(t *testing.T) {
 		t.Fatalf("proto = %T, want graphql.GraphQL", a.proto)
 	}
 	docs := map[model.OpKey]string{}
+	sels := map[model.OpKey][]string{}
 	for _, st := range a.tools {
 		if st.Fields != nil {
 			t.Errorf("%s has a jsonpick picker; GraphQL response_fields are compiled into the document", st.Tool.Key)
 		}
 		docs[st.Tool.Key] = st.Tool.GraphQL.Document
+		sels[st.Tool.Key] = st.Tool.GraphQL.Selection
+	}
+	// Selection follows the document served: the override's paths for
+	// query user, the default selection for query org.
+	if want := []string{"id", "name"}; !slices.Equal(sels["query user"], want) {
+		t.Errorf("query user Selection = %q, want the override's %q", sels["query user"], want)
+	}
+	if want := []string{"id", "name"}; !slices.Equal(sels["query org"], want) {
+		t.Errorf("query org Selection = %q, want the default %q", sels["query org"], want)
 	}
 	if docs["query user"] != userOverrideDoc {
 		t.Errorf("query user document = %q\nwant %q", docs["query user"], userOverrideDoc)
